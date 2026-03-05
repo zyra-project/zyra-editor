@@ -1,0 +1,88 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://zyra-project.github.io/zyra-editor/manifest.schema.json",
+  "title": "Zyra Manifest",
+  "description": "Schema for the output of `zyra manifest --json`",
+  "type": "object",
+  "required": ["version", "stages"],
+  "additionalProperties": false,
+  "properties": {
+    "version": {
+      "type": "string",
+      "description": "Manifest schema version"
+    },
+    "stages": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/StageDef" }
+    }
+  },
+  "$defs": {
+    "PortDef": {
+      "type": "object",
+      "required": ["id", "label", "types"],
+      "additionalProperties": false,
+      "properties": {
+        "id": { "type": "string" },
+        "label": { "type": "string" },
+        "types": {
+          "type": "array",
+          "items": { "type": "string" },
+          "minItems": 1
+        }
+      }
+    },
+    "ArgDef": {
+      "type": "object",
+      "required": ["key", "label", "type", "required"],
+      "additionalProperties": false,
+      "properties": {
+        "key": { "type": "string" },
+        "flag": { "type": "string" },
+        "label": { "type": "string" },
+        "type": {
+          "type": "string",
+          "enum": ["string", "number", "boolean", "filepath", "enum"]
+        },
+        "required": { "type": "boolean" },
+        "default": {},
+        "placeholder": { "type": "string" },
+        "description": { "type": "string" },
+        "options": {
+          "type": "array",
+          "items": { "type": "string" }
+        }
+      }
+    },
+    "StageDef": {
+      "type": "object",
+      "required": ["stage", "command", "label", "cli", "status", "color", "inputs", "outputs", "args"],
+      "additionalProperties": false,
+      "properties": {
+        "stage": { "type": "string" },
+        "command": { "type": "string" },
+        "label": { "type": "string" },
+        "cli": { "type": "string" },
+        "status": {
+          "type": "string",
+          "enum": ["implemented", "planned", "experimental"]
+        },
+        "color": {
+          "type": "string",
+          "pattern": "^#[0-9a-fA-F]{6}$"
+        },
+        "inputs": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/PortDef" }
+        },
+        "outputs": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/PortDef" }
+        },
+        "args": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/ArgDef" }
+        }
+      }
+    }
+  }
+}

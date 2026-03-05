@@ -1,0 +1,16 @@
+{
+  "name": "zyra-editor-monorepo",
+  "private": true,
+  "scripts": {
+    "dev": "pnpm --filter @zyra/editor dev",
+    "build": "pnpm --filter @zyra/core build && pnpm --filter @zyra/editor build",
+    "lint": "pnpm -r lint",
+    "typecheck": "pnpm -r typecheck"
+  },
+  "pnpm": {
+    "onlyBuiltDependencies": ["esbuild"]
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}

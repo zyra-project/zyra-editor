@@ -1,0 +1,222 @@
+import type { Manifest } from "@zyra/core";
+
+export const MOCK_MANIFEST: Manifest = {
+  version: "1.0",
+  stages: [
+    {
+      stage: "acquire",
+      command: "http",
+      label: "HTTP Acquire",
+      cli: "zyra acquire http",
+      status: "implemented",
+      color: "#00529E",
+      inputs: [],
+      outputs: [{ id: "file", label: "File", types: ["any"] }],
+      args: [
+        {
+          key: "url",
+          label: "URL",
+          type: "string",
+          required: true,
+          placeholder: "https://...",
+          description: "Source URL to fetch",
+        },
+        {
+          key: "output",
+          flag: "-o",
+          label: "Output Path",
+          type: "filepath",
+          required: true,
+        },
+      ],
+    },
+    {
+      stage: "acquire",
+      command: "s3",
+      label: "S3 Acquire",
+      cli: "zyra acquire s3",
+      status: "implemented",
+      color: "#00529E",
+      inputs: [],
+      outputs: [{ id: "file", label: "File", types: ["any"] }],
+      args: [
+        {
+          key: "bucket",
+          label: "Bucket",
+          type: "string",
+          required: true,
+          description: "S3 bucket name",
+        },
+        {
+          key: "key",
+          label: "Object Key",
+          type: "string",
+          required: true,
+        },
+        {
+          key: "output",
+          flag: "-o",
+          label: "Output Path",
+          type: "filepath",
+          required: true,
+        },
+      ],
+    },
+    {
+      stage: "process",
+      command: "convert-format",
+      label: "Convert Format",
+      cli: "zyra process convert-format",
+      status: "implemented",
+      color: "#2C670C",
+      inputs: [
+        {
+          id: "file",
+          label: "Input File",
+          types: ["grib2", "netcdf", "geotiff", "any"],
+        },
+      ],
+      outputs: [
+        {
+          id: "file",
+          label: "Output File",
+          types: ["netcdf", "grib2", "geotiff"],
+        },
+      ],
+      args: [
+        {
+          key: "format",
+          label: "Target Format",
+          type: "enum",
+          options: ["netcdf", "grib2", "geotiff"],
+          required: true,
+        },
+      ],
+    },
+    {
+      stage: "process",
+      command: "regrid",
+      label: "Regrid",
+      cli: "zyra process regrid",
+      status: "implemented",
+      color: "#2C670C",
+      inputs: [
+        { id: "file", label: "Input File", types: ["netcdf", "grib2"] },
+      ],
+      outputs: [
+        { id: "file", label: "Output File", types: ["netcdf", "grib2"] },
+      ],
+      args: [
+        {
+          key: "resolution",
+          label: "Resolution",
+          type: "string",
+          required: true,
+          placeholder: "0.25",
+          description: "Target grid resolution in degrees",
+        },
+        {
+          key: "method",
+          label: "Method",
+          type: "enum",
+          options: ["bilinear", "nearest", "conservative"],
+          required: false,
+          default: "bilinear",
+        },
+      ],
+    },
+    {
+      stage: "process",
+      command: "subset",
+      label: "Subset",
+      cli: "zyra process subset",
+      status: "implemented",
+      color: "#2C670C",
+      inputs: [
+        { id: "file", label: "Input File", types: ["netcdf", "grib2"] },
+      ],
+      outputs: [
+        { id: "file", label: "Output File", types: ["netcdf", "grib2"] },
+      ],
+      args: [
+        {
+          key: "bbox",
+          label: "Bounding Box",
+          type: "string",
+          required: false,
+          placeholder: "lon_min,lat_min,lon_max,lat_max",
+          description: "Spatial bounding box",
+        },
+        {
+          key: "variables",
+          label: "Variables",
+          type: "string",
+          required: false,
+          placeholder: "temperature,pressure",
+          description: "Comma-separated variable names",
+        },
+      ],
+    },
+    {
+      stage: "visualize",
+      command: "plot-map",
+      label: "Plot Map",
+      cli: "zyra visualize plot-map",
+      status: "implemented",
+      color: "#7B2D8E",
+      inputs: [
+        { id: "file", label: "Input File", types: ["netcdf", "geotiff"] },
+      ],
+      outputs: [{ id: "image", label: "Image", types: ["png", "svg"] }],
+      args: [
+        {
+          key: "variable",
+          label: "Variable",
+          type: "string",
+          required: true,
+          description: "Variable to plot",
+        },
+        {
+          key: "colormap",
+          label: "Colormap",
+          type: "enum",
+          options: ["viridis", "plasma", "inferno", "magma", "coolwarm"],
+          required: false,
+          default: "viridis",
+        },
+        {
+          key: "output",
+          flag: "-o",
+          label: "Output Path",
+          type: "filepath",
+          required: true,
+        },
+      ],
+    },
+    {
+      stage: "distribute",
+      command: "upload-s3",
+      label: "Upload to S3",
+      cli: "zyra distribute upload-s3",
+      status: "implemented",
+      color: "#B8860B",
+      inputs: [{ id: "file", label: "File", types: ["any"] }],
+      outputs: [],
+      args: [
+        {
+          key: "bucket",
+          label: "Bucket",
+          type: "string",
+          required: true,
+        },
+        {
+          key: "prefix",
+          label: "Key Prefix",
+          type: "string",
+          required: false,
+          placeholder: "output/",
+        },
+      ],
+    },
+  ],
+};
