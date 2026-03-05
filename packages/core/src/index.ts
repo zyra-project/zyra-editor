@@ -10,5 +10,19 @@ export type {
   Graph,
   GraphNode,
   GraphEdge,
+  Pipeline,
+  PipelineStep,
 } from "./serializer.js";
 export { graphToPipeline } from "./serializer.js";
+
+export type {
+  RunStepRequest,
+  RunStepResponse,
+  JobStatus,
+  NodeRunStatus,
+  NodeRunState,
+} from "./execution.js";
+export { emptyRunState, STATUS_COLORS } from "./execution.js";
+
+export type { RunPlan } from "./pipeline.js";
+export { graphToRunRequests } from "./pipeline.js";

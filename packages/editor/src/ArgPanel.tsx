@@ -1,5 +1,6 @@
 import type { ArgDef, StageDef } from "@zyra/core";
 import type { ZyraNodeData } from "./ZyraNode";
+import { isSensitive } from "./ZyraNode";
 
 interface Props {
   nodeId: string;
@@ -89,7 +90,7 @@ function ArgField({
       ) : (
         <input
           id={id}
-          type={arg.type === "number" ? "number" : "text"}
+          type={isSensitive(arg) ? "password" : arg.type === "number" ? "number" : "text"}
           value={(value as string) ?? ""}
           placeholder={arg.placeholder ?? ""}
           onChange={(e) =>

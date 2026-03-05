@@ -25,14 +25,14 @@ export interface Graph {
 
 // ── pipeline.yaml serialization ───────────────────────────────────
 
-interface PipelineStep {
+export interface PipelineStep {
   name: string;
   command: string;
   args: Record<string, string | number | boolean>;
   depends_on?: string[];
 }
 
-interface Pipeline {
+export interface Pipeline {
   version: string;
   steps: PipelineStep[];
 }

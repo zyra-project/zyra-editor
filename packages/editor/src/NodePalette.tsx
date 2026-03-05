@@ -29,6 +29,14 @@ export function NodePalette({ onAddNode }: Props) {
               key={`${def.stage}/${def.command}`}
               style={{ ...nodeButtonStyle, borderLeftColor: def.color }}
               onClick={() => onAddNode(def)}
+              draggable
+              onDragStart={(e) => {
+                e.dataTransfer.setData(
+                  "application/zyra-stage",
+                  JSON.stringify(def),
+                );
+                e.dataTransfer.effectAllowed = "move";
+              }}
               title={def.cli}
             >
               <span>{def.label}</span>
@@ -44,16 +52,12 @@ export function NodePalette({ onAddNode }: Props) {
 }
 
 const panelStyle: React.CSSProperties = {
-  position: "absolute",
-  left: 0,
-  top: 0,
-  bottom: 0,
   width: 220,
+  minWidth: 220,
   background: "#1a1a2e",
   borderRight: "1px solid #333",
   padding: 16,
   overflowY: "auto",
-  zIndex: 10,
   color: "#eee",
 };
 
