@@ -6,8 +6,12 @@ import type { StageDef } from "./manifest.js";
  */
 export interface GraphNode {
   id: string;
+  /** User-facing label shown in the editor and used as the YAML step name. */
+  label?: string;
   stageCommand: string;   // "acquire/http"
   argValues: Record<string, string | number | boolean>;
+  /** Canvas position (for round-tripping through YAML). */
+  position?: { x: number; y: number };
 }
 
 /** An edge between two nodes (output port → input port). */
@@ -30,6 +34,8 @@ export interface PipelineStep {
   command: string;
   args: Record<string, string | number | boolean>;
   depends_on?: string[];
+  /** Editor layout metadata — not used by the Zyra CLI. */
+  _layout?: { x: number; y: number };
 }
 
 export interface Pipeline {
@@ -88,6 +94,8 @@ export function graphToPipeline(
   }
 
   const nodeMap = new Map(graph.nodes.map((n) => [n.id, n]));
+  // Map node id → display label for dependency references
+  const labelOf = (nid: string) => nodeMap.get(nid)?.label || nid;
 
   const steps: PipelineStep[] = sorted.map((id) => {
     const node = nodeMap.get(id)!;
@@ -95,11 +103,12 @@ export function graphToPipeline(
     const deps = parentMap.get(id) ?? [];
 
     const step: PipelineStep = {
-      name: id,
+      name: node.label || id,
       command: stage?.cli ?? node.stageCommand,
       args: { ...node.argValues },
     };
-    if (deps.length > 0) step.depends_on = deps;
+    if (deps.length > 0) step.depends_on = deps.map(labelOf);
+    if (node.position) step._layout = { x: Math.round(node.position.x), y: Math.round(node.position.y) };
     return step;
   });
 

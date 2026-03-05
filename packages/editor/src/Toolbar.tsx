@@ -9,6 +9,8 @@ interface ToolbarProps {
   running: boolean;
   nodeCount: number;
   runState: RunStateMap;
+  yamlOpen: boolean;
+  onToggleYaml: () => void;
 }
 
 export function Toolbar({
@@ -19,6 +21,8 @@ export function Toolbar({
   running,
   nodeCount,
   runState,
+  yamlOpen,
+  onToggleYaml,
 }: ToolbarProps) {
   const counts = { succeeded: 0, failed: 0, running: 0, total: 0 };
   for (const [, state] of runState) {
@@ -75,6 +79,16 @@ export function Toolbar({
           Clear
         </button>
       )}
+
+      <div style={{ marginLeft: 8, borderLeft: "1px solid #30363d", paddingLeft: 8 }}>
+        <button
+          onClick={onToggleYaml}
+          style={btnStyle(yamlOpen ? "#1f6feb" : "#30363d")}
+          title="Toggle YAML panel"
+        >
+          YAML
+        </button>
+      </div>
 
       {/* Status summary */}
       {hasRun && (

@@ -25,4 +25,6 @@ export type {
 export { emptyRunState, STATUS_COLORS } from "./execution.js";
 
 export type { RunPlan } from "./pipeline.js";
-export { graphToRunRequests } from "./pipeline.js";
+export { graphToRunRequests, stepToCliPreview } from "./pipeline.js";
+
+export { pipelineToGraph } from "./deserializer.js";

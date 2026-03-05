@@ -5,7 +5,7 @@ import type {
   NodeRunState,
   RunStepRequest,
 } from "@zyra/core";
-import { emptyRunState, graphToRunRequests } from "@zyra/core";
+import { emptyRunState, graphToRunRequests, graphToPipeline, stepToCliPreview } from "@zyra/core";
 import { postRun, getJobStatus, connectJobWs, cancelJob } from "./api";
 
 export type RunStateMap = Map<string, NodeRunState>;
@@ -19,6 +19,8 @@ export interface ExecutionControls {
   dryRun: (graph: Graph, stages: StageDef[]) => Promise<void>;
   /** Execute the full pipeline (async, with log streaming). */
   runPipeline: (graph: Graph, stages: StageDef[]) => Promise<void>;
+  /** Run a single node by id. Returns an error string if deps are unmet. */
+  runSingleNode: (nodeId: string, graph: Graph, stages: StageDef[]) => Promise<string | null>;
   /** Cancel all running jobs and stop the pipeline. */
   cancelAll: () => void;
   /** Clear all execution state. */
@@ -57,38 +59,128 @@ export function useExecution(): ExecutionControls {
       const gen = ++runGenRef.current;
 
       try {
-        const { requests, pipeline } = graphToRunRequests(graph, stages, { dryRun: true });
+        const pipeline = graphToPipeline(graph, stages);
 
-        // Initialise all nodes to dry-run state
-        const init = new Map<string, NodeRunState>();
+        // Build CLI preview strings client-side (individual stages
+        // don't support --dry-run, only the pipeline runner does)
+        const result = new Map<string, NodeRunState>();
         for (const step of pipeline.steps) {
-          init.set(step.name, { ...emptyRunState(), status: "dry-run" });
+          result.set(step.name, {
+            ...emptyRunState(),
+            status: "dry-run",
+            dryRunArgv: stepToCliPreview(step),
+          });
         }
-        setRunState(init);
-
-        for (let i = 0; i < requests.length; i++) {
-          if (cancelledRef.current || runGenRef.current !== gen) break;
-          const nodeId = pipeline.steps[i].name;
-          try {
-            const res = await postRun(requests[i]);
-            updateNode(nodeId, {
-              status: "dry-run",
-              dryRunArgv: res.stdout?.trim() ?? "",
-              stderr: res.stderr ?? "",
-              exitCode: res.exit_code,
-            });
-          } catch (err) {
-            updateNode(nodeId, {
-              status: "failed",
-              stderr: err instanceof Error ? err.message : String(err),
-            });
-          }
-        }
+        setRunState(result);
       } finally {
         if (runGenRef.current === gen) setRunning(false);
       }
     },
-    [updateNode],
+    [],
+  );
+
+  // ── Single-node run ──────────────────────────────────────────
+
+  const runSingleNode = useCallback(
+    async (nodeId: string, graph: Graph, stages: StageDef[]): Promise<string | null> => {
+      const { requests, pipeline } = graphToRunRequests(graph, stages);
+      const stepIndex = pipeline.steps.findIndex((s) => s.name === nodeId);
+      if (stepIndex === -1) return `Node "${nodeId}" not found in pipeline`;
+
+      const step = pipeline.steps[stepIndex];
+      const deps = step.depends_on ?? [];
+
+      // Check that all upstream dependencies have succeeded
+      if (deps.length > 0) {
+        const unmet: string[] = [];
+        for (const dep of deps) {
+          const depState = runState.get(dep);
+          if (!depState || depState.status !== "succeeded") {
+            unmet.push(dep);
+          }
+        }
+        if (unmet.length > 0) {
+          return `Cannot run "${nodeId}" — upstream dependencies not yet succeeded: ${unmet.join(", ")}`;
+        }
+      }
+
+      setRunning(true);
+      cancelledRef.current = false;
+      const gen = ++runGenRef.current;
+
+      updateNode(nodeId, { ...emptyRunState(), status: "running" });
+
+      try {
+        const req = requests[stepIndex];
+        const res = await postRun(req);
+
+        if (res.status === "error") {
+          updateNode(nodeId, {
+            status: "failed",
+            stdout: res.stdout ?? "",
+            stderr: res.stderr ?? "",
+            exitCode: res.exit_code,
+          });
+          return null;
+        }
+
+        const jobId = res.job_id;
+        if (!jobId) {
+          const exitOk = (res.exit_code ?? 0) === 0;
+          updateNode(nodeId, {
+            status: exitOk ? "succeeded" : "failed",
+            stdout: res.stdout ?? "",
+            stderr: res.stderr ?? "",
+            exitCode: res.exit_code,
+          });
+          return null;
+        }
+
+        activeJobsRef.current.set(nodeId, jobId);
+        updateNode(nodeId, { jobId });
+
+        // Poll until done (simpler than full pipeline WS logic)
+        let consecutiveFailures = 0;
+        while (!cancelledRef.current && runGenRef.current === gen) {
+          try {
+            const status = await getJobStatus(jobId);
+            consecutiveFailures = 0;
+            updateNode(nodeId, {
+              stdout: status.stdout ?? "",
+              stderr: status.stderr ?? "",
+              exitCode: status.exit_code,
+            });
+            if (
+              status.status === "succeeded" ||
+              status.status === "failed" ||
+              status.status === "canceled"
+            ) {
+              updateNode(nodeId, { status: status.status });
+              break;
+            }
+          } catch {
+            consecutiveFailures++;
+            if (consecutiveFailures >= MAX_POLL_FAILURES) {
+              updateNode(nodeId, {
+                status: "failed",
+                stderr: `Lost connection to job ${jobId}`,
+              });
+              break;
+            }
+          }
+          await new Promise((r) => setTimeout(r, 1000));
+        }
+      } catch (err) {
+        updateNode(nodeId, {
+          status: "failed",
+          stderr: err instanceof Error ? err.message : String(err),
+        });
+      } finally {
+        if (runGenRef.current === gen) setRunning(false);
+      }
+      return null;
+    },
+    [runState, updateNode],
   );
 
   // ── Full pipeline run ──────────────────────────────────────────
@@ -335,5 +427,5 @@ export function useExecution(): ExecutionControls {
     setRunning(false);
   }, []);
 
-  return { runState, running, dryRun, runPipeline, cancelAll, reset };
+  return { runState, running, dryRun, runPipeline, runSingleNode, cancelAll, reset };
 }

@@ -11,8 +11,12 @@ export function isSensitive(arg: ArgDef): boolean {
 export interface ZyraNodeData {
   stageDef: StageDef;
   argValues: Record<string, string | number | boolean>;
+  /** User-customizable name; used as the YAML step name. */
+  nodeLabel?: string;
   runStatus?: NodeRunStatus;
   dryRunArgv?: string;
+  /** Callback to run this single node. Injected by App. */
+  onRunNode?: (nodeId: string) => void;
   [key: string]: unknown;
 }
 
@@ -30,10 +34,14 @@ const statusIndicator: Record<
 };
 
 export function ZyraNode({ id, data, selected }: NodeProps) {
-  const { stageDef, argValues, runStatus, dryRunArgv } = data as unknown as ZyraNodeData;
+  const { stageDef, argValues, nodeLabel, runStatus, dryRunArgv, onRunNode } = data as unknown as ZyraNodeData;
   const indicator = statusIndicator[runStatus ?? "idle"];
   const [hovered, setHovered] = useState(false);
-  const { deleteElements } = useReactFlow();
+  const [editing, setEditing] = useState(false);
+  const [editValue, setEditValue] = useState("");
+  const { deleteElements, updateNodeData } = useReactFlow();
+
+  const displayLabel = nodeLabel || stageDef.label;
 
   return (
     <div
@@ -62,8 +70,70 @@ export function ZyraNode({ id, data, selected }: NodeProps) {
           alignItems: "center",
         }}
       >
-        <span>{stageDef.label}</span>
+        {editing ? (
+          <input
+            autoFocus
+            value={editValue}
+            onChange={(e) => setEditValue(e.target.value)}
+            onBlur={() => {
+              const trimmed = editValue.trim();
+              updateNodeData(id, { nodeLabel: trimmed || undefined });
+              setEditing(false);
+            }}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") (e.target as HTMLInputElement).blur();
+              if (e.key === "Escape") { setEditing(false); }
+            }}
+            style={{
+              background: "rgba(0,0,0,0.3)",
+              border: "1px solid rgba(255,255,255,0.3)",
+              borderRadius: 3,
+              color: "#fff",
+              fontSize: 12,
+              fontWeight: 600,
+              padding: "1px 4px",
+              outline: "none",
+              width: "100%",
+              fontFamily: "inherit",
+            }}
+          />
+        ) : (
+          <span
+            onDoubleClick={() => {
+              setEditValue(nodeLabel || "");
+              setEditing(true);
+            }}
+            title="Double-click to rename"
+            style={{ cursor: "text" }}
+          >
+            {displayLabel}
+          </span>
+        )}
         <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+          {hovered && onRunNode && runStatus !== "running" && (
+            <button
+              title="Run this step"
+              onClick={(e) => {
+                e.stopPropagation();
+                onRunNode(id);
+              }}
+              style={{
+                background: "rgba(0,0,0,0.3)",
+                border: "none",
+                borderRadius: 3,
+                color: "#3fb950",
+                cursor: "pointer",
+                fontSize: 11,
+                lineHeight: 1,
+                padding: "2px 5px",
+                display: "inline-flex",
+                alignItems: "center",
+                fontWeight: 700,
+              }}
+            >
+              &#9654;
+            </button>
+          )}
           {hovered && (
             <button
               title="Delete node"
@@ -163,10 +233,16 @@ export function ZyraNode({ id, data, selected }: NodeProps) {
         ))}
 
         {/* Args summary */}
-        {stageDef.args.length > 0 && (() => {
+        {(() => {
+          const definedKeys = new Set(stageDef.args.map((a) => a.key));
           const filled = stageDef.args.filter(
             (a) => argValues[a.key] !== undefined && argValues[a.key] !== "",
           );
+          // Extra args from YAML not in the stage manifest
+          const extraFilled = Object.entries(argValues)
+            .filter(([k, v]) => !definedKeys.has(k) && v !== undefined && v !== "");
+          const totalArgs = stageDef.args.length + extraFilled.length;
+          if (totalArgs === 0) return null;
           return (
             <div
               style={{
@@ -177,37 +253,19 @@ export function ZyraNode({ id, data, selected }: NodeProps) {
                 color: "#777",
               }}
             >
-              {filled.length === 0 ? (
-                <span>{stageDef.args.length} arg{stageDef.args.length !== 1 ? "s" : ""}</span>
+              {filled.length === 0 && extraFilled.length === 0 ? (
+                <span>{totalArgs} arg{totalArgs !== 1 ? "s" : ""}</span>
               ) : (
-                filled.map((a) => (
-                  <div
-                    key={a.key}
-                    style={{
-                      display: "flex",
-                      justifyContent: "space-between",
-                      gap: 8,
-                      marginBottom: 2,
-                    }}
-                  >
-                    <span style={{ color: "#888", flexShrink: 0 }}>{a.label}</span>
-                    <span
-                      style={{
-                        color: "#58a6ff",
-                        fontFamily: "monospace",
-                        fontSize: 10,
-                        overflow: "hidden",
-                        textOverflow: "ellipsis",
-                        whiteSpace: "nowrap",
-                        maxWidth: 120,
-                        textAlign: "right",
-                      }}
-                      title={isSensitive(a) ? "••••••••" : String(argValues[a.key])}
-                    >
-                      {isSensitive(a) ? "••••••••" : String(argValues[a.key])}
-                    </span>
-                  </div>
-                ))
+                <>
+                  {filled.map((a) => (
+                    <ArgRow key={a.key} label={a.label} value={
+                      isSensitive(a) ? "••••••••" : String(argValues[a.key])
+                    } />
+                  ))}
+                  {extraFilled.map(([k, v]) => (
+                    <ArgRow key={k} label={k} value={String(v)} />
+                  ))}
+                </>
               )}
             </div>
           );
@@ -232,6 +290,36 @@ export function ZyraNode({ id, data, selected }: NodeProps) {
           </div>
         )}
       </div>
+    </div>
+  );
+}
+
+function ArgRow({ label, value }: { label: string; value: string }) {
+  return (
+    <div
+      style={{
+        display: "flex",
+        justifyContent: "space-between",
+        gap: 8,
+        marginBottom: 2,
+      }}
+    >
+      <span style={{ color: "#888", flexShrink: 0 }}>{label}</span>
+      <span
+        style={{
+          color: "#58a6ff",
+          fontFamily: "monospace",
+          fontSize: 10,
+          overflow: "hidden",
+          textOverflow: "ellipsis",
+          whiteSpace: "nowrap",
+          maxWidth: 120,
+          textAlign: "right",
+        }}
+        title={value}
+      >
+        {value}
+      </span>
     </div>
   );
 }

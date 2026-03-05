@@ -1,5 +1,5 @@
 import type { StageDef } from "./manifest.js";
-import type { Graph, Pipeline } from "./serializer.js";
+import type { Graph, Pipeline, PipelineStep } from "./serializer.js";
 import { graphToPipeline } from "./serializer.js";
 import type { RunStepRequest } from "./execution.js";
 
@@ -54,4 +54,26 @@ export function graphToRunRequests(
   });
 
   return { requests, pipeline };
+}
+
+/**
+ * Build a human-readable CLI preview string for a pipeline step.
+ * This mirrors the server-side `_args_dict_to_argv` logic so the editor
+ * can show what would run without actually calling the backend.
+ */
+export function stepToCliPreview(step: PipelineStep): string {
+  const raw = step.command.replace(/^zyra\s+/, "");
+  const parts = [raw];
+
+  for (const [key, value] of Object.entries(step.args)) {
+    if (value === undefined || value === null || value === "") continue;
+    const flag = `--${key.replace(/_/g, "-")}`;
+    if (typeof value === "boolean") {
+      if (value) parts.push(flag);
+    } else {
+      parts.push(flag, String(value));
+    }
+  }
+
+  return `zyra ${parts.join(" ")}`;
 }
