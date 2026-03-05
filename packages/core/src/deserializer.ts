@@ -7,8 +7,9 @@ import type { Graph, GraphNode, GraphEdge, Pipeline } from "./serializer.js";
  * `command` against `stage.cli` and the shorthand `stage/command` form.
  *
  * Edge reconstruction uses `depends_on` — one edge per dependency, using
- * the first compatible output→input port pair (or falling back to the
- * first ports available).
+ * the first output port of the source stage and the first input port of
+ * the target stage (falling back to "out" and "in" when stage metadata
+ * is absent).
  */
 export function pipelineToGraph(
   pipeline: Pipeline,
@@ -47,7 +48,7 @@ export function pipelineToGraph(
     const stage = findStage(step.command);
     const node: GraphNode = {
       id: step.name,
-      label: step.name,
+      label: step.label ?? step.name,
       stageCommand: stage
         ? `${stage.stage}/${stage.command}`
         : step.command,

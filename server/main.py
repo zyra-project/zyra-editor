@@ -28,11 +28,13 @@ from zyra.api.workers import jobs as _jobs_mod
 # the WebSocket.  By clearing handlers just before cli_main(), the CLI's
 # configure_logging_from_env() call creates a fresh handler that writes
 # to the tee.
+import threading
+
 _orig_start_job = _jobs_mod.start_job
+_start_job_lock = threading.Lock()
 
 def _patched_start_job(job_id, stage, command, args):
     """Wrap start_job to reset root logging handlers inside the tee context."""
-    import sys as _sys
     _orig_cli_main = None
     try:
         from zyra.cli import main as _cm
@@ -48,14 +50,16 @@ def _patched_start_job(job_id, stage, command, args):
             root.handlers.clear()
             return _orig_cli_main(argv)
 
-        # Temporarily replace cli main in the module so start_job uses our wrapper
+        # Guard the global swap with a lock so concurrent job starts
+        # don't race on zyra.cli.main.
         import zyra.cli
-        _saved = zyra.cli.main
-        zyra.cli.main = _cli_main_with_logging_reset
-        try:
-            _orig_start_job(job_id, stage, command, args)
-        finally:
-            zyra.cli.main = _saved
+        with _start_job_lock:
+            _saved = zyra.cli.main
+            zyra.cli.main = _cli_main_with_logging_reset
+            try:
+                _orig_start_job(job_id, stage, command, args)
+            finally:
+                zyra.cli.main = _saved
     else:
         _orig_start_job(job_id, stage, command, args)
 

@@ -119,6 +119,7 @@ export function LogPanel({ runState, selectedNodeId, onClearNode }: LogPanelProp
                       if (activeTab === nodeId) setActiveTab(null);
                     }}
                     title="Clear log"
+                    aria-label={`Clear log for ${nodeId}`}
                     style={{
                       background: "none",
                       border: "none",

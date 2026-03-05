@@ -33,6 +33,8 @@ export interface Graph {
 
 export interface PipelineStep {
   name: string;
+  /** User-facing label for YAML display (defaults to name if unset). */
+  label?: string;
   command: string;
   args: Record<string, string | number | boolean>;
   depends_on?: string[];
@@ -96,8 +98,6 @@ export function graphToPipeline(
   }
 
   const nodeMap = new Map(graph.nodes.map((n) => [n.id, n]));
-  // Map node id → display label for dependency references
-  const labelOf = (nid: string) => nodeMap.get(nid)?.label || nid;
 
   const steps: PipelineStep[] = sorted.map((id) => {
     const node = nodeMap.get(id)!;
@@ -105,11 +105,12 @@ export function graphToPipeline(
     const deps = parentMap.get(id) ?? [];
 
     const step: PipelineStep = {
-      name: node.label || id,
+      name: id,
       command: stage?.cli ?? node.stageCommand,
       args: { ...node.argValues },
     };
-    if (deps.length > 0) step.depends_on = deps.map(labelOf);
+    if (node.label && node.label !== id) step.label = node.label;
+    if (deps.length > 0) step.depends_on = deps;
     if (node.position || node.size) {
       const layout: PipelineStep["_layout"] = {
         x: Math.round(node.position?.x ?? 0),
