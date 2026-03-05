@@ -5,6 +5,18 @@ interface Props {
   onAddNode: (stage: StageDef) => void;
 }
 
+// Canonical stage ordering matching Zyra's composable pipeline stages
+const STAGE_ORDER: string[] = [
+  "control",
+  "search",
+  "acquire",
+  "process",
+  "visualize",
+  "narrate",
+  "verify",
+  "export",
+];
+
 export function NodePalette({ onAddNode }: Props) {
   const manifest = useManifest();
 
@@ -16,12 +28,19 @@ export function NodePalette({ onAddNode }: Props) {
     groups.set(s.stage, list);
   }
 
+  // Sort groups by canonical stage order; unknown stages go to the end
+  const sortedEntries = [...groups.entries()].sort(([a], [b]) => {
+    const ia = STAGE_ORDER.indexOf(a);
+    const ib = STAGE_ORDER.indexOf(b);
+    return (ia === -1 ? Infinity : ia) - (ib === -1 ? Infinity : ib);
+  });
+
   return (
     <div style={panelStyle}>
       <h3 style={{ margin: "0 0 12px", fontSize: 14, fontWeight: 600 }}>
         Node Palette
       </h3>
-      {[...groups.entries()].map(([stage, defs]) => (
+      {sortedEntries.map(([stage, defs]) => (
         <div key={stage} style={{ marginBottom: 12 }}>
           <div style={groupLabelStyle}>{stage}</div>
           {defs.map((def) => (
