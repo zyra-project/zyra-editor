@@ -15,7 +15,7 @@ export function ManifestProvider({ children }: { children: ReactNode }) {
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    fetch("/api/manifest")
+    fetch("/v1/manifest")
       .then((r) => {
         if (!r.ok) throw new Error(`HTTP ${r.status}`);
         return r.json();
@@ -23,7 +23,7 @@ export function ManifestProvider({ children }: { children: ReactNode }) {
       .then(setManifest)
       .catch(() => {
         // Fall back to mock manifest in dev mode
-        console.warn("Could not fetch /api/manifest — using mock manifest");
+        console.warn("Could not fetch /v1/manifest — using mock manifest");
         setManifest(MOCK_MANIFEST);
         setError(null);
       });

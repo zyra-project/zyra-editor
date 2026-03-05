@@ -44,16 +44,12 @@ export function NodePalette({ onAddNode }: Props) {
 }
 
 const panelStyle: React.CSSProperties = {
-  position: "absolute",
-  left: 0,
-  top: 0,
-  bottom: 0,
   width: 220,
+  minWidth: 220,
   background: "#1a1a2e",
   borderRight: "1px solid #333",
   padding: 16,
   overflowY: "auto",
-  zIndex: 10,
   color: "#eee",
 };
 

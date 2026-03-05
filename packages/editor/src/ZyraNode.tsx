@@ -1,14 +1,30 @@
 import { Handle, Position, type NodeProps } from "@xyflow/react";
-import type { StageDef } from "@zyra/core";
+import type { StageDef, NodeRunStatus } from "@zyra/core";
 
 export interface ZyraNodeData {
   stageDef: StageDef;
   argValues: Record<string, string | number | boolean>;
+  runStatus?: NodeRunStatus;
+  dryRunArgv?: string;
   [key: string]: unknown;
 }
 
+const statusIndicator: Record<
+  NodeRunStatus,
+  { color: string; label: string; pulse?: boolean }
+> = {
+  idle: { color: "transparent", label: "" },
+  "dry-run": { color: "#58a6ff", label: "DRY" },
+  queued: { color: "#888", label: "" },
+  running: { color: "#58a6ff", label: "", pulse: true },
+  succeeded: { color: "#3fb950", label: "\u2713" },
+  failed: { color: "#f85149", label: "\u2717" },
+  canceled: { color: "#d29922", label: "\u2014" },
+};
+
 export function ZyraNode({ data, selected }: NodeProps) {
-  const { stageDef } = data as unknown as ZyraNodeData;
+  const { stageDef, runStatus, dryRunArgv } = data as unknown as ZyraNodeData;
+  const indicator = statusIndicator[runStatus ?? "idle"];
 
   return (
     <div
@@ -36,12 +52,35 @@ export function ZyraNode({ data, selected }: NodeProps) {
         }}
       >
         <span>{stageDef.label}</span>
-        <span style={{ fontSize: 10, opacity: 0.7 }}>{stageDef.stage}</span>
+        <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+          <span style={{ fontSize: 10, opacity: 0.7 }}>{stageDef.stage}</span>
+          {indicator.color !== "transparent" && (
+            <span
+              style={{
+                display: "inline-flex",
+                alignItems: "center",
+                justifyContent: "center",
+                width: indicator.label ? "auto" : 10,
+                minWidth: 10,
+                height: indicator.label ? 16 : 10,
+                padding: indicator.label ? "0 4px" : 0,
+                borderRadius: indicator.label ? 3 : "50%",
+                background: indicator.color,
+                fontSize: 9,
+                fontWeight: 700,
+                color: "#fff",
+                animation: indicator.pulse ? "zyra-pulse 1.2s infinite" : undefined,
+              }}
+            >
+              {indicator.label}
+            </span>
+          )}
+        </div>
       </div>
 
       {/* Ports */}
       <div style={{ padding: "8px 12px", position: "relative" }}>
-        {stageDef.inputs.map((port, i) => (
+        {stageDef.inputs.map((port) => (
           <div key={port.id} style={{ position: "relative", marginBottom: 4 }}>
             <Handle
               type="target"
@@ -61,7 +100,7 @@ export function ZyraNode({ data, selected }: NodeProps) {
             </span>
           </div>
         ))}
-        {stageDef.outputs.map((port, i) => (
+        {stageDef.outputs.map((port) => (
           <div
             key={port.id}
             style={{
@@ -101,6 +140,25 @@ export function ZyraNode({ data, selected }: NodeProps) {
             }}
           >
             {stageDef.args.length} arg{stageDef.args.length !== 1 ? "s" : ""}
+          </div>
+        )}
+
+        {/* Dry-run resolved command */}
+        {dryRunArgv && (
+          <div
+            style={{
+              borderTop: "1px solid #333",
+              marginTop: 6,
+              paddingTop: 6,
+              fontSize: 10,
+              color: "#58a6ff",
+              fontFamily: "monospace",
+              wordBreak: "break-all",
+              maxHeight: 40,
+              overflow: "auto",
+            }}
+          >
+            {dryRunArgv}
           </div>
         )}
       </div>
