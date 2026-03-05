@@ -25,35 +25,28 @@ app.add_middleware(
 
 # ── Stage colours (keyed by the first word of the command key) ───────
 STAGE_COLORS: dict[str, str] = {
-    "acquire": "#00529E",
-    "import": "#00529E",
-    "process": "#2C670C",
-    "transform": "#2C670C",
-    "visualize": "#7B2D8E",
-    "render": "#7B2D8E",
-    "narrate": "#7B2D8E",
-    "disseminate": "#B8860B",
-    "distribute": "#B8860B",
-    "export": "#B8860B",
-    "decimate": "#B8860B",
-    "decide": "#C04000",
-    "optimize": "#C04000",
-    "simulate": "#C04000",
-    "verify": "#555555",
+    "control": "#888888",
     "search": "#1E90FF",
-    "enrich": "#1E90FF",
+    "acquire": "#00529E",
+    "process": "#2C670C",
+    "visualize": "#7B2D8E",
+    "narrate": "#7B2D8E",
+    "verify": "#555555",
+    "export": "#B8860B",
+    "decide": "#C04000",
+    "simulate": "#C04000",
 }
 DEFAULT_COLOR = "#666666"
 
 # ── Infer ports from stage category ─────────────────────────────────
 STAGE_INPUTS: dict[str, list[dict]] = {
+    "control": [],
     "acquire": [],
-    "import": [],
     "search": [],
 }
 DEFAULT_INPUTS = [{"id": "file", "label": "Input File", "types": ["any"]}]
 DEFAULT_OUTPUTS = [{"id": "file", "label": "Output File", "types": ["any"]}]
-SINK_STAGES = {"disseminate", "distribute", "export", "decimate", "verify"}
+SINK_STAGES = {"export", "verify"}
 
 
 def _opt_to_arg(flag: str, info) -> dict | None:
@@ -104,13 +97,39 @@ def _opt_to_arg(flag: str, info) -> dict | None:
     return arg
 
 
+# Map deprecated / alias stage names to canonical stage names
+STAGE_ALIASES: dict[str, str] = {
+    "decimate": "export",
+    "disseminate": "export",
+    "distribute": "export",
+    "import": "acquire",
+    "transform": "process",
+    "render": "visualize",
+    "optimize": "decide",
+    "enrich": "search",
+}
+
+
 def _commands_to_manifest(commands: dict) -> dict:
     """Transform /v1/commands response into the editor Manifest shape."""
     stages = []
+    seen: set[tuple[str, str]] = set()
     for cmd_key, cmd_info in commands.items():
         parts = cmd_key.split(" ", 1)
-        stage = parts[0]
-        command = parts[1] if len(parts) > 1 else stage
+        raw_stage = parts[0]
+        stage = STAGE_ALIASES.get(raw_stage, raw_stage)
+        command = parts[1] if len(parts) > 1 else raw_stage
+
+        # Only include commands whose raw name matches the canonical stage
+        # (skip aliased duplicates like "import ftp" when "acquire ftp" exists)
+        if raw_stage != stage:
+            continue
+
+        # Deduplicate by (stage, command)
+        key = (stage, command)
+        if key in seen:
+            continue
+        seen.add(key)
 
         args = []
         for flag, info in (cmd_info.get("options") or {}).items():
@@ -132,6 +151,36 @@ def _commands_to_manifest(commands: dict) -> dict:
             "outputs": outputs,
             "args": args,
         })
+
+    # Inject editor-only control nodes (not backed by CLI commands)
+    stages.insert(0, {
+        "stage": "control",
+        "command": "variable",
+        "label": "Variable",
+        "cli": "",
+        "status": "implemented",
+        "color": STAGE_COLORS.get("control", DEFAULT_COLOR),
+        "inputs": [],
+        "outputs": [{"id": "value", "label": "Value", "types": ["any"]}],
+        "args": [
+            {
+                "key": "name",
+                "label": "Name",
+                "type": "string",
+                "required": True,
+                "placeholder": "my_var",
+                "description": "Variable name",
+            },
+            {
+                "key": "value",
+                "label": "Value",
+                "type": "string",
+                "required": True,
+                "placeholder": "...",
+                "description": "The value to pass downstream",
+            },
+        ],
+    })
 
     return {"version": "1.0", "stages": stages}
 
