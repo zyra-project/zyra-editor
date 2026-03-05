@@ -96,194 +96,194 @@ export function useExecution(): ExecutionControls {
       wsRefs.current = [];
 
       try {
-      const { requests, pipeline } = graphToRunRequests(graph, stages);
+        const { requests, pipeline } = graphToRunRequests(graph, stages);
 
-      // Build dependency map: nodeId → set of nodeIds it depends on
-      const deps = new Map<string, string[]>();
-      for (const step of pipeline.steps) {
-        deps.set(step.name, step.depends_on ?? []);
-      }
-
-      // Initialise all nodes as queued
-      const init = new Map<string, NodeRunState>();
-      for (const step of pipeline.steps) {
-        init.set(step.name, { ...emptyRunState(), status: "queued" });
-      }
-      setRunState(init);
-
-      // Track resolved status locally (state updates are async)
-      const resolved = new Map<string, "succeeded" | "failed" | "canceled">();
-
-      /** Wait until all dependencies of a node are resolved. */
-      function waitForDeps(nodeId: string): Promise<boolean> {
-        return new Promise((resolve) => {
-          const check = () => {
-            if (cancelledRef.current) {
-              resolve(false);
-              return;
-            }
-            const nodeDeps = deps.get(nodeId) ?? [];
-            const allDone = nodeDeps.every((d) => resolved.has(d));
-            if (!allDone) {
-              setTimeout(check, 250);
-              return;
-            }
-            const allOk = nodeDeps.every((d) => resolved.get(d) === "succeeded");
-            resolve(allOk);
-          };
-          check();
-        });
-      }
-
-      /** Run a single step: submit, stream logs, wait for completion. */
-      async function runStep(
-        nodeId: string,
-        req: RunStepRequest,
-      ): Promise<void> {
-        const depsOk = await waitForDeps(nodeId);
-        if (!depsOk || cancelledRef.current) {
-          updateNode(nodeId, { status: "canceled" });
-          resolved.set(nodeId, "canceled");
-          return;
+        // Build dependency map: nodeId → set of nodeIds it depends on
+        const deps = new Map<string, string[]>();
+        for (const step of pipeline.steps) {
+          deps.set(step.name, step.depends_on ?? []);
         }
 
-        updateNode(nodeId, { status: "running" });
+        // Initialise all nodes as queued
+        const init = new Map<string, NodeRunState>();
+        for (const step of pipeline.steps) {
+          init.set(step.name, { ...emptyRunState(), status: "queued" });
+        }
+        setRunState(init);
 
-        try {
-          const res = await postRun(req);
+        // Track resolved status locally (state updates are async)
+        const resolved = new Map<string, "succeeded" | "failed" | "canceled">();
 
-          if (res.status === "error") {
+        /** Wait until all dependencies of a node are resolved. */
+        function waitForDeps(nodeId: string): Promise<boolean> {
+          return new Promise((resolve) => {
+            const check = () => {
+              if (cancelledRef.current) {
+                resolve(false);
+                return;
+              }
+              const nodeDeps = deps.get(nodeId) ?? [];
+              const allDone = nodeDeps.every((d) => resolved.has(d));
+              if (!allDone) {
+                setTimeout(check, 250);
+                return;
+              }
+              const allOk = nodeDeps.every((d) => resolved.get(d) === "succeeded");
+              resolve(allOk);
+            };
+            check();
+          });
+        }
+
+        /** Run a single step: submit, stream logs, wait for completion. */
+        async function runStep(
+          nodeId: string,
+          req: RunStepRequest,
+        ): Promise<void> {
+          const depsOk = await waitForDeps(nodeId);
+          if (!depsOk || cancelledRef.current) {
+            updateNode(nodeId, { status: "canceled" });
+            resolved.set(nodeId, "canceled");
+            return;
+          }
+
+          updateNode(nodeId, { status: "running" });
+
+          try {
+            const res = await postRun(req);
+
+            if (res.status === "error") {
+              updateNode(nodeId, {
+                status: "failed",
+                stdout: res.stdout ?? "",
+                stderr: res.stderr ?? "",
+                exitCode: res.exit_code,
+              });
+              resolved.set(nodeId, "failed");
+              return;
+            }
+
+            const jobId = res.job_id;
+            if (!jobId) {
+              // Sync fallback — already completed
+              const exitOk = (res.exit_code ?? 0) === 0;
+              updateNode(nodeId, {
+                status: exitOk ? "succeeded" : "failed",
+                stdout: res.stdout ?? "",
+                stderr: res.stderr ?? "",
+                exitCode: res.exit_code,
+              });
+              resolved.set(nodeId, exitOk ? "succeeded" : "failed");
+              return;
+            }
+
+            activeJobsRef.current.set(nodeId, jobId);
+            updateNode(nodeId, { jobId });
+
+            // Stream logs via WebSocket
+            await new Promise<void>((resolve) => {
+              const ws = connectJobWs(jobId, ["stdout", "stderr", "progress"]);
+              wsRefs.current.push(ws);
+
+              ws.onmessage = (ev) => {
+                try {
+                  const msg = JSON.parse(ev.data);
+                  if (msg.params?.stdout) {
+                    setRunState((prev) => {
+                      const next = new Map(prev);
+                      const cur = next.get(nodeId) ?? emptyRunState();
+                      next.set(nodeId, {
+                        ...cur,
+                        stdout: cur.stdout + msg.params.stdout,
+                      });
+                      return next;
+                    });
+                  }
+                  if (msg.params?.stderr) {
+                    setRunState((prev) => {
+                      const next = new Map(prev);
+                      const cur = next.get(nodeId) ?? emptyRunState();
+                      next.set(nodeId, {
+                        ...cur,
+                        stderr: cur.stderr + msg.params.stderr,
+                      });
+                      return next;
+                    });
+                  }
+                  if (
+                    msg.params?.status === "succeeded" ||
+                    msg.params?.status === "failed" ||
+                    msg.params?.status === "canceled"
+                  ) {
+                    updateNode(nodeId, {
+                      status: msg.params.status,
+                      exitCode: msg.params.exit_code,
+                    });
+                    resolved.set(nodeId, msg.params.status);
+                    ws.close();
+                    resolve();
+                  }
+                } catch {
+                  // ignore malformed messages
+                }
+              };
+
+              let fallbackStarted = false;
+              const startPollingFallback = () => {
+                if (fallbackStarted || resolved.has(nodeId)) return;
+                fallbackStarted = true;
+                pollUntilDone(nodeId, jobId).then(resolve);
+              };
+
+              ws.onerror = () => {
+                ws.close();
+                startPollingFallback();
+              };
+
+              ws.onclose = () => {
+                startPollingFallback();
+              };
+            });
+          } catch (err) {
             updateNode(nodeId, {
               status: "failed",
-              stdout: res.stdout ?? "",
-              stderr: res.stderr ?? "",
-              exitCode: res.exit_code,
+              stderr: err instanceof Error ? err.message : String(err),
             });
             resolved.set(nodeId, "failed");
-            return;
           }
+        }
 
-          const jobId = res.job_id;
-          if (!jobId) {
-            // Sync fallback — already completed
-            const exitOk = (res.exit_code ?? 0) === 0;
-            updateNode(nodeId, {
-              status: exitOk ? "succeeded" : "failed",
-              stdout: res.stdout ?? "",
-              stderr: res.stderr ?? "",
-              exitCode: res.exit_code,
-            });
-            resolved.set(nodeId, exitOk ? "succeeded" : "failed");
-            return;
-          }
-
-          activeJobsRef.current.set(nodeId, jobId);
-          updateNode(nodeId, { jobId });
-
-          // Stream logs via WebSocket
-          await new Promise<void>((resolve) => {
-            const ws = connectJobWs(jobId, ["stdout", "stderr", "progress"]);
-            wsRefs.current.push(ws);
-
-            ws.onmessage = (ev) => {
-              try {
-                const msg = JSON.parse(ev.data);
-                if (msg.params?.stdout) {
-                  setRunState((prev) => {
-                    const next = new Map(prev);
-                    const cur = next.get(nodeId) ?? emptyRunState();
-                    next.set(nodeId, {
-                      ...cur,
-                      stdout: cur.stdout + msg.params.stdout,
-                    });
-                    return next;
-                  });
-                }
-                if (msg.params?.stderr) {
-                  setRunState((prev) => {
-                    const next = new Map(prev);
-                    const cur = next.get(nodeId) ?? emptyRunState();
-                    next.set(nodeId, {
-                      ...cur,
-                      stderr: cur.stderr + msg.params.stderr,
-                    });
-                    return next;
-                  });
-                }
-                if (
-                  msg.params?.status === "succeeded" ||
-                  msg.params?.status === "failed" ||
-                  msg.params?.status === "canceled"
-                ) {
-                  updateNode(nodeId, {
-                    status: msg.params.status,
-                    exitCode: msg.params.exit_code,
-                  });
-                  resolved.set(nodeId, msg.params.status);
-                  ws.close();
-                  resolve();
-                }
-              } catch {
-                // ignore malformed messages
+        /** Poll job status until terminal state. */
+        async function pollUntilDone(nodeId: string, jobId: string) {
+          while (!cancelledRef.current) {
+            try {
+              const status = await getJobStatus(jobId);
+              updateNode(nodeId, {
+                stdout: status.stdout ?? "",
+                stderr: status.stderr ?? "",
+                exitCode: status.exit_code,
+              });
+              if (
+                status.status === "succeeded" ||
+                status.status === "failed" ||
+                status.status === "canceled"
+              ) {
+                updateNode(nodeId, { status: status.status });
+                resolved.set(nodeId, status.status);
+                return;
               }
-            };
-
-            let fallbackStarted = false;
-            const startPollingFallback = () => {
-              if (fallbackStarted || resolved.has(nodeId)) return;
-              fallbackStarted = true;
-              pollUntilDone(nodeId, jobId).then(resolve);
-            };
-
-            ws.onerror = () => {
-              ws.close();
-              startPollingFallback();
-            };
-
-            ws.onclose = () => {
-              startPollingFallback();
-            };
-          });
-        } catch (err) {
-          updateNode(nodeId, {
-            status: "failed",
-            stderr: err instanceof Error ? err.message : String(err),
-          });
-          resolved.set(nodeId, "failed");
-        }
-      }
-
-      /** Poll job status until terminal state. */
-      async function pollUntilDone(nodeId: string, jobId: string) {
-        while (!cancelledRef.current) {
-          try {
-            const status = await getJobStatus(jobId);
-            updateNode(nodeId, {
-              stdout: status.stdout ?? "",
-              stderr: status.stderr ?? "",
-              exitCode: status.exit_code,
-            });
-            if (
-              status.status === "succeeded" ||
-              status.status === "failed" ||
-              status.status === "canceled"
-            ) {
-              updateNode(nodeId, { status: status.status });
-              resolved.set(nodeId, status.status);
-              return;
+            } catch {
+              // retry
             }
-          } catch {
-            // retry
+            await new Promise((r) => setTimeout(r, 1000));
           }
-          await new Promise((r) => setTimeout(r, 1000));
         }
-      }
 
-      // Launch all steps — they each wait for their deps internally
-      const promises = pipeline.steps.map((step, i) =>
-        runStep(step.name, requests[i]),
-      );
-      await Promise.all(promises);
+        // Launch all steps — they each wait for their deps internally
+        const promises = pipeline.steps.map((step, i) =>
+          runStep(step.name, requests[i]),
+        );
+        await Promise.all(promises);
       } finally {
         setRunning(false);
       }

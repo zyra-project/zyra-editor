@@ -83,7 +83,7 @@ zyra-editor/
 │   │   └── src/
 │   │       ├── types.ts
 │   │       ├── ports.ts
-│   │       ├── serialise.ts
+│   │       ├── serializer.ts
 │   │       ├── execution.ts    # Run/job types, NodeRunState, STATUS_COLORS
 │   │       └── pipeline.ts     # graphToRunRequests() — graph → API requests
 │   └── editor/         # React visual editor
