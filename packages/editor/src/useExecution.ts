@@ -108,68 +108,19 @@ export function useExecution(): ExecutionControls {
       cancelledRef.current = false;
       const gen = ++runGenRef.current;
 
-      updateNode(nodeId, { ...emptyRunState(), status: "running" });
+      // Use sync mode for single-node runs so stdout/stderr come back directly
+      const req: RunStepRequest = { ...requests[stepIndex], mode: "sync" };
+      updateNode(nodeId, { ...emptyRunState(), status: "running", submittedRequest: req });
 
       try {
-        const req = requests[stepIndex];
         const res = await postRun(req);
-
-        if (res.status === "error") {
-          updateNode(nodeId, {
-            status: "failed",
-            stdout: res.stdout ?? "",
-            stderr: res.stderr ?? "",
-            exitCode: res.exit_code,
-          });
-          return null;
-        }
-
-        const jobId = res.job_id;
-        if (!jobId) {
-          const exitOk = (res.exit_code ?? 0) === 0;
-          updateNode(nodeId, {
-            status: exitOk ? "succeeded" : "failed",
-            stdout: res.stdout ?? "",
-            stderr: res.stderr ?? "",
-            exitCode: res.exit_code,
-          });
-          return null;
-        }
-
-        activeJobsRef.current.set(nodeId, jobId);
-        updateNode(nodeId, { jobId });
-
-        // Poll until done (simpler than full pipeline WS logic)
-        let consecutiveFailures = 0;
-        while (!cancelledRef.current && runGenRef.current === gen) {
-          try {
-            const status = await getJobStatus(jobId);
-            consecutiveFailures = 0;
-            updateNode(nodeId, {
-              stdout: status.stdout ?? "",
-              stderr: status.stderr ?? "",
-              exitCode: status.exit_code,
-            });
-            if (
-              status.status === "succeeded" ||
-              status.status === "failed" ||
-              status.status === "canceled"
-            ) {
-              updateNode(nodeId, { status: status.status });
-              break;
-            }
-          } catch {
-            consecutiveFailures++;
-            if (consecutiveFailures >= MAX_POLL_FAILURES) {
-              updateNode(nodeId, {
-                status: "failed",
-                stderr: `Lost connection to job ${jobId}`,
-              });
-              break;
-            }
-          }
-          await new Promise((r) => setTimeout(r, 1000));
-        }
+        const exitOk = (res.exit_code ?? 0) === 0;
+        updateNode(nodeId, {
+          status: res.status === "error" || !exitOk ? "failed" : "succeeded",
+          stdout: res.stdout ?? "",
+          stderr: res.stderr ?? "",
+          exitCode: res.exit_code,
+        });
       } catch (err) {
         updateNode(nodeId, {
           status: "failed",
@@ -245,7 +196,7 @@ export function useExecution(): ExecutionControls {
             return;
           }
 
-          updateNode(nodeId, { status: "running" });
+          updateNode(nodeId, { status: "running", submittedRequest: req });
 
           try {
             const res = await postRun(req);

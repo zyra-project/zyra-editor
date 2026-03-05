@@ -113,6 +113,16 @@ export function LogPanel({ runState, selectedNodeId }: LogPanelProps) {
         >
           {activeState ? (
             <>
+              {activeState.submittedRequest && (
+                <div style={{ color: "#8b949e", marginBottom: 8 }}>
+                  <span style={{ color: "#58a6ff" }}>
+                    $ zyra {activeState.submittedRequest.stage} {activeState.submittedRequest.command}
+                  </span>
+                  <pre style={{ margin: "4px 0 0", whiteSpace: "pre-wrap", color: "#6e7681", fontSize: 11 }}>
+                    {JSON.stringify(activeState.submittedRequest.args, null, 2)}
+                  </pre>
+                </div>
+              )}
               {activeState.dryRunArgv && (
                 <div style={{ color: "#58a6ff", marginBottom: 8 }}>
                   $ {activeState.dryRunArgv}
@@ -128,7 +138,7 @@ export function LogPanel({ runState, selectedNodeId }: LogPanelProps) {
                   {activeState.stderr}
                 </pre>
               )}
-              {activeState.exitCode !== undefined && (
+              {activeState.exitCode !== undefined && activeState.exitCode !== null && (
                 <div
                   style={{
                     marginTop: 8,
@@ -136,7 +146,17 @@ export function LogPanel({ runState, selectedNodeId }: LogPanelProps) {
                     fontWeight: 600,
                   }}
                 >
-                  Exit code: {activeState.exitCode}
+                  {activeState.exitCode === 0 ? "Completed successfully" : `Exit code: ${activeState.exitCode}`}
+                  {activeState.exitCode === 0 && !activeState.stdout && !activeState.stderr && (
+                    <span style={{ fontWeight: 400, color: "#8b949e", marginLeft: 8 }}>
+                      (no output captured — command ran silently)
+                    </span>
+                  )}
+                </div>
+              )}
+              {activeState.status === "running" && (
+                <div style={{ marginTop: 8, color: "#58a6ff", fontSize: 11 }}>
+                  Waiting for response…
                 </div>
               )}
               <div ref={logEndRef} />

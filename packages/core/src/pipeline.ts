@@ -24,6 +24,10 @@ export function graphToRunRequests(
 ): RunPlan {
   const pipeline = graphToPipeline(graph, stages);
 
+  // Keys that only the pipeline runner understands — individual stage CLIs
+  // will reject these as unrecognized flags so we strip them before submission.
+  const PIPELINE_RUNNER_ONLY_KEYS = new Set(["period", "dry_run"]);
+
   const requests = pipeline.steps.map((step) => {
     const raw = step.command.replace(/^zyra\s+/, "");
 
@@ -40,7 +44,15 @@ export function graphToRunRequests(
       command = rest.join(" ") || stage;
     }
 
-    const args: Record<string, unknown> = { ...step.args };
+    // Pass through all args except pipeline-runner-only keys that individual
+    // stage CLIs don't understand.  The server-side executor handles positional
+    // arg mapping, so positional args like "path" must NOT be stripped.
+    const args: Record<string, unknown> = {};
+    for (const [k, v] of Object.entries(step.args)) {
+      if (!PIPELINE_RUNNER_ONLY_KEYS.has(k)) {
+        args[k] = v;
+      }
+    }
     if (options?.dryRun) {
       args.dry_run = true;
     }
