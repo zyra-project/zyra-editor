@@ -5,7 +5,7 @@ import type {
   NodeRunState,
   RunStepRequest,
 } from "@zyra/core";
-import { emptyRunState, graphToRunRequests, graphToPipeline } from "@zyra/core";
+import { emptyRunState, graphToRunRequests } from "@zyra/core";
 import { postRun, getJobStatus, connectJobWs, cancelJob } from "./api";
 
 export type RunStateMap = Map<string, NodeRunState>;
@@ -51,36 +51,37 @@ export function useExecution(): ExecutionControls {
       setRunning(true);
       cancelledRef.current = false;
 
-      const requests = graphToRunRequests(graph, stages, { dryRun: true });
-      const pipeline = graphToPipeline(graph, stages);
+      try {
+        const { requests, pipeline } = graphToRunRequests(graph, stages, { dryRun: true });
 
-      // Initialise all nodes to dry-run state
-      const init = new Map<string, NodeRunState>();
-      for (const step of pipeline.steps) {
-        init.set(step.name, { ...emptyRunState(), status: "dry-run" });
-      }
-      setRunState(init);
-
-      for (let i = 0; i < requests.length; i++) {
-        if (cancelledRef.current) break;
-        const nodeId = pipeline.steps[i].name;
-        try {
-          const res = await postRun(requests[i]);
-          updateNode(nodeId, {
-            status: "dry-run",
-            dryRunArgv: res.stdout?.trim() ?? "",
-            stderr: res.stderr ?? "",
-            exitCode: res.exit_code,
-          });
-        } catch (err) {
-          updateNode(nodeId, {
-            status: "failed",
-            stderr: err instanceof Error ? err.message : String(err),
-          });
+        // Initialise all nodes to dry-run state
+        const init = new Map<string, NodeRunState>();
+        for (const step of pipeline.steps) {
+          init.set(step.name, { ...emptyRunState(), status: "dry-run" });
         }
-      }
+        setRunState(init);
 
-      setRunning(false);
+        for (let i = 0; i < requests.length; i++) {
+          if (cancelledRef.current) break;
+          const nodeId = pipeline.steps[i].name;
+          try {
+            const res = await postRun(requests[i]);
+            updateNode(nodeId, {
+              status: "dry-run",
+              dryRunArgv: res.stdout?.trim() ?? "",
+              stderr: res.stderr ?? "",
+              exitCode: res.exit_code,
+            });
+          } catch (err) {
+            updateNode(nodeId, {
+              status: "failed",
+              stderr: err instanceof Error ? err.message : String(err),
+            });
+          }
+        }
+      } finally {
+        setRunning(false);
+      }
     },
     [updateNode],
   );
@@ -94,8 +95,8 @@ export function useExecution(): ExecutionControls {
       activeJobsRef.current = new Map();
       wsRefs.current = [];
 
-      const requests = graphToRunRequests(graph, stages);
-      const pipeline = graphToPipeline(graph, stages);
+      try {
+      const { requests, pipeline } = graphToRunRequests(graph, stages);
 
       // Build dependency map: nodeId → set of nodeIds it depends on
       const deps = new Map<string, string[]>();
@@ -165,13 +166,14 @@ export function useExecution(): ExecutionControls {
           const jobId = res.job_id;
           if (!jobId) {
             // Sync fallback — already completed
+            const exitOk = (res.exit_code ?? 0) === 0;
             updateNode(nodeId, {
-              status: res.exit_code === 0 ? "succeeded" : "failed",
+              status: exitOk ? "succeeded" : "failed",
               stdout: res.stdout ?? "",
               stderr: res.stderr ?? "",
               exitCode: res.exit_code,
             });
-            resolved.set(nodeId, res.exit_code === 0 ? "succeeded" : "failed");
+            resolved.set(nodeId, exitOk ? "succeeded" : "failed");
             return;
           }
 
@@ -282,8 +284,9 @@ export function useExecution(): ExecutionControls {
         runStep(step.name, requests[i]),
       );
       await Promise.all(promises);
-
-      setRunning(false);
+      } finally {
+        setRunning(false);
+      }
     },
     [updateNode],
   );
