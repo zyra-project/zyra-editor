@@ -44,6 +44,9 @@ This is a TypeScript monorepo (pnpm workspaces) with three components:
 # Install JavaScript dependencies
 pnpm install
 
+# Build @zyra/core (required before first run)
+pnpm build
+
 # Start the editor dev server (Vite on port 5173)
 pnpm dev
 ```
@@ -55,7 +58,7 @@ cd server
 python -m venv .venv
 source .venv/bin/activate
 pip install -r requirements.txt
-uvicorn server.main:app --port 8765
+uvicorn main:app --port 8765
 ```
 
 The Vite dev server proxies `/v1` and `/ws` requests to `localhost:8765`.

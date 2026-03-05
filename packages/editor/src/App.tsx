@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useState } from "react";
+import { useCallback, useMemo, useRef, useState } from "react";
 import {
   ReactFlow,
   Background,
@@ -6,6 +6,8 @@ import {
   addEdge,
   useNodesState,
   useEdgesState,
+  useReactFlow,
+  ReactFlowProvider,
   type Connection,
   type Node,
   type Edge,
@@ -54,6 +56,8 @@ function Editor() {
   const [edges, setEdges, onEdgesChange] = useEdgesState<Edge>([]);
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
   const exec = useExecution();
+  const reactFlowWrapper = useRef<HTMLDivElement>(null);
+  const { screenToFlowPosition } = useReactFlow();
 
   const nodeTypes = useMemo(() => ({ zyra: ZyraNode }), []);
 
@@ -76,12 +80,12 @@ function Editor() {
   }, [nodes, exec.runState]);
 
   const handleAddNode = useCallback(
-    (stageDef: StageDef) => {
+    (stageDef: StageDef, position?: { x: number; y: number }) => {
       const id = nextId();
       const newNode: Node = {
         id,
         type: "zyra",
-        position: { x: 280 + Math.random() * 200, y: 80 + Math.random() * 300 },
+        position: position ?? { x: 280 + Math.random() * 200, y: 80 + Math.random() * 300 },
         data: {
           stageDef,
           argValues: {},
@@ -90,6 +94,23 @@ function Editor() {
       setNodes((nds) => [...nds, newNode]);
     },
     [setNodes],
+  );
+
+  const onDragOver = useCallback((e: React.DragEvent) => {
+    e.preventDefault();
+    e.dataTransfer.dropEffect = "move";
+  }, []);
+
+  const onDrop = useCallback(
+    (e: React.DragEvent) => {
+      e.preventDefault();
+      const json = e.dataTransfer.getData("application/zyra-stage");
+      if (!json) return;
+      const stageDef: StageDef = JSON.parse(json);
+      const position = screenToFlowPosition({ x: e.clientX, y: e.clientY });
+      handleAddNode(stageDef, position);
+    },
+    [screenToFlowPosition, handleAddNode],
   );
 
   const isValidConnection = useCallback(
@@ -184,7 +205,7 @@ function Editor() {
       <div style={{ display: "flex", flex: 1, minHeight: 0 }}>
         <NodePalette onAddNode={handleAddNode} />
 
-        <div style={{ flex: 1, position: "relative" }}>
+        <div ref={reactFlowWrapper} style={{ flex: 1, position: "relative" }}>
           <ReactFlow
             nodes={nodesWithStatus}
             edges={edges}
@@ -193,6 +214,8 @@ function Editor() {
             onConnect={onConnect}
             onNodeClick={handleNodeClick}
             onPaneClick={() => setSelectedNodeId(null)}
+            onDragOver={onDragOver}
+            onDrop={onDrop}
             isValidConnection={isValidConnection}
             nodeTypes={nodeTypes}
             fitView
@@ -230,7 +253,9 @@ function Editor() {
 export function App() {
   return (
     <ManifestProvider>
-      <Editor />
+      <ReactFlowProvider>
+        <Editor />
+      </ReactFlowProvider>
     </ManifestProvider>
   );
 }
