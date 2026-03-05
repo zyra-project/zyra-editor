@@ -48,7 +48,7 @@ export function pipelineToGraph(
     const stage = findStage(step.command);
     const node: GraphNode = {
       id: step.name,
-      label: step.label ?? step.name,
+      label: step.label,
       stageCommand: stage
         ? `${stage.stage}/${stage.command}`
         : step.command,

@@ -268,6 +268,7 @@ export function useExecution(): ExecutionControls {
           stderr: err instanceof Error ? err.message : String(err),
         });
       } finally {
+        activeJobsRef.current.delete(nodeId);
         if (runGenRef.current === gen) setRunning(false);
       }
       return null;

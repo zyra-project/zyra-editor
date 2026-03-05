@@ -11,7 +11,7 @@ export function isSensitive(arg: ArgDef): boolean {
 export interface ZyraNodeData {
   stageDef: StageDef;
   argValues: Record<string, string | number | boolean>;
-  /** User-customizable name; used as the YAML step name. */
+  /** User-customizable display label for this node. */
   nodeLabel?: string;
   runStatus?: NodeRunStatus;
   dryRunArgv?: string;

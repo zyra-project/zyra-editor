@@ -206,7 +206,7 @@ function Editor() {
           data: {
             stageDef: stageDef ?? placeholderStage(gn.stageCommand),
             argValues: { ...gn.argValues },
-            nodeLabel: gn.label || undefined,
+            nodeLabel: gn.label && gn.label !== gn.id ? gn.label : undefined,
           } satisfies ZyraNodeData,
         };
         if (gn.size) {

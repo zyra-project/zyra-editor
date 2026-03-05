@@ -6,7 +6,7 @@ import type { StageDef } from "./manifest.js";
  */
 export interface GraphNode {
   id: string;
-  /** User-facing label shown in the editor and used as the YAML step name. */
+  /** User-facing display label for the editor (optional, display-only metadata). */
   label?: string;
   stageCommand: string;   // "acquire/http"
   argValues: Record<string, string | number | boolean>;

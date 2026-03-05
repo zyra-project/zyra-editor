@@ -44,11 +44,24 @@ def _patched_start_job(job_id, stage, command, args):
 
     if _orig_cli_main is not None:
         def _cli_main_with_logging_reset(argv):
-            # Clear existing handlers so basicConfig creates new ones on
-            # the swapped sys.stderr (the _LocalPubTee)
             root = logging.getLogger()
-            root.handlers.clear()
-            return _orig_cli_main(argv)
+            # Save existing handlers so we can restore them after the CLI run
+            prev_handlers = list(root.handlers)
+            try:
+                # Clear existing handlers so basicConfig creates new ones on
+                # the swapped sys.stderr (the _LocalPubTee)
+                root.handlers.clear()
+                return _orig_cli_main(argv)
+            finally:
+                # Close any handlers added during the CLI run, then restore
+                # the original handler list
+                for handler in root.handlers:
+                    if handler not in prev_handlers:
+                        try:
+                            handler.close()
+                        except Exception:
+                            pass
+                root.handlers = prev_handlers
 
         # Guard the global swap with a lock so concurrent job starts
         # don't race on zyra.cli.main.
