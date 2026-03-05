@@ -2,12 +2,21 @@ import { useEffect, useRef, useState } from "react";
 import type { RunStateMap } from "./useExecution";
 import { STATUS_COLORS } from "@zyra/core";
 
+/** Formats seconds into a human-readable elapsed string. */
+function formatElapsed(seconds: number): string {
+  if (seconds < 60) return `${seconds}s`;
+  const m = Math.floor(seconds / 60);
+  const s = seconds % 60;
+  return `${m}m ${s}s`;
+}
+
 interface LogPanelProps {
   runState: RunStateMap;
   selectedNodeId: string | null;
+  onClearNode?: (nodeId: string) => void;
 }
 
-export function LogPanel({ runState, selectedNodeId }: LogPanelProps) {
+export function LogPanel({ runState, selectedNodeId, onClearNode }: LogPanelProps) {
   const [activeTab, setActiveTab] = useState<string | null>(null);
   const logEndRef = useRef<HTMLDivElement>(null);
   const [collapsed, setCollapsed] = useState(false);
@@ -77,24 +86,53 @@ export function LogPanel({ runState, selectedNodeId }: LogPanelProps) {
         {!collapsed && (
           <div style={{ display: "flex", overflow: "auto", flex: 1 }}>
             {Array.from(runState.entries()).map(([nodeId, state]) => (
-              <button
+              <span
                 key={nodeId}
-                onClick={() => setActiveTab(nodeId)}
                 style={{
+                  display: "inline-flex",
+                  alignItems: "center",
                   background: activeTab === nodeId ? "#0d1117" : "transparent",
-                  border: "none",
                   borderBottom:
                     activeTab === nodeId ? "2px solid #58a6ff" : "2px solid transparent",
-                  color: activeTab === nodeId ? "#c9d1d9" : "#8b949e",
-                  padding: "4px 12px",
-                  fontSize: 11,
-                  cursor: "pointer",
-                  whiteSpace: "nowrap",
                 }}
               >
-                {nodeId}
-                <StatusDot status={state.status} />
-              </button>
+                <button
+                  onClick={() => setActiveTab(nodeId)}
+                  style={{
+                    background: "none",
+                    border: "none",
+                    color: activeTab === nodeId ? "#c9d1d9" : "#8b949e",
+                    padding: "4px 8px 4px 12px",
+                    fontSize: 11,
+                    cursor: "pointer",
+                    whiteSpace: "nowrap",
+                  }}
+                >
+                  {nodeId}
+                  <StatusDot status={state.status} />
+                </button>
+                {onClearNode && state.status !== "running" && (
+                  <button
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      onClearNode(nodeId);
+                      if (activeTab === nodeId) setActiveTab(null);
+                    }}
+                    title="Clear log"
+                    style={{
+                      background: "none",
+                      border: "none",
+                      color: "#484f58",
+                      cursor: "pointer",
+                      fontSize: 10,
+                      padding: "0 6px 0 0",
+                      lineHeight: 1,
+                    }}
+                  >
+                    x
+                  </button>
+                )}
+              </span>
             ))}
           </div>
         )}
@@ -155,9 +193,7 @@ export function LogPanel({ runState, selectedNodeId }: LogPanelProps) {
                 </div>
               )}
               {activeState.status === "running" && (
-                <div style={{ marginTop: 8, color: "#58a6ff", fontSize: 11 }}>
-                  Waiting for response…
-                </div>
+                <RunningIndicator />
               )}
               <div ref={logEndRef} />
             </>
@@ -166,6 +202,19 @@ export function LogPanel({ runState, selectedNodeId }: LogPanelProps) {
           )}
         </div>
       )}
+    </div>
+  );
+}
+
+function RunningIndicator() {
+  const [elapsed, setElapsed] = useState(0);
+  useEffect(() => {
+    const t = setInterval(() => setElapsed((s) => s + 1), 1000);
+    return () => clearInterval(t);
+  }, []);
+  return (
+    <div style={{ marginTop: 8, color: "#58a6ff", fontSize: 11 }}>
+      Running… {formatElapsed(elapsed)}
     </div>
   );
 }

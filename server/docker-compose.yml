@@ -1,0 +1,11 @@
+services:
+  zyra-server:
+    build: .
+    ports:
+      - "8765:8765"
+    volumes:
+      # Mount the working data directory so downloads and outputs persist
+      - ../_work:/data
+    environment:
+      - ZYRA_VERBOSITY=debug
+      - ZYRA_DATA_DIR=/data

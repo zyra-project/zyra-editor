@@ -5,13 +5,61 @@ Usage:
     uvicorn main:app --port 8765
 """
 
+import os
 from pathlib import Path
 
+# Enable verbose logging for CLI jobs so the editor can stream debug-level
+# messages (e.g., FTP download progress) through the WebSocket log panel.
+os.environ.setdefault("ZYRA_VERBOSITY", "debug")
+
+import logging
 import requests as http_requests
 from fastapi import Request
 from fastapi.staticfiles import StaticFiles
 from starlette.middleware.cors import CORSMiddleware
 from zyra.api.server import create_app
+from zyra.api.workers import jobs as _jobs_mod
+
+# Monkey-patch start_job so that logging handlers are reset inside the
+# captured-stdio context.  Without this, logging.basicConfig() (called
+# during server startup) installs a StreamHandler that points to the
+# *original* sys.stderr.  When start_job swaps stderr for _LocalPubTee,
+# log messages still go to the original file descriptor and never reach
+# the WebSocket.  By clearing handlers just before cli_main(), the CLI's
+# configure_logging_from_env() call creates a fresh handler that writes
+# to the tee.
+_orig_start_job = _jobs_mod.start_job
+
+def _patched_start_job(job_id, stage, command, args):
+    """Wrap start_job to reset root logging handlers inside the tee context."""
+    import sys as _sys
+    _orig_cli_main = None
+    try:
+        from zyra.cli import main as _cm
+        _orig_cli_main = _cm
+    except Exception:
+        pass
+
+    if _orig_cli_main is not None:
+        def _cli_main_with_logging_reset(argv):
+            # Clear existing handlers so basicConfig creates new ones on
+            # the swapped sys.stderr (the _LocalPubTee)
+            root = logging.getLogger()
+            root.handlers.clear()
+            return _orig_cli_main(argv)
+
+        # Temporarily replace cli main in the module so start_job uses our wrapper
+        import zyra.cli
+        _saved = zyra.cli.main
+        zyra.cli.main = _cli_main_with_logging_reset
+        try:
+            _orig_start_job(job_id, stage, command, args)
+        finally:
+            zyra.cli.main = _saved
+    else:
+        _orig_start_job(job_id, stage, command, args)
+
+_jobs_mod.start_job = _patched_start_job
 
 app = create_app()
 

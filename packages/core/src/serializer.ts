@@ -12,6 +12,8 @@ export interface GraphNode {
   argValues: Record<string, string | number | boolean>;
   /** Canvas position (for round-tripping through YAML). */
   position?: { x: number; y: number };
+  /** Canvas size (for round-tripping through YAML). */
+  size?: { w: number; h: number };
 }
 
 /** An edge between two nodes (output port → input port). */
@@ -35,7 +37,7 @@ export interface PipelineStep {
   args: Record<string, string | number | boolean>;
   depends_on?: string[];
   /** Editor layout metadata — not used by the Zyra CLI. */
-  _layout?: { x: number; y: number };
+  _layout?: { x: number; y: number; w?: number; h?: number };
 }
 
 export interface Pipeline {
@@ -108,7 +110,17 @@ export function graphToPipeline(
       args: { ...node.argValues },
     };
     if (deps.length > 0) step.depends_on = deps.map(labelOf);
-    if (node.position) step._layout = { x: Math.round(node.position.x), y: Math.round(node.position.y) };
+    if (node.position || node.size) {
+      const layout: PipelineStep["_layout"] = {
+        x: Math.round(node.position?.x ?? 0),
+        y: Math.round(node.position?.y ?? 0),
+      };
+      if (node.size) {
+        layout.w = Math.round(node.size.w);
+        layout.h = Math.round(node.size.h);
+      }
+      step._layout = layout;
+    }
     return step;
   });
 

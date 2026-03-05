@@ -25,6 +25,8 @@ export interface ExecutionControls {
   cancelAll: () => void;
   /** Clear all execution state. */
   reset: () => void;
+  /** Clear execution state for a single node. */
+  clearNode: (nodeId: string) => void;
 }
 
 /** Max consecutive poll failures before marking a node as failed. */
@@ -108,18 +110,157 @@ export function useExecution(): ExecutionControls {
       cancelledRef.current = false;
       const gen = ++runGenRef.current;
 
-      // Use sync mode for single-node runs so stdout/stderr come back directly
-      const req: RunStepRequest = { ...requests[stepIndex], mode: "sync" };
+      // Use async mode with WebSocket streaming for live log output
+      const req: RunStepRequest = { ...requests[stepIndex], mode: "async" };
       updateNode(nodeId, { ...emptyRunState(), status: "running", submittedRequest: req });
 
       try {
         const res = await postRun(req);
-        const exitOk = (res.exit_code ?? 0) === 0;
-        updateNode(nodeId, {
-          status: res.status === "error" || !exitOk ? "failed" : "succeeded",
-          stdout: res.stdout ?? "",
-          stderr: res.stderr ?? "",
-          exitCode: res.exit_code,
+
+        if (res.status === "error") {
+          updateNode(nodeId, {
+            status: "failed",
+            stdout: res.stdout ?? "",
+            stderr: res.stderr ?? "",
+            exitCode: res.exit_code,
+          });
+          return null;
+        }
+
+        const jobId = res.job_id;
+        if (!jobId) {
+          // Sync fallback — server returned result directly
+          const exitOk = (res.exit_code ?? 0) === 0;
+          updateNode(nodeId, {
+            status: exitOk ? "succeeded" : "failed",
+            stdout: res.stdout ?? "",
+            stderr: res.stderr ?? "",
+            exitCode: res.exit_code,
+          });
+          return null;
+        }
+
+        activeJobsRef.current.set(nodeId, jobId);
+        updateNode(nodeId, { jobId });
+
+        // Stream logs via WebSocket
+        await new Promise<void>((resolve) => {
+          const ws = connectJobWs(jobId, ["stdout", "stderr", "progress"]);
+          wsRefs.current.push(ws);
+          let done = false;
+
+          const appendStderr = (text: string) => {
+            setRunState((prev) => {
+              const next = new Map(prev);
+              const cur = next.get(nodeId) ?? emptyRunState();
+              next.set(nodeId, { ...cur, stderr: cur.stderr + text });
+              return next;
+            });
+          };
+
+          ws.onopen = () => {
+            appendStderr("[ws] Connected to job stream\n");
+          };
+
+          ws.onmessage = (ev) => {
+            try {
+              const msg = JSON.parse(ev.data);
+              // Skip keepalive frames
+              if (msg.keepalive) return;
+
+              const stdoutChunk = msg.stdout ?? msg.params?.stdout ?? "";
+              const stderrChunk = msg.stderr ?? msg.params?.stderr ?? "";
+              // Filter out the server's initial "listening" frame
+              const isListeningFrame = stderrChunk === "listening" && !stdoutChunk;
+              if (!isListeningFrame && (stdoutChunk || stderrChunk)) {
+                setRunState((prev) => {
+                  const next = new Map(prev);
+                  const cur = next.get(nodeId) ?? emptyRunState();
+                  next.set(nodeId, {
+                    ...cur,
+                    stdout: cur.stdout + stdoutChunk,
+                    stderr: cur.stderr + stderrChunk,
+                  });
+                  return next;
+                });
+              }
+              // Log progress updates
+              if (msg.progress !== undefined && msg.progress < 1.0) {
+                appendStderr(`[ws] Progress: ${Math.round(msg.progress * 100)}%\n`);
+              }
+              // Check for terminal status
+              const status = msg.status ?? msg.params?.status;
+              const exitCode = msg.exit_code ?? msg.params?.exit_code;
+              if (
+                status === "succeeded" ||
+                status === "failed" ||
+                status === "canceled"
+              ) {
+                updateNode(nodeId, { status, exitCode });
+                ws.close();
+                done = true;
+                resolve();
+              } else if (exitCode !== undefined && !done) {
+                // Final payload with exit_code but no explicit status
+                const s = exitCode === 0 ? "succeeded" : "failed";
+                updateNode(nodeId, { status: s, exitCode });
+                ws.close();
+                done = true;
+                resolve();
+              }
+            } catch {
+              // ignore malformed messages
+            }
+          };
+
+          let fallbackStarted = false;
+          const startPollingFallback = () => {
+            if (fallbackStarted || done) return;
+            fallbackStarted = true;
+            appendStderr("[ws] Connection closed, falling back to polling\n");
+            (async () => {
+              let consecutiveFailures = 0;
+              while (!cancelledRef.current && runGenRef.current === gen) {
+                try {
+                  const status = await getJobStatus(jobId);
+                  consecutiveFailures = 0;
+                  updateNode(nodeId, {
+                    stdout: status.stdout ?? "",
+                    stderr: status.stderr ?? "",
+                    exitCode: status.exit_code,
+                  });
+                  if (
+                    status.status === "succeeded" ||
+                    status.status === "failed" ||
+                    status.status === "canceled"
+                  ) {
+                    updateNode(nodeId, { status: status.status });
+                    resolve();
+                    return;
+                  }
+                } catch {
+                  consecutiveFailures++;
+                  if (consecutiveFailures >= MAX_POLL_FAILURES) {
+                    updateNode(nodeId, {
+                      status: "failed",
+                      stderr: `Lost connection to job ${jobId}\n`,
+                    });
+                    resolve();
+                    return;
+                  }
+                }
+                await new Promise((r) => setTimeout(r, 1000));
+              }
+              resolve();
+            })();
+          };
+
+          ws.onerror = () => {
+            appendStderr("[ws] Connection error\n");
+            ws.close();
+            startPollingFallback();
+          };
+          ws.onclose = () => { startPollingFallback(); };
         });
       } catch (err) {
         updateNode(nodeId, {
@@ -378,5 +519,15 @@ export function useExecution(): ExecutionControls {
     setRunning(false);
   }, []);
 
-  return { runState, running, dryRun, runPipeline, runSingleNode, cancelAll, reset };
+  // ── Clear single node ────────────────────────────────────────────
+
+  const clearNode = useCallback((nodeId: string) => {
+    setRunState((prev) => {
+      const next = new Map(prev);
+      next.delete(nodeId);
+      return next;
+    });
+  }, []);
+
+  return { runState, running, dryRun, runPipeline, runSingleNode, cancelAll, reset, clearNode };
 }

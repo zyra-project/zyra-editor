@@ -1,0 +1,25 @@
+FROM node:20-slim
+
+RUN corepack enable && corepack prepare pnpm@latest --activate
+
+WORKDIR /app
+
+# Copy workspace config and lockfile first for layer caching
+COPY pnpm-workspace.yaml package.json pnpm-lock.yaml ./
+COPY packages/core/package.json packages/core/
+COPY packages/editor/package.json packages/editor/
+
+# Use shamefully-hoist for flat node_modules (avoids symlink issues in Docker)
+RUN pnpm install --shamefully-hoist
+
+# Copy source
+COPY packages/core/ packages/core/
+COPY packages/editor/ packages/editor/
+
+# Build @zyra/core (workspace dependency)
+RUN ./node_modules/.bin/tsc -p packages/core
+
+EXPOSE 5173
+
+# Run vite from root node_modules against the editor package
+CMD ["./node_modules/.bin/vite", "--host", "0.0.0.0", "--config", "packages/editor/vite.config.ts", "packages/editor"]

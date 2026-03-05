@@ -40,6 +40,11 @@ function toGraph(nodes: Node[], edges: Edge[]): Graph {
       stageCommand: `${d.stageDef.stage}/${d.stageDef.command}`,
       argValues: { ...d.argValues },
       position: { x: n.position.x, y: n.position.y },
+      size: n.measured?.width && n.measured?.height
+        ? { w: n.measured.width, h: n.measured.height }
+        : n.width && n.height
+          ? { w: n.width, h: n.height }
+          : undefined,
     };
   });
   const graphEdges: GraphEdge[] = edges
@@ -194,7 +199,7 @@ function Editor() {
           existing?.position ??
           autoPositions.get(gn.id) ??
           { x: 350, y: 80 };
-        return {
+        const node: Node = {
           id: gn.id,
           type: "zyra",
           position: pos,
@@ -204,6 +209,12 @@ function Editor() {
             nodeLabel: gn.label || undefined,
           } satisfies ZyraNodeData,
         };
+        if (gn.size) {
+          node.width = gn.size.w;
+          node.height = gn.size.h;
+          node.style = { width: gn.size.w, height: gn.size.h };
+        }
+        return node;
       });
 
       const newEdges: Edge[] = graph.edges.map((ge, i) => ({
@@ -411,7 +422,7 @@ function Editor() {
         )}
       </div>
 
-      <LogPanel runState={exec.runState} selectedNodeId={selectedNodeId} />
+      <LogPanel runState={exec.runState} selectedNodeId={selectedNodeId} onClearNode={exec.clearNode} />
 
       {/* Pulse animation for running status indicator */}
       <style>{`

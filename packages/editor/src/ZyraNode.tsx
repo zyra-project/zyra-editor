@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Handle, Position, useReactFlow, type NodeProps } from "@xyflow/react";
+import { Handle, Position, NodeResizer, useReactFlow, type NodeProps } from "@xyflow/react";
 import type { ArgDef, StageDef, NodeRunStatus } from "@zyra/core";
 import { STATUS_COLORS } from "@zyra/core";
 
@@ -52,11 +52,21 @@ export function ZyraNode({ id, data, selected }: NodeProps) {
         border: selected ? "2px solid #58a6ff" : "1px solid #444",
         borderRadius: 8,
         minWidth: 180,
+        width: "100%",
+        height: "100%",
         fontFamily: "system-ui, sans-serif",
         fontSize: 13,
         color: "#eee",
+        overflow: "hidden",
       }}
     >
+      <NodeResizer
+        isVisible={!!selected}
+        minWidth={180}
+        minHeight={80}
+        lineStyle={{ borderColor: "#58a6ff" }}
+        handleStyle={{ background: "#58a6ff", width: 8, height: 8 }}
+      />
       {/* Header */}
       <div
         style={{
@@ -313,7 +323,8 @@ function ArgRow({ label, value }: { label: string; value: string }) {
           overflow: "hidden",
           textOverflow: "ellipsis",
           whiteSpace: "nowrap",
-          maxWidth: 120,
+          flex: 1,
+          minWidth: 0,
           textAlign: "right",
         }}
         title={value}

@@ -70,28 +70,32 @@ interface YamlPanelProps {
 export function YamlPanel({ pipeline, onPipelineChange, onClose }: YamlPanelProps) {
   const [yamlText, setYamlText] = useState("");
   const [parseError, setParseError] = useState<string | null>(null);
-  const [dirty, setDirty] = useState(false);
+  const [editing, setEditing] = useState(false);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  // Track whether the textarea is actively being edited by the user
+  const userEditingRef = useRef(false);
 
-  // Sync incoming pipeline to text when not dirty (user hasn't edited)
+  // Always sync incoming pipeline to YAML text — unless the user is
+  // actively typing in the textarea (to avoid clobbering their edits).
   useEffect(() => {
-    if (!dirty) {
+    if (!userEditingRef.current) {
       setYamlText(yaml.dump(pipeline, { lineWidth: -1, noRefs: true }));
       setParseError(null);
     }
-  }, [pipeline, dirty]);
+  }, [pipeline]);
 
   const handleTextChange = useCallback((e: React.ChangeEvent<HTMLTextAreaElement>) => {
     const text = e.target.value;
     setYamlText(text);
-    setDirty(true);
+    userEditingRef.current = true;
+    setEditing(true);
 
     try {
       const raw = yaml.load(text);
-      const pipeline = normalizePipeline(raw);
-      if (pipeline) {
+      const p = normalizePipeline(raw);
+      if (p) {
         setParseError(null);
-        onPipelineChange(pipeline);
+        onPipelineChange(p);
       } else {
         setParseError("Unrecognized format — expected 'steps' or 'stages' array");
       }
@@ -100,8 +104,18 @@ export function YamlPanel({ pipeline, onPipelineChange, onClose }: YamlPanelProp
     }
   }, [onPipelineChange]);
 
+  // When the textarea loses focus, allow pipeline prop to sync back
+  const handleBlur = useCallback(() => {
+    userEditingRef.current = false;
+    setEditing(false);
+    // Immediately sync to latest pipeline state
+    setYamlText(yaml.dump(pipeline, { lineWidth: -1, noRefs: true }));
+    setParseError(null);
+  }, [pipeline]);
+
   const handleSync = useCallback(() => {
-    setDirty(false);
+    userEditingRef.current = false;
+    setEditing(false);
     setYamlText(yaml.dump(pipeline, { lineWidth: -1, noRefs: true }));
     setParseError(null);
   }, [pipeline]);
@@ -116,7 +130,8 @@ export function YamlPanel({ pipeline, onPipelineChange, onClose }: YamlPanelProp
         if (!file) return;
         const text = await file.text();
         setYamlText(text);
-        setDirty(true);
+        userEditingRef.current = true;
+        setEditing(true);
         try {
           const raw = yaml.load(text);
           const p = normalizePipeline(raw);
@@ -176,7 +191,7 @@ export function YamlPanel({ pipeline, onPipelineChange, onClose }: YamlPanelProp
         <button onClick={handleSave} style={btnStyle("#30363d")} title="Save as YAML file">
           Save
         </button>
-        {dirty && (
+        {editing && (
           <button onClick={handleSync} style={btnStyle("#1f6feb")} title="Reset to canvas state">
             Sync
           </button>
@@ -218,6 +233,7 @@ export function YamlPanel({ pipeline, onPipelineChange, onClose }: YamlPanelProp
         ref={textareaRef}
         value={yamlText}
         onChange={handleTextChange}
+        onBlur={handleBlur}
         spellCheck={false}
         style={{
           flex: 1,
