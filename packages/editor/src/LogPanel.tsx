@@ -2,6 +2,17 @@ import { useEffect, useRef, useState } from "react";
 import type { RunStateMap } from "./useExecution";
 import { STATUS_COLORS } from "@zyra/core";
 
+const SENSITIVE_KEY = /password|secret|token|credential|auth|api.?key/i;
+
+/** Redact sensitive values from an args dict for display. */
+function maskArgs(args: Record<string, unknown>): Record<string, unknown> {
+  const out: Record<string, unknown> = {};
+  for (const [k, v] of Object.entries(args)) {
+    out[k] = SENSITIVE_KEY.test(k) ? "••••••••" : v;
+  }
+  return out;
+}
+
 /** Formats seconds into a human-readable elapsed string. */
 function formatElapsed(seconds: number): string {
   if (seconds < 60) return `${seconds}s`;
@@ -158,7 +169,7 @@ export function LogPanel({ runState, selectedNodeId, onClearNode }: LogPanelProp
                     $ zyra {activeState.submittedRequest.stage} {activeState.submittedRequest.command}
                   </span>
                   <pre style={{ margin: "4px 0 0", whiteSpace: "pre-wrap", color: "#6e7681", fontSize: 11 }}>
-                    {JSON.stringify(activeState.submittedRequest.args, null, 2)}
+                    {JSON.stringify(maskArgs(activeState.submittedRequest.args as Record<string, unknown>), null, 2)}
                   </pre>
                 </div>
               )}

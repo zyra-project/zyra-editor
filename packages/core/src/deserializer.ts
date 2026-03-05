@@ -40,6 +40,14 @@ export function pipelineToGraph(
     return undefined;
   }
 
+  /** Normalize a raw command string to "stage/command" form for round-tripping. */
+  function normalizeCommand(cmd: string): string {
+    const stripped = cmd.replace(/^zyra\s+/, "");
+    const parts = stripped.split(/\s+/);
+    if (parts.length >= 2) return `${parts[0]}/${parts[1]}`;
+    return stripped;
+  }
+
   const nodes: GraphNode[] = [];
   const edges: GraphEdge[] = [];
   const nodeMap = new Map<string, { node: GraphNode; stage?: StageDef }>();
@@ -51,7 +59,7 @@ export function pipelineToGraph(
       label: step.label,
       stageCommand: stage
         ? `${stage.stage}/${stage.command}`
-        : step.command,
+        : normalizeCommand(step.command),
       argValues: { ...step.args },
       position: step._layout ? { x: step._layout.x, y: step._layout.y } : undefined,
       size: step._layout?.w && step._layout?.h ? { w: step._layout.w, h: step._layout.h } : undefined,

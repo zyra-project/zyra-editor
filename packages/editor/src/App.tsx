@@ -121,7 +121,8 @@ function computeAutoLayout(graph: Graph): Map<string, { x: number; y: number }> 
 
   // Assign positions
   const positions = new Map<string, { x: number; y: number }>();
-  for (const [col, ids] of columns) {
+  for (const col of Array.from(columns.keys()).sort((a, b) => a - b)) {
+    const ids = columns.get(col)!;
     const x = PADDING_X + col * (NODE_W + PADDING_X);
     const totalHeight = ids.length * NODE_H + (ids.length - 1) * PADDING_Y;
     const startY = Math.max(PADDING_Y, (600 - totalHeight) / 2);

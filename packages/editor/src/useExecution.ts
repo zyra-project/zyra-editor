@@ -216,6 +216,7 @@ export function useExecution(): ExecutionControls {
           let fallbackStarted = false;
           const startPollingFallback = () => {
             if (fallbackStarted || done) return;
+            if (cancelledRef.current || runGenRef.current !== gen) return;
             fallbackStarted = true;
             appendStderr("[ws] Connection closed, falling back to polling\n");
             (async () => {
