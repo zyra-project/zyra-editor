@@ -20,6 +20,6 @@ export type {
   NodeRunStatus,
   NodeRunState,
 } from "./execution.js";
-export { emptyRunState } from "./execution.js";
+export { emptyRunState, STATUS_COLORS } from "./execution.js";
 
 export { graphToRunRequests } from "./pipeline.js";

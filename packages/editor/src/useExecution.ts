@@ -226,17 +226,20 @@ export function useExecution(): ExecutionControls {
               }
             };
 
-            ws.onerror = () => {
-              // Fall back to polling on WS failure
-              ws.close();
+            let fallbackStarted = false;
+            const startPollingFallback = () => {
+              if (fallbackStarted || resolved.has(nodeId)) return;
+              fallbackStarted = true;
               pollUntilDone(nodeId, jobId).then(resolve);
             };
 
+            ws.onerror = () => {
+              ws.close();
+              startPollingFallback();
+            };
+
             ws.onclose = () => {
-              // If we haven't resolved yet, poll
-              if (!resolved.has(nodeId)) {
-                pollUntilDone(nodeId, jobId).then(resolve);
-              }
+              startPollingFallback();
             };
           });
         } catch (err) {
@@ -250,7 +253,7 @@ export function useExecution(): ExecutionControls {
 
       /** Poll job status until terminal state. */
       async function pollUntilDone(nodeId: string, jobId: string) {
-        const poll = async () => {
+        while (!cancelledRef.current) {
           try {
             const status = await getJobStatus(jobId);
             updateNode(nodeId, {
@@ -270,11 +273,8 @@ export function useExecution(): ExecutionControls {
           } catch {
             // retry
           }
-          if (!cancelledRef.current) {
-            setTimeout(poll, 1000);
-          }
-        };
-        await poll();
+          await new Promise((r) => setTimeout(r, 1000));
+        }
       }
 
       // Launch all steps — they each wait for their deps internally
@@ -313,6 +313,10 @@ export function useExecution(): ExecutionControls {
       try { ws.close(); } catch { /* ignore */ }
     }
     wsRefs.current = [];
+
+    for (const [, jobId] of activeJobsRef.current) {
+      cancelJob(jobId).catch(() => {});
+    }
     activeJobsRef.current = new Map();
     setRunState(new Map());
     setRunning(false);

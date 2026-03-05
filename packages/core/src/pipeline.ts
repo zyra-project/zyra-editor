@@ -18,8 +18,20 @@ export function graphToRunRequests(
   const pipeline = graphToPipeline(graph, stages);
 
   return pipeline.steps.map((step) => {
-    const [stage, ...rest] = step.command.replace(/^zyra\s+/, "").split(/\s+/);
-    const command = rest.join(" ") || stage;
+    const raw = step.command.replace(/^zyra\s+/, "");
+
+    let stage: string;
+    let command: string;
+
+    if (!/\s/.test(raw) && raw.includes("/")) {
+      const [stagePart, commandPart] = raw.split("/", 2);
+      stage = stagePart;
+      command = commandPart;
+    } else {
+      const [parsedStage, ...rest] = raw.split(/\s+/);
+      stage = parsedStage;
+      command = rest.join(" ") || stage;
+    }
 
     const args: Record<string, unknown> = { ...step.args };
     if (options?.dryRun) {

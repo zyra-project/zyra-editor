@@ -52,3 +52,14 @@ export interface NodeRunState {
 export function emptyRunState(): NodeRunState {
   return { status: "idle", stdout: "", stderr: "" };
 }
+
+/** Canonical status → hex color mapping shared across all UI components. */
+export const STATUS_COLORS: Record<NodeRunStatus, string> = {
+  idle: "#555",
+  "dry-run": "#58a6ff",
+  queued: "#888",
+  running: "#58a6ff",
+  succeeded: "#3fb950",
+  failed: "#f85149",
+  canceled: "#d29922",
+};

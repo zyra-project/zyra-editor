@@ -1,5 +1,6 @@
 import { Handle, Position, type NodeProps } from "@xyflow/react";
 import type { StageDef, NodeRunStatus } from "@zyra/core";
+import { STATUS_COLORS } from "@zyra/core";
 
 export interface ZyraNodeData {
   stageDef: StageDef;
@@ -14,12 +15,12 @@ const statusIndicator: Record<
   { color: string; label: string; pulse?: boolean }
 > = {
   idle: { color: "transparent", label: "" },
-  "dry-run": { color: "#58a6ff", label: "DRY" },
-  queued: { color: "#888", label: "" },
-  running: { color: "#58a6ff", label: "", pulse: true },
-  succeeded: { color: "#3fb950", label: "\u2713" },
-  failed: { color: "#f85149", label: "\u2717" },
-  canceled: { color: "#d29922", label: "\u2014" },
+  "dry-run": { color: STATUS_COLORS["dry-run"], label: "DRY" },
+  queued: { color: STATUS_COLORS.queued, label: "" },
+  running: { color: STATUS_COLORS.running, label: "", pulse: true },
+  succeeded: { color: STATUS_COLORS.succeeded, label: "\u2713" },
+  failed: { color: STATUS_COLORS.failed, label: "\u2717" },
+  canceled: { color: STATUS_COLORS.canceled, label: "\u2014" },
 };
 
 export function ZyraNode({ data, selected }: NodeProps) {

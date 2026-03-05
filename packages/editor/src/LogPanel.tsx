@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import type { RunStateMap } from "./useExecution";
+import { STATUS_COLORS } from "@zyra/core";
 
 interface LogPanelProps {
   runState: RunStateMap;
@@ -150,15 +151,7 @@ export function LogPanel({ runState, selectedNodeId }: LogPanelProps) {
 }
 
 function StatusDot({ status }: { status: string }) {
-  const colors: Record<string, string> = {
-    queued: "#888",
-    running: "#58a6ff",
-    succeeded: "#3fb950",
-    failed: "#f85149",
-    canceled: "#d29922",
-    "dry-run": "#58a6ff",
-  };
-  const color = colors[status];
+  const color = (STATUS_COLORS as Record<string, string>)[status];
   if (!color) return null;
   return (
     <span

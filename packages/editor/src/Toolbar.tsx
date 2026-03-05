@@ -1,5 +1,5 @@
 import type { RunStateMap } from "./useExecution";
-import type { NodeRunStatus } from "@zyra/core";
+import { STATUS_COLORS } from "@zyra/core";
 
 interface ToolbarProps {
   onDryRun: () => void;
@@ -10,16 +10,6 @@ interface ToolbarProps {
   nodeCount: number;
   runState: RunStateMap;
 }
-
-const statusColors: Record<NodeRunStatus, string> = {
-  idle: "#555",
-  "dry-run": "#58a6ff",
-  queued: "#888",
-  running: "#58a6ff",
-  succeeded: "#3fb950",
-  failed: "#f85149",
-  canceled: "#d29922",
-};
 
 export function Toolbar({
   onDryRun,
@@ -60,7 +50,7 @@ export function Toolbar({
       <button
         onClick={onDryRun}
         disabled={running || nodeCount === 0}
-        style={btnStyle("#1f6feb")}
+        style={btnStyle("#1f6feb", running || nodeCount === 0)}
         title="Validate pipeline without executing — shows resolved CLI commands"
       >
         Dry Run
@@ -69,7 +59,7 @@ export function Toolbar({
       <button
         onClick={onRun}
         disabled={running || nodeCount === 0}
-        style={btnStyle("#238636")}
+        style={btnStyle("#238636", running || nodeCount === 0)}
       >
         Run
       </button>
@@ -90,17 +80,17 @@ export function Toolbar({
       {hasRun && (
         <div style={{ marginLeft: "auto", display: "flex", gap: 12, fontSize: 12 }}>
           {counts.running > 0 && (
-            <span style={{ color: statusColors.running }}>
+            <span style={{ color: STATUS_COLORS.running }}>
               {counts.running} running
             </span>
           )}
           {counts.succeeded > 0 && (
-            <span style={{ color: statusColors.succeeded }}>
+            <span style={{ color: STATUS_COLORS.succeeded }}>
               {counts.succeeded}/{counts.total} passed
             </span>
           )}
           {counts.failed > 0 && (
-            <span style={{ color: statusColors.failed }}>
+            <span style={{ color: STATUS_COLORS.failed }}>
               {counts.failed} failed
             </span>
           )}
@@ -110,7 +100,7 @@ export function Toolbar({
   );
 }
 
-function btnStyle(bg: string): React.CSSProperties {
+function btnStyle(bg: string, disabled?: boolean): React.CSSProperties {
   return {
     background: bg,
     color: "#fff",
@@ -119,7 +109,7 @@ function btnStyle(bg: string): React.CSSProperties {
     padding: "4px 12px",
     fontSize: 12,
     fontWeight: 600,
-    cursor: "pointer",
-    opacity: 1,
+    cursor: disabled ? "not-allowed" : "pointer",
+    opacity: disabled ? 0.5 : 1,
   };
 }

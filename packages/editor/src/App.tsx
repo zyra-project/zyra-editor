@@ -152,12 +152,12 @@ function Editor() {
   const handleDryRun = useCallback(() => {
     const graph = toGraph(nodes, edges);
     exec.dryRun(graph, manifest.stages);
-  }, [nodes, edges, manifest.stages, exec]);
+  }, [nodes, edges, manifest.stages, exec.dryRun]);
 
   const handleRun = useCallback(() => {
     const graph = toGraph(nodes, edges);
     exec.runPipeline(graph, manifest.stages);
-  }, [nodes, edges, manifest.stages, exec]);
+  }, [nodes, edges, manifest.stages, exec.runPipeline]);
 
   const selectedNode = nodes.find((n) => n.id === selectedNodeId);
 
