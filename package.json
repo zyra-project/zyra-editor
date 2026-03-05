@@ -1,6 +1,7 @@
 {
   "name": "zyra-editor-monorepo",
   "private": true,
+  "license": "Apache-2.0",
   "scripts": {
     "dev": "pnpm --filter @zyra/editor dev",
     "build": "pnpm --filter @zyra/core build && pnpm --filter @zyra/editor build",
