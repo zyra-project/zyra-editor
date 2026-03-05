@@ -25,10 +25,14 @@ export interface ExecutionControls {
   reset: () => void;
 }
 
+/** Max consecutive poll failures before marking a node as failed. */
+const MAX_POLL_FAILURES = 20;
+
 export function useExecution(): ExecutionControls {
   const [runState, setRunState] = useState<RunStateMap>(new Map());
   const [running, setRunning] = useState(false);
   const cancelledRef = useRef(false);
+  const runGenRef = useRef(0); // generation counter to detect stale runs
   const activeJobsRef = useRef<Map<string, string>>(new Map()); // nodeId → jobId
   const wsRefs = useRef<WebSocket[]>([]);
 
@@ -50,6 +54,7 @@ export function useExecution(): ExecutionControls {
     async (graph: Graph, stages: StageDef[]) => {
       setRunning(true);
       cancelledRef.current = false;
+      const gen = ++runGenRef.current;
 
       try {
         const { requests, pipeline } = graphToRunRequests(graph, stages, { dryRun: true });
@@ -62,7 +67,7 @@ export function useExecution(): ExecutionControls {
         setRunState(init);
 
         for (let i = 0; i < requests.length; i++) {
-          if (cancelledRef.current) break;
+          if (cancelledRef.current || runGenRef.current !== gen) break;
           const nodeId = pipeline.steps[i].name;
           try {
             const res = await postRun(requests[i]);
@@ -80,7 +85,7 @@ export function useExecution(): ExecutionControls {
           }
         }
       } finally {
-        setRunning(false);
+        if (runGenRef.current === gen) setRunning(false);
       }
     },
     [updateNode],
@@ -92,6 +97,7 @@ export function useExecution(): ExecutionControls {
     async (graph: Graph, stages: StageDef[]) => {
       setRunning(true);
       cancelledRef.current = false;
+      const gen = ++runGenRef.current;
       activeJobsRef.current = new Map();
       wsRefs.current = [];
 
@@ -118,7 +124,7 @@ export function useExecution(): ExecutionControls {
         function waitForDeps(nodeId: string): Promise<boolean> {
           return new Promise((resolve) => {
             const check = () => {
-              if (cancelledRef.current) {
+              if (cancelledRef.current || runGenRef.current !== gen) {
                 resolve(false);
                 return;
               }
@@ -141,7 +147,7 @@ export function useExecution(): ExecutionControls {
           req: RunStepRequest,
         ): Promise<void> {
           const depsOk = await waitForDeps(nodeId);
-          if (!depsOk || cancelledRef.current) {
+          if (!depsOk || cancelledRef.current || runGenRef.current !== gen) {
             updateNode(nodeId, { status: "canceled" });
             resolved.set(nodeId, "canceled");
             return;
@@ -188,24 +194,16 @@ export function useExecution(): ExecutionControls {
               ws.onmessage = (ev) => {
                 try {
                   const msg = JSON.parse(ev.data);
-                  if (msg.params?.stdout) {
+                  const stdoutChunk = msg.params?.stdout ?? "";
+                  const stderrChunk = msg.params?.stderr ?? "";
+                  if (stdoutChunk || stderrChunk) {
                     setRunState((prev) => {
                       const next = new Map(prev);
                       const cur = next.get(nodeId) ?? emptyRunState();
                       next.set(nodeId, {
                         ...cur,
-                        stdout: cur.stdout + msg.params.stdout,
-                      });
-                      return next;
-                    });
-                  }
-                  if (msg.params?.stderr) {
-                    setRunState((prev) => {
-                      const next = new Map(prev);
-                      const cur = next.get(nodeId) ?? emptyRunState();
-                      next.set(nodeId, {
-                        ...cur,
-                        stderr: cur.stderr + msg.params.stderr,
+                        stdout: cur.stdout + stdoutChunk,
+                        stderr: cur.stderr + stderrChunk,
                       });
                       return next;
                     });
@@ -255,9 +253,11 @@ export function useExecution(): ExecutionControls {
 
         /** Poll job status until terminal state. */
         async function pollUntilDone(nodeId: string, jobId: string) {
-          while (!cancelledRef.current) {
+          let consecutiveFailures = 0;
+          while (!cancelledRef.current && runGenRef.current === gen) {
             try {
               const status = await getJobStatus(jobId);
+              consecutiveFailures = 0;
               updateNode(nodeId, {
                 stdout: status.stdout ?? "",
                 stderr: status.stderr ?? "",
@@ -273,7 +273,15 @@ export function useExecution(): ExecutionControls {
                 return;
               }
             } catch {
-              // retry
+              consecutiveFailures++;
+              if (consecutiveFailures >= MAX_POLL_FAILURES) {
+                updateNode(nodeId, {
+                  status: "failed",
+                  stderr: `Lost connection to job ${jobId} after ${MAX_POLL_FAILURES} failed status checks`,
+                });
+                resolved.set(nodeId, "failed");
+                return;
+              }
             }
             await new Promise((r) => setTimeout(r, 1000));
           }
@@ -285,7 +293,7 @@ export function useExecution(): ExecutionControls {
         );
         await Promise.all(promises);
       } finally {
-        setRunning(false);
+        if (runGenRef.current === gen) setRunning(false);
       }
     },
     [updateNode],
@@ -295,6 +303,7 @@ export function useExecution(): ExecutionControls {
 
   const cancelAll = useCallback(() => {
     cancelledRef.current = true;
+    runGenRef.current++;
     for (const ws of wsRefs.current) {
       try { ws.close(); } catch { /* ignore */ }
     }
@@ -312,6 +321,7 @@ export function useExecution(): ExecutionControls {
 
   const reset = useCallback(() => {
     cancelledRef.current = true;
+    runGenRef.current++;
     for (const ws of wsRefs.current) {
       try { ws.close(); } catch { /* ignore */ }
     }
