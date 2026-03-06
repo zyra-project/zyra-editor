@@ -1,5 +1,5 @@
-import { useState, useMemo } from "react";
-import { Handle, Position, NodeResizer, useReactFlow, type NodeProps } from "@xyflow/react";
+import { useState, useMemo, useEffect, useRef, useCallback } from "react";
+import { Handle, Position, NodeResizer, useReactFlow, useUpdateNodeInternals, type NodeProps } from "@xyflow/react";
 import type { ArgDef, StageDef, NodeRunStatus, PortDef } from "@zyra/core";
 import { STATUS_COLORS, getEffectivePorts } from "@zyra/core";
 
@@ -48,6 +48,8 @@ export function ZyraNode({ id, data, selected }: NodeProps) {
   const [editValue, setEditValue] = useState("");
   const [expanded, setExpanded] = useState(false);
   const { deleteElements, updateNodeData } = useReactFlow();
+  const updateNodeInternals = useUpdateNodeInternals();
+  const nodeRef = useRef<HTMLDivElement>(null);
 
   const displayLabel = nodeLabel || stageDef.label;
 
@@ -84,6 +86,24 @@ export function ZyraNode({ id, data, selected }: NodeProps) {
   const hiddenOutputCount = allOutputs.length - visibleOutputs.length;
   const hiddenCount = hiddenInputCount + hiddenOutputCount;
 
+  // Tell React Flow to recalculate handle positions when visible ports change
+  useEffect(() => {
+    // Use requestAnimationFrame so the DOM has updated before recalculating
+    const raf = requestAnimationFrame(() => updateNodeInternals(id));
+    return () => cancelAnimationFrame(raf);
+  }, [id, updateNodeInternals, visibleInputs.length, visibleOutputs.length]);
+
+  // Also recalculate on resize via ResizeObserver
+  useEffect(() => {
+    const el = nodeRef.current;
+    if (!el) return;
+    const ro = new ResizeObserver(() => {
+      updateNodeInternals(id);
+    });
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, [id, updateNodeInternals]);
+
   // Build a map from argKey -> ArgDef for looking up sensitive status
   const argDefMap = useMemo(() => {
     const m = new Map<string, ArgDef>();
@@ -93,6 +113,7 @@ export function ZyraNode({ id, data, selected }: NodeProps) {
 
   return (
     <div
+      ref={nodeRef}
       onMouseEnter={() => setHovered(true)}
       onMouseLeave={() => setHovered(false)}
       style={{
