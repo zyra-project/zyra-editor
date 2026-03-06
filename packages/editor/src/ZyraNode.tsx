@@ -270,15 +270,20 @@ export function ZyraNode({ id, data, selected }: NodeProps) {
       {/* Value preview for control nodes */}
       {stageDef.stage === "control" && (() => {
         const val = argValues.value;
-        if (val === undefined || val === "") return null;
-        const display = typeof val === "boolean" ? (val ? "true" : "false") : String(val);
+        const valueDef = stageDef.args.find((a) => a.key === "value");
+        const hasValue = val !== undefined && val !== "";
+        const display = hasValue
+          ? (typeof val === "boolean" ? (val ? "true" : "false") : String(val))
+          : (valueDef?.placeholder || valueDef?.default != null ? String(valueDef.default ?? valueDef.placeholder) : null);
+        if (!display) return null;
         return (
           <div
             style={{
               padding: "4px 12px",
               fontSize: 11,
               fontFamily: "var(--font-mono)",
-              color: "var(--accent-blue)",
+              color: hasValue ? "var(--accent-blue)" : "var(--text-muted)",
+              fontStyle: hasValue ? "normal" : "italic",
               background: "rgba(0,0,0,0.15)",
               overflow: "hidden",
               textOverflow: "ellipsis",
@@ -286,7 +291,7 @@ export function ZyraNode({ id, data, selected }: NodeProps) {
               borderBottom: "1px solid var(--border-default)",
               flexShrink: 0,
             }}
-            title={display}
+            title={hasValue ? display : `placeholder: ${display}`}
           >
             {display}
           </div>

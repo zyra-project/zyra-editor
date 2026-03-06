@@ -262,10 +262,16 @@ function Editor() {
         const srcNode = nodes.find((n) => n.id === e.source);
         const srcData = srcNode?.data as ZyraNodeData | undefined;
         let displayValue = srcData?.nodeLabel || srcData?.stageDef.label || "";
-        // For control nodes with a "value" arg, show the actual value
+        // For control nodes, show the actual value (or placeholder/default as fallback)
         if (srcData?.stageDef.stage === "control") {
           const val = srcData.argValues?.value;
-          if (val !== undefined && val !== "") displayValue = String(val);
+          if (val !== undefined && val !== "") {
+            displayValue = String(val);
+          } else {
+            const valueDef = srcData.stageDef.args.find((a) => a.key === "value");
+            const fallback = valueDef?.default ?? valueDef?.placeholder;
+            if (fallback != null && fallback !== "") displayValue = String(fallback);
+          }
         }
         inMap.get(e.target)!.set(e.targetHandle, displayValue);
       }
@@ -707,11 +713,17 @@ function Editor() {
       .map((e) => {
         const srcNode = nodes.find((n) => n.id === e.source);
         const srcData = srcNode?.data as ZyraNodeData | undefined;
-        // For control nodes, extract the actual value to show alongside the label
+        // For control nodes, extract the actual value (or placeholder/default) to show alongside the label
         let peerValue: string | undefined;
         if (srcData?.stageDef.stage === "control") {
           const val = srcData.argValues?.value;
-          if (val !== undefined && val !== "") peerValue = String(val);
+          if (val !== undefined && val !== "") {
+            peerValue = String(val);
+          } else {
+            const valueDef = srcData.stageDef.args.find((a) => a.key === "value");
+            const fallback = valueDef?.default ?? valueDef?.placeholder;
+            if (fallback != null && fallback !== "") peerValue = String(fallback);
+          }
         }
         return {
           portId: e.targetHandle ?? "",
