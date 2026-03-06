@@ -48,24 +48,26 @@ export function ZyraNode({ id, data, selected }: NodeProps) {
       onMouseEnter={() => setHovered(true)}
       onMouseLeave={() => setHovered(false)}
       style={{
-        background: "#16213e",
-        border: selected ? "2px solid #58a6ff" : "1px solid #444",
-        borderRadius: 8,
+        background: "var(--bg-node)",
+        border: selected ? "2px solid var(--node-selected)" : "1px solid var(--border-strong)",
+        borderRadius: "var(--radius-lg)",
         minWidth: 180,
         width: "100%",
         height: "100%",
-        fontFamily: "system-ui, sans-serif",
+        fontFamily: "var(--font-sans)",
         fontSize: 13,
-        color: "#eee",
+        color: "var(--text-bright)",
         overflow: "hidden",
+        boxShadow: `0 2px 8px var(--node-shadow)`,
+        transition: "border-color 0.15s, box-shadow 0.15s",
       }}
     >
       <NodeResizer
         isVisible={!!selected}
         minWidth={180}
         minHeight={80}
-        lineStyle={{ borderColor: "#58a6ff" }}
-        handleStyle={{ background: "#58a6ff", width: 8, height: 8 }}
+        lineStyle={{ borderColor: "var(--node-selected)" }}
+        handleStyle={{ background: "var(--node-selected)", width: 8, height: 8 }}
       />
       {/* Header */}
       <div
@@ -132,7 +134,7 @@ export function ZyraNode({ id, data, selected }: NodeProps) {
                 background: "rgba(0,0,0,0.3)",
                 border: "none",
                 borderRadius: 3,
-                color: "#3fb950",
+                color: "var(--accent-green)",
                 cursor: "pointer",
                 fontSize: 11,
                 lineHeight: 1,
@@ -165,7 +167,7 @@ export function ZyraNode({ id, data, selected }: NodeProps) {
                 alignItems: "center",
               }}
             >
-              🗑
+              &times;
             </button>
           )}
           <span style={{ fontSize: 10, opacity: 0.7 }}>{stageDef.stage}</span>
@@ -204,12 +206,12 @@ export function ZyraNode({ id, data, selected }: NodeProps) {
               style={{
                 ...handleStyle,
                 top: "50%",
-                background: "#58a6ff",
+                background: "var(--handle-input)",
               }}
             />
-            <span style={{ fontSize: 11, color: "#aaa", marginLeft: 8 }}>
+            <span style={{ fontSize: 11, color: "var(--text-secondary)", marginLeft: 8 }}>
               {port.label}
-              <span style={{ fontSize: 9, color: "#666", marginLeft: 4 }}>
+              <span style={{ fontSize: 9, color: "var(--text-muted)", marginLeft: 4 }}>
                 [{port.types.join(", ")}]
               </span>
             </span>
@@ -231,11 +233,11 @@ export function ZyraNode({ id, data, selected }: NodeProps) {
               style={{
                 ...handleStyle,
                 top: "50%",
-                background: "#3fb950",
+                background: "var(--handle-output)",
               }}
             />
-            <span style={{ fontSize: 11, color: "#aaa", marginRight: 8 }}>
-              <span style={{ fontSize: 9, color: "#666", marginRight: 4 }}>
+            <span style={{ fontSize: 11, color: "var(--text-secondary)", marginRight: 8 }}>
+              <span style={{ fontSize: 9, color: "var(--text-muted)", marginRight: 4 }}>
                 [{port.types.join(", ")}]
               </span>
               {port.label}
@@ -249,7 +251,6 @@ export function ZyraNode({ id, data, selected }: NodeProps) {
           const filled = stageDef.args.filter(
             (a) => argValues[a.key] !== undefined && argValues[a.key] !== "",
           );
-          // Extra args from YAML not in the stage manifest
           const extraFilled = Object.entries(argValues)
             .filter(([k, v]) => !definedKeys.has(k) && v !== undefined && v !== "");
           const totalArgs = stageDef.args.length + extraFilled.length;
@@ -257,11 +258,11 @@ export function ZyraNode({ id, data, selected }: NodeProps) {
           return (
             <div
               style={{
-                borderTop: "1px solid #333",
+                borderTop: "1px solid var(--border-default)",
                 marginTop: 6,
                 paddingTop: 6,
                 fontSize: 11,
-                color: "#777",
+                color: "var(--text-muted)",
               }}
             >
               {filled.length === 0 && extraFilled.length === 0 ? (
@@ -287,12 +288,12 @@ export function ZyraNode({ id, data, selected }: NodeProps) {
         {dryRunArgv && (
           <div
             style={{
-              borderTop: "1px solid #333",
+              borderTop: "1px solid var(--border-default)",
               marginTop: 6,
               paddingTop: 6,
               fontSize: 10,
-              color: "#58a6ff",
-              fontFamily: "monospace",
+              color: "var(--accent-blue)",
+              fontFamily: "var(--font-mono)",
               wordBreak: "break-all",
               maxHeight: 40,
               overflow: "auto",
@@ -316,11 +317,11 @@ function ArgRow({ label, value }: { label: string; value: string }) {
         marginBottom: 2,
       }}
     >
-      <span style={{ color: "#888", flexShrink: 0 }}>{label}</span>
+      <span style={{ color: "var(--text-secondary)", flexShrink: 0 }}>{label}</span>
       <span
         style={{
-          color: "#58a6ff",
-          fontFamily: "monospace",
+          color: "var(--accent-blue)",
+          fontFamily: "var(--font-mono)",
           fontSize: 10,
           overflow: "hidden",
           textOverflow: "ellipsis",
@@ -341,5 +342,6 @@ const handleStyle: React.CSSProperties = {
   width: 10,
   height: 10,
   borderRadius: "50%",
-  border: "2px solid #1a1a2e",
+  border: "2px solid var(--handle-border)",
+  transition: "transform 0.1s",
 };

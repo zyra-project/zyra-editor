@@ -143,11 +143,8 @@ export function YamlPanel({ pipeline, onPipelineChange, onClose }: YamlPanelProp
   const [parseError, setParseError] = useState<string | null>(null);
   const [editing, setEditing] = useState(false);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
-  // Track whether the textarea is actively being edited by the user
   const userEditingRef = useRef(false);
 
-  // Always sync incoming pipeline to YAML text — unless the user is
-  // actively typing in the textarea (to avoid clobbering their edits).
   useEffect(() => {
     if (!userEditingRef.current) {
       setYamlText(yaml.dump(pipeline, { lineWidth: -1, noRefs: true }));
@@ -175,7 +172,6 @@ export function YamlPanel({ pipeline, onPipelineChange, onClose }: YamlPanelProp
     }
   }, [onPipelineChange]);
 
-  // When the textarea loses focus, stop treating the user as actively editing
   const handleBlur = useCallback(() => {
     userEditingRef.current = false;
     setEditing(false);
@@ -226,42 +222,35 @@ export function YamlPanel({ pipeline, onPipelineChange, onClose }: YamlPanelProp
     a.href = url;
     a.download = "pipeline.yaml";
     a.click();
-    // Defer revoking the URL to avoid racing the download in some browsers.
     setTimeout(() => URL.revokeObjectURL(url), 0);
   }, [yamlText]);
 
   return (
-    <div
-      style={{
-        width: 420,
-        background: "#161b22",
-        borderLeft: "1px solid #30363d",
-        display: "flex",
-        flexDirection: "column",
-        fontFamily: "system-ui, sans-serif",
-        fontSize: 13,
-        color: "#c9d1d9",
-      }}
-    >
+    <div style={{
+      display: "flex",
+      flexDirection: "column",
+      height: "100%",
+      fontFamily: "var(--font-sans)",
+      fontSize: 13,
+      color: "var(--text-primary)",
+    }}>
       {/* Header */}
-      <div
-        style={{
-          display: "flex",
-          alignItems: "center",
-          padding: "8px 12px",
-          borderBottom: "1px solid #30363d",
-          gap: 6,
-        }}
-      >
-        <span style={{ fontWeight: 600, flex: 1 }}>Pipeline YAML</span>
-        <button onClick={handleOpen} style={btnStyle("#30363d")} title="Open YAML file">
+      <div style={{
+        display: "flex",
+        alignItems: "center",
+        padding: "12px 16px",
+        borderBottom: "1px solid var(--border-default)",
+        gap: 8,
+      }}>
+        <span style={{ fontWeight: 600, flex: 1, fontSize: 14 }}>Pipeline YAML</span>
+        <button className="zyra-btn zyra-btn--neutral" onClick={handleOpen} title="Open YAML file" style={{ fontSize: 11, padding: "4px 10px" }}>
           Open
         </button>
-        <button onClick={handleSave} style={btnStyle("#30363d")} title="Save as YAML file">
+        <button className="zyra-btn zyra-btn--neutral" onClick={handleSave} title="Save as YAML file" style={{ fontSize: 11, padding: "4px 10px" }}>
           Save
         </button>
         {editing && (
-          <button onClick={handleSync} style={btnStyle("#1f6feb")} title="Reset to canvas state">
+          <button className="zyra-btn zyra-btn--info" onClick={handleSync} title="Reset to canvas state" style={{ fontSize: 11, padding: "4px 10px" }}>
             Sync
           </button>
         )}
@@ -270,30 +259,29 @@ export function YamlPanel({ pipeline, onPipelineChange, onClose }: YamlPanelProp
           style={{
             background: "none",
             border: "none",
-            color: "#8b949e",
+            color: "var(--text-secondary)",
             cursor: "pointer",
-            fontSize: 16,
+            fontSize: 18,
             padding: "0 4px",
+            lineHeight: 1,
           }}
           title="Close YAML panel"
           aria-label="Close YAML panel"
         >
-          x
+          &times;
         </button>
       </div>
 
       {/* Error bar */}
       {parseError && (
-        <div
-          style={{
-            padding: "6px 12px",
-            background: "#3d1a1a",
-            color: "#f85149",
-            fontSize: 11,
-            borderBottom: "1px solid #30363d",
-            whiteSpace: "pre-wrap",
-          }}
-        >
+        <div style={{
+          padding: "8px 16px",
+          background: "var(--bg-error)",
+          color: "var(--text-error)",
+          fontSize: 11,
+          borderBottom: "1px solid var(--border-default)",
+          whiteSpace: "pre-wrap",
+        }}>
           {parseError}
         </div>
       )}
@@ -307,13 +295,13 @@ export function YamlPanel({ pipeline, onPipelineChange, onClose }: YamlPanelProp
         spellCheck={false}
         style={{
           flex: 1,
-          background: "#0d1117",
-          color: "#c9d1d9",
+          background: "var(--bg-primary)",
+          color: "var(--text-primary)",
           border: "none",
-          padding: 12,
-          fontFamily: "'Cascadia Code', 'Fira Code', 'Consolas', monospace",
+          padding: 16,
+          fontFamily: "var(--font-mono)",
           fontSize: 12,
-          lineHeight: 1.5,
+          lineHeight: 1.6,
           resize: "none",
           outline: "none",
           tabSize: 2,
@@ -321,17 +309,4 @@ export function YamlPanel({ pipeline, onPipelineChange, onClose }: YamlPanelProp
       />
     </div>
   );
-}
-
-function btnStyle(bg: string): React.CSSProperties {
-  return {
-    background: bg,
-    color: "#c9d1d9",
-    border: "1px solid #444c56",
-    borderRadius: 6,
-    padding: "3px 10px",
-    fontSize: 11,
-    fontWeight: 600,
-    cursor: "pointer",
-  };
 }

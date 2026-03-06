@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   ReactFlow,
   Background,
@@ -14,16 +14,17 @@ import {
   BackgroundVariant,
 } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
-import type { StageDef, Graph, GraphNode, GraphEdge, Pipeline } from "@zyra/core";
+import type { StageDef, Graph, GraphNode, GraphEdge, Pipeline, NodeRunStatus } from "@zyra/core";
 import { portsCompatible, graphToPipeline, pipelineToGraph } from "@zyra/core";
 import { ManifestProvider, useManifest } from "./ManifestLoader";
 import { NodePalette } from "./NodePalette";
 import { ZyraNode, type ZyraNodeData } from "./ZyraNode";
-import { ArgPanel } from "./ArgPanel";
+import { NodeDetailPanel } from "./NodeDetailPanel";
 import { Toolbar } from "./Toolbar";
 import { LogPanel } from "./LogPanel";
 import { useExecution } from "./useExecution";
 import { YamlPanel } from "./YamlPanel";
+import { useTheme } from "./useTheme";
 
 let nodeIdCounter = 0;
 function nextId() {
@@ -78,7 +79,6 @@ function placeholderStage(stageCommand: string): StageDef {
 
 /**
  * Compute a left-to-right layout based on dependency depth.
- * Nodes at the same depth are stacked vertically.
  */
 function computeAutoLayout(graph: Graph): Map<string, { x: number; y: number }> {
   const NODE_W = 260;
@@ -86,7 +86,6 @@ function computeAutoLayout(graph: Graph): Map<string, { x: number; y: number }> 
   const PADDING_X = 80;
   const PADDING_Y = 40;
 
-  // Build adjacency: parent → children
   const children = new Map<string, string[]>();
   const parents = new Map<string, string[]>();
   for (const n of graph.nodes) {
@@ -98,11 +97,10 @@ function computeAutoLayout(graph: Graph): Map<string, { x: number; y: number }> 
     parents.get(e.targetNode)?.push(e.sourceNode);
   }
 
-  // Compute depth (longest path from a root)
   const depth = new Map<string, number>();
   function getDepth(id: string, visited: Set<string>): number {
     if (depth.has(id)) return depth.get(id)!;
-    if (visited.has(id)) return 0; // cycle guard
+    if (visited.has(id)) return 0;
     visited.add(id);
     const pars = parents.get(id) ?? [];
     const d = pars.length === 0 ? 0 : Math.max(...pars.map((p) => getDepth(p, visited))) + 1;
@@ -111,7 +109,6 @@ function computeAutoLayout(graph: Graph): Map<string, { x: number; y: number }> 
   }
   for (const n of graph.nodes) getDepth(n.id, new Set());
 
-  // Group by depth
   const columns = new Map<number, string[]>();
   for (const n of graph.nodes) {
     const d = depth.get(n.id) ?? 0;
@@ -119,7 +116,6 @@ function computeAutoLayout(graph: Graph): Map<string, { x: number; y: number }> 
     columns.get(d)!.push(n.id);
   }
 
-  // Assign positions
   const positions = new Map<string, { x: number; y: number }>();
   for (const col of Array.from(columns.keys()).sort((a, b) => a - b)) {
     const ids = columns.get(col)!;
@@ -136,31 +132,29 @@ function computeAutoLayout(graph: Graph): Map<string, { x: number; y: number }> 
 
 function Editor() {
   const manifest = useManifest();
+  const { theme, toggle: toggleTheme } = useTheme();
   const [nodes, setNodes, onNodesChange] = useNodesState<Node>([]);
   const [edges, setEdges, onEdgesChange] = useEdgesState<Edge>([]);
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
   const [yamlOpen, setYamlOpen] = useState(false);
+  const [paletteCollapsed, setPaletteCollapsed] = useState(false);
   const exec = useExecution();
   const reactFlowWrapper = useRef<HTMLDivElement>(null);
   const { screenToFlowPosition } = useReactFlow();
 
   const nodeTypes = useMemo(() => ({ zyra: ZyraNode }), []);
 
-  // Stable ref for the per-node run callback so memo doesn't churn
+  // Stable ref for the per-node run callback
   const runNodeRef = useRef<(nodeId: string) => void>(() => {});
-
-  // Stable callback that delegates to the mutable ref — avoids recreating
-  // node data objects every time exec.runState changes.
   const onRunNode = useCallback((nodeId: string) => runNodeRef.current(nodeId), []);
 
-  // Inject run status + run callback into node data so ZyraNode can render badges / play button
+  // Inject run status into node data
   const nodesWithStatus = useMemo(() => {
     return nodes.map((n) => {
       const rs = exec.runState.get(n.id);
       const d = n.data as ZyraNodeData;
       const newStatus = rs?.status;
       const newArgv = rs?.dryRunArgv;
-      // Only clone when run-related fields actually differ
       if (d.runStatus === newStatus && d.dryRunArgv === newArgv && d.onRunNode === onRunNode) {
         return n;
       }
@@ -176,7 +170,7 @@ function Editor() {
     });
   }, [nodes, exec.runState, onRunNode]);
 
-  // Compute pipeline from current canvas state (for YAML panel)
+  // Pipeline from current canvas state
   const pipeline = useMemo<Pipeline>(() => {
     try {
       return graphToPipeline(toGraph(nodes, edges), manifest.stages);
@@ -185,7 +179,7 @@ function Editor() {
     }
   }, [nodes, edges, manifest.stages]);
 
-  // YAML → canvas: rebuild React Flow nodes/edges from a parsed Pipeline
+  // YAML -> canvas
   const handlePipelineChange = useCallback(
     (newPipeline: Pipeline) => {
       const graph = pipelineToGraph(newPipeline, manifest.stages);
@@ -193,10 +187,7 @@ function Editor() {
         manifest.stages.map((s) => [`${s.stage}/${s.command}`, s]),
       );
 
-      // Check if any nodes have saved positions
       const hasLayout = graph.nodes.some((gn) => gn.position);
-
-      // Compute auto-layout positions when no _layout metadata exists
       const autoPositions = hasLayout
         ? new Map<string, { x: number; y: number }>()
         : computeAutoLayout(graph);
@@ -233,11 +224,11 @@ function Editor() {
         sourceHandle: ge.sourcePort,
         target: ge.targetNode,
         targetHandle: ge.targetPort,
-        style: { stroke: "#58a6ff", strokeWidth: 2 },
-        animated: true,
+        type: "smoothstep",
+        style: { stroke: "var(--accent-blue)", strokeWidth: 2 },
+        animated: exec.running,
       }));
 
-      // Update the counter so new nodes don't collide
       const maxNum = graph.nodes.reduce((max, n) => {
         const m = n.id.match(/^node-(\d+)$/);
         return m ? Math.max(max, Number(m[1])) : max;
@@ -247,7 +238,7 @@ function Editor() {
       setNodes(newNodes);
       setEdges(newEdges);
     },
-    [manifest.stages, nodes, setNodes, setEdges],
+    [manifest.stages, nodes, setNodes, setEdges, exec.running],
   );
 
   const handleAddNode = useCallback(
@@ -308,14 +299,15 @@ function Editor() {
         addEdge(
           {
             ...connection,
-            style: { stroke: "#58a6ff", strokeWidth: 2 },
-            animated: true,
+            type: "smoothstep",
+            style: { stroke: "var(--accent-blue)", strokeWidth: 2 },
+            animated: exec.running,
           },
           eds,
         ),
       );
     },
-    [setEdges],
+    [setEdges, exec.running],
   );
 
   const handleNodeClick = useCallback((_: React.MouseEvent, node: Node) => {
@@ -365,18 +357,64 @@ function Editor() {
   );
   runNodeRef.current = handleRunNode;
 
+  // Keyboard shortcuts
+  useEffect(() => {
+    function handleKeyDown(e: KeyboardEvent) {
+      // Escape: close detail panel / deselect
+      if (e.key === "Escape") {
+        if (yamlOpen) {
+          setYamlOpen(false);
+        } else if (selectedNodeId) {
+          setSelectedNodeId(null);
+        }
+        return;
+      }
+      // Cmd/Ctrl+S: export YAML
+      if ((e.metaKey || e.ctrlKey) && e.key === "s") {
+        e.preventDefault();
+        setYamlOpen(true);
+        return;
+      }
+    }
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [selectedNodeId, yamlOpen]);
+
   const selectedNode = nodes.find((n) => n.id === selectedNodeId);
 
+  // Compute connected ports for the detail panel
+  const connectedInputs = useMemo(() => {
+    if (!selectedNodeId) return [];
+    return edges
+      .filter((e) => e.target === selectedNodeId)
+      .map((e) => {
+        const srcNode = nodes.find((n) => n.id === e.source);
+        const srcData = srcNode?.data as ZyraNodeData | undefined;
+        return {
+          portId: e.targetHandle ?? "",
+          peerLabel: srcData?.nodeLabel || srcData?.stageDef.label || e.source,
+          peerStatus: exec.runState.get(e.source)?.status as NodeRunStatus | undefined,
+        };
+      });
+  }, [selectedNodeId, edges, nodes, exec.runState]);
+
+  const connectedOutputs = useMemo(() => {
+    if (!selectedNodeId) return [];
+    return edges
+      .filter((e) => e.source === selectedNodeId)
+      .map((e) => {
+        const tgtNode = nodes.find((n) => n.id === e.target);
+        const tgtData = tgtNode?.data as ZyraNodeData | undefined;
+        return {
+          portId: e.sourceHandle ?? "",
+          peerLabel: tgtData?.nodeLabel || tgtData?.stageDef.label || e.target,
+          peerStatus: exec.runState.get(e.target)?.status as NodeRunStatus | undefined,
+        };
+      });
+  }, [selectedNodeId, edges, nodes, exec.runState]);
+
   return (
-    <div
-      style={{
-        width: "100vw",
-        height: "100vh",
-        background: "#0d1117",
-        display: "flex",
-        flexDirection: "column",
-      }}
-    >
+    <div className="zyra-editor">
       <Toolbar
         onDryRun={handleDryRun}
         onRun={handleRun}
@@ -387,60 +425,80 @@ function Editor() {
         runState={exec.runState}
         yamlOpen={yamlOpen}
         onToggleYaml={() => setYamlOpen((v) => !v)}
+        theme={theme}
+        onToggleTheme={toggleTheme}
       />
 
-      <div style={{ display: "flex", flex: 1, minHeight: 0 }}>
-        <NodePalette onAddNode={handleAddNode} />
+      <NodePalette
+        onAddNode={handleAddNode}
+        collapsed={paletteCollapsed}
+        onToggleCollapse={() => setPaletteCollapsed((v) => !v)}
+      />
 
-        <div ref={reactFlowWrapper} style={{ flex: 1, position: "relative" }}>
-          <ReactFlow
-            nodes={nodesWithStatus}
-            edges={edges}
-            onNodesChange={onNodesChange}
-            onEdgesChange={onEdgesChange}
-            onConnect={onConnect}
-            onNodeClick={handleNodeClick}
-            onPaneClick={() => setSelectedNodeId(null)}
-            onDragOver={onDragOver}
-            onDrop={onDrop}
-            isValidConnection={isValidConnection}
-            nodeTypes={nodeTypes}
-            fitView
-            proOptions={{ hideAttribution: true }}
-            style={{ background: "#0d1117" }}
-          >
-            <Background variant={BackgroundVariant.Dots} color="#333" gap={20} size={1} />
-            <Controls style={{ background: "#1a1a2e", borderColor: "#444" }} />
-          </ReactFlow>
-        </div>
-
-        {selectedNode && (
-          <ArgPanel
-            nodeId={selectedNode.id}
-            data={selectedNode.data as ZyraNodeData}
-            onArgChange={handleArgChange}
-            onClose={() => setSelectedNodeId(null)}
-          />
-        )}
-
-        {yamlOpen && (
-          <YamlPanel
-            pipeline={pipeline}
-            onPipelineChange={handlePipelineChange}
-            onClose={() => setYamlOpen(false)}
-          />
-        )}
+      <div className="zyra-canvas" ref={reactFlowWrapper}>
+        <ReactFlow
+          nodes={nodesWithStatus}
+          edges={edges}
+          onNodesChange={onNodesChange}
+          onEdgesChange={onEdgesChange}
+          onConnect={onConnect}
+          onNodeClick={handleNodeClick}
+          onPaneClick={() => setSelectedNodeId(null)}
+          onDragOver={onDragOver}
+          onDrop={onDrop}
+          isValidConnection={isValidConnection}
+          nodeTypes={nodeTypes}
+          fitView
+          panOnDrag
+          selectionOnDrag={false}
+          proOptions={{ hideAttribution: true }}
+          defaultEdgeOptions={{
+            type: "smoothstep",
+            style: { stroke: "var(--accent-blue)", strokeWidth: 2 },
+            animated: false,
+          }}
+          style={{ width: "100%", height: "100%" }}
+        >
+          <Background variant={BackgroundVariant.Dots} color="var(--canvas-dot)" gap={20} size={1} />
+          <Controls />
+        </ReactFlow>
       </div>
 
-      <LogPanel runState={exec.runState} selectedNodeId={selectedNodeId} onClearNode={exec.clearNode} />
+      {selectedNode && (
+        <NodeDetailPanel
+          nodeId={selectedNode.id}
+          data={selectedNode.data as ZyraNodeData}
+          runState={exec.runState.get(selectedNode.id)}
+          connectedInputs={connectedInputs}
+          connectedOutputs={connectedOutputs}
+          onArgChange={handleArgChange}
+          onClose={() => setSelectedNodeId(null)}
+        />
+      )}
 
-      {/* Pulse animation for running status indicator */}
-      <style>{`
-        @keyframes zyra-pulse {
-          0%, 100% { opacity: 1; }
-          50% { opacity: 0.4; }
-        }
-      `}</style>
+      <LogPanel
+        runState={exec.runState}
+        selectedNodeId={selectedNodeId}
+        onClearNode={exec.clearNode}
+        onSelectNode={setSelectedNodeId}
+      />
+
+      {/* YAML Drawer Overlay */}
+      {yamlOpen && (
+        <>
+          <div
+            className="zyra-drawer-backdrop"
+            onClick={() => setYamlOpen(false)}
+          />
+          <div className="zyra-drawer">
+            <YamlPanel
+              pipeline={pipeline}
+              onPipelineChange={handlePipelineChange}
+              onClose={() => setYamlOpen(false)}
+            />
+          </div>
+        </>
+      )}
     </div>
   );
 }

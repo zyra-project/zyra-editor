@@ -1,0 +1,349 @@
+/* ── Zyra Editor Design Tokens ──────────────────────────────── */
+
+:root,
+[data-theme="dark"] {
+  /* Backgrounds */
+  --bg-primary: #0d1117;
+  --bg-secondary: #161b22;
+  --bg-tertiary: #1a1a2e;
+  --bg-node: #16213e;
+  --bg-overlay: rgba(0, 0, 0, 0.5);
+  --bg-error: #3d1a1a;
+
+  /* Text */
+  --text-primary: #c9d1d9;
+  --text-secondary: #8b949e;
+  --text-muted: #484f58;
+  --text-bright: #eee;
+  --text-error: #f85149;
+  --text-link: #58a6ff;
+
+  /* Borders */
+  --border-default: #30363d;
+  --border-muted: #21262d;
+  --border-strong: #444;
+
+  /* Accents */
+  --accent-blue: #58a6ff;
+  --accent-green: #3fb950;
+  --accent-red: #f85149;
+  --accent-yellow: #d29922;
+
+  /* Buttons */
+  --btn-primary: #238636;
+  --btn-info: #1f6feb;
+  --btn-danger: #da3633;
+  --btn-neutral: #30363d;
+
+  /* Handles / Ports */
+  --handle-input: #58a6ff;
+  --handle-output: #3fb950;
+  --handle-border: #1a1a2e;
+
+  /* Node selected */
+  --node-selected: #58a6ff;
+  --node-shadow: rgba(0, 0, 0, 0.4);
+
+  /* Spacing */
+  --space-xs: 4px;
+  --space-sm: 8px;
+  --space-md: 12px;
+  --space-lg: 16px;
+  --space-xl: 24px;
+
+  /* Radii */
+  --radius-sm: 4px;
+  --radius-md: 6px;
+  --radius-lg: 8px;
+
+  /* Fonts */
+  --font-sans: system-ui, -apple-system, 'Segoe UI', sans-serif;
+  --font-mono: 'Cascadia Code', 'Fira Code', 'JetBrains Mono', 'Consolas', monospace;
+
+  /* Misc */
+  --canvas-dot: #333;
+  --scrollbar-thumb: #30363d;
+  --scrollbar-track: transparent;
+}
+
+[data-theme="light"] {
+  /* Backgrounds */
+  --bg-primary: #ffffff;
+  --bg-secondary: #f6f8fa;
+  --bg-tertiary: #f0f3f6;
+  --bg-node: #ffffff;
+  --bg-overlay: rgba(0, 0, 0, 0.3);
+  --bg-error: #ffebe9;
+
+  /* Text */
+  --text-primary: #1f2328;
+  --text-secondary: #656d76;
+  --text-muted: #8b949e;
+  --text-bright: #1f2328;
+  --text-error: #cf222e;
+  --text-link: #0969da;
+
+  /* Borders */
+  --border-default: #d0d7de;
+  --border-muted: #d8dee4;
+  --border-strong: #afb8c1;
+
+  /* Accents */
+  --accent-blue: #0969da;
+  --accent-green: #1a7f37;
+  --accent-red: #cf222e;
+  --accent-yellow: #9a6700;
+
+  /* Buttons */
+  --btn-primary: #1a7f37;
+  --btn-info: #0969da;
+  --btn-danger: #cf222e;
+  --btn-neutral: #eaeef2;
+
+  /* Handles / Ports */
+  --handle-input: #0969da;
+  --handle-output: #1a7f37;
+  --handle-border: #f0f3f6;
+
+  /* Node selected */
+  --node-selected: #0969da;
+  --node-shadow: rgba(0, 0, 0, 0.1);
+
+  /* Misc */
+  --canvas-dot: #d0d7de;
+  --scrollbar-thumb: #afb8c1;
+  --scrollbar-track: transparent;
+}
+
+/* ── Base Resets ──────────────────────────────────────────── */
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+html, body, #root {
+  margin: 0;
+  padding: 0;
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  font-family: var(--font-sans);
+  color: var(--text-primary);
+  background: var(--bg-primary);
+}
+
+/* ── Scrollbar Styling ───────────────────────────────────── */
+
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+::-webkit-scrollbar-track {
+  background: var(--scrollbar-track);
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--scrollbar-thumb);
+  border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: var(--border-strong);
+}
+
+/* ── Animations ──────────────────────────────────────────── */
+
+@keyframes zyra-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.4; }
+}
+
+@keyframes zyra-slide-in {
+  from { transform: translateX(100%); }
+  to { transform: translateX(0); }
+}
+
+@keyframes zyra-fade-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+/* ── Editor Grid Layout ─────────────────────────────────── */
+
+.zyra-editor {
+  display: grid;
+  width: 100vw;
+  height: 100vh;
+  grid-template-rows: 48px 1fr auto;
+  grid-template-columns: auto 1fr auto;
+  grid-template-areas:
+    "toolbar  toolbar  toolbar"
+    "palette  canvas   detail"
+    "palette  logs     logs";
+  background: var(--bg-primary);
+}
+
+.zyra-toolbar {
+  grid-area: toolbar;
+}
+
+.zyra-palette {
+  grid-area: palette;
+}
+
+.zyra-canvas {
+  grid-area: canvas;
+  position: relative;
+  overflow: hidden;
+  min-width: 0;
+  min-height: 0;
+}
+
+.zyra-detail {
+  grid-area: detail;
+}
+
+.zyra-logs {
+  grid-area: logs;
+}
+
+/* ── YAML Drawer Overlay ─────────────────────────────────── */
+
+.zyra-drawer-backdrop {
+  position: fixed;
+  inset: 0;
+  background: var(--bg-overlay);
+  z-index: 50;
+  animation: zyra-fade-in 0.15s ease-out;
+}
+
+.zyra-drawer {
+  position: fixed;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  width: min(600px, 80vw);
+  z-index: 51;
+  background: var(--bg-secondary);
+  border-left: 1px solid var(--border-default);
+  animation: zyra-slide-in 0.2s ease-out;
+  display: flex;
+  flex-direction: column;
+}
+
+/* ── React Flow Overrides ────────────────────────────────── */
+
+.react-flow__controls {
+  background: var(--bg-tertiary) !important;
+  border-color: var(--border-strong) !important;
+  border-radius: var(--radius-md) !important;
+  box-shadow: 0 2px 8px var(--node-shadow) !important;
+}
+
+.react-flow__controls button {
+  background: var(--bg-tertiary) !important;
+  border-color: var(--border-strong) !important;
+  color: var(--text-secondary) !important;
+  fill: var(--text-secondary) !important;
+}
+
+.react-flow__controls button:hover {
+  background: var(--bg-secondary) !important;
+}
+
+/* ── Utility Classes ─────────────────────────────────────── */
+
+.zyra-btn {
+  border: none;
+  border-radius: var(--radius-md);
+  padding: 6px 14px;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  color: #fff;
+  transition: opacity 0.15s;
+  font-family: var(--font-sans);
+}
+
+.zyra-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.zyra-btn:hover:not(:disabled) {
+  opacity: 0.85;
+}
+
+.zyra-btn--primary { background: var(--btn-primary); }
+.zyra-btn--info { background: var(--btn-info); }
+.zyra-btn--danger { background: var(--btn-danger); }
+.zyra-btn--neutral {
+  background: var(--btn-neutral);
+  color: var(--text-primary);
+}
+
+.zyra-input {
+  width: 100%;
+  padding: 6px 10px;
+  background: var(--bg-primary);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+  color: var(--text-bright);
+  font-size: 13px;
+  font-family: var(--font-sans);
+  outline: none;
+  transition: border-color 0.15s;
+}
+
+.zyra-input:focus {
+  border-color: var(--accent-blue);
+}
+
+select.zyra-input {
+  cursor: pointer;
+}
+
+/* ── Tab System ──────────────────────────────────────────── */
+
+.zyra-tabs {
+  display: flex;
+  border-bottom: 1px solid var(--border-default);
+  background: var(--bg-secondary);
+}
+
+.zyra-tab {
+  padding: 8px 16px;
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--text-secondary);
+  background: none;
+  border: none;
+  border-bottom: 2px solid transparent;
+  cursor: pointer;
+  font-family: var(--font-sans);
+  transition: color 0.15s, border-color 0.15s;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.zyra-tab:hover {
+  color: var(--text-primary);
+}
+
+.zyra-tab--active {
+  color: var(--text-primary);
+  border-bottom-color: var(--accent-blue);
+}
+
+.zyra-tab__badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+}

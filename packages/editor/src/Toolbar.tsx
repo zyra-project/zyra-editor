@@ -1,5 +1,6 @@
 import type { RunStateMap } from "./useExecution";
 import { STATUS_COLORS } from "@zyra/core";
+import type { Theme } from "./useTheme";
 
 interface ToolbarProps {
   onDryRun: () => void;
@@ -11,6 +12,8 @@ interface ToolbarProps {
   runState: RunStateMap;
   yamlOpen: boolean;
   onToggleYaml: () => void;
+  theme: Theme;
+  onToggleTheme: () => void;
 }
 
 export function Toolbar({
@@ -23,6 +26,8 @@ export function Toolbar({
   runState,
   yamlOpen,
   onToggleYaml,
+  theme,
+  onToggleTheme,
 }: ToolbarProps) {
   const counts = { succeeded: 0, failed: 0, running: 0, total: 0 };
   for (const [, state] of runState) {
@@ -35,64 +40,79 @@ export function Toolbar({
   const hasRun = counts.total > 0;
 
   return (
-    <div
-      style={{
-        height: 40,
-        background: "#161b22",
-        borderBottom: "1px solid #30363d",
-        display: "flex",
-        alignItems: "center",
-        padding: "0 16px",
-        gap: 8,
-        fontFamily: "system-ui, sans-serif",
-        fontSize: 13,
-        color: "#c9d1d9",
-      }}
-    >
-      <span style={{ fontWeight: 600, marginRight: 8 }}>Zyra Editor</span>
+    <div className="zyra-toolbar" style={{
+      height: 48,
+      background: "var(--bg-secondary)",
+      borderBottom: "1px solid var(--border-default)",
+      display: "flex",
+      alignItems: "center",
+      padding: "0 16px",
+      gap: 8,
+      fontFamily: "var(--font-sans)",
+      fontSize: 13,
+      color: "var(--text-primary)",
+    }}>
+      {/* Logo / Title */}
+      <span style={{
+        fontWeight: 700,
+        fontSize: 15,
+        marginRight: 16,
+        letterSpacing: "-0.02em",
+      }}>
+        Zyra
+      </span>
 
-      <button
-        onClick={onDryRun}
-        disabled={running || nodeCount === 0}
-        style={btnStyle("#1f6feb", running || nodeCount === 0)}
-        title="Validate pipeline without executing — shows resolved CLI commands"
-      >
-        Dry Run
-      </button>
-
-      <button
-        onClick={onRun}
-        disabled={running || nodeCount === 0}
-        style={btnStyle("#238636", running || nodeCount === 0)}
-      >
-        Run
-      </button>
-
-      {running && (
-        <button onClick={onCancel} style={btnStyle("#da3633")}>
-          Cancel
-        </button>
-      )}
-
-      {hasRun && !running && (
-        <button onClick={onReset} style={btnStyle("#30363d")}>
-          Clear
-        </button>
-      )}
-
-      <div style={{ marginLeft: 8, borderLeft: "1px solid #30363d", paddingLeft: 8 }}>
+      {/* Pipeline actions */}
+      <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
         <button
-          onClick={onToggleYaml}
-          style={btnStyle(yamlOpen ? "#1f6feb" : "#30363d")}
-          title="Toggle YAML panel"
+          className="zyra-btn zyra-btn--info"
+          onClick={onDryRun}
+          disabled={running || nodeCount === 0}
+          title="Validate pipeline without executing — shows resolved CLI commands"
         >
-          YAML
+          Dry Run
         </button>
+
+        <button
+          className="zyra-btn zyra-btn--primary"
+          onClick={onRun}
+          disabled={running || nodeCount === 0}
+          title="Execute the full pipeline"
+        >
+          Run
+        </button>
+
+        {running && (
+          <button className="zyra-btn zyra-btn--danger" onClick={onCancel} title="Cancel all running jobs">
+            Cancel
+          </button>
+        )}
+
+        {hasRun && !running && (
+          <button className="zyra-btn zyra-btn--neutral" onClick={onReset} title="Clear all execution results">
+            Clear
+          </button>
+        )}
       </div>
+
+      {/* Separator */}
+      <div style={{ width: 1, height: 24, background: "var(--border-default)", margin: "0 8px" }} />
+
+      {/* Tools */}
+      <button
+        className={`zyra-btn ${yamlOpen ? "zyra-btn--info" : "zyra-btn--neutral"}`}
+        onClick={onToggleYaml}
+        title="Toggle YAML editor (Ctrl+S)"
+      >
+        YAML
+      </button>
+
+      {/* Spacer */}
+      <div style={{ flex: 1 }} />
 
       {/* Status summary */}
       {hasRun && (
-        <div style={{ marginLeft: "auto", display: "flex", gap: 12, fontSize: 12 }}>
+        <div style={{ display: "flex", gap: 12, fontSize: 12, marginRight: 12 }}>
           {counts.running > 0 && (
             <span style={{ color: STATUS_COLORS.running }}>
               {counts.running} running
@@ -110,20 +130,27 @@ export function Toolbar({
           )}
         </div>
       )}
+
+      {/* Theme toggle */}
+      <button
+        onClick={onToggleTheme}
+        title={`Switch to ${theme === "dark" ? "light" : "dark"} mode`}
+        style={{
+          background: "none",
+          border: "1px solid var(--border-default)",
+          borderRadius: "var(--radius-md)",
+          color: "var(--text-secondary)",
+          cursor: "pointer",
+          padding: "4px 8px",
+          fontSize: 16,
+          lineHeight: 1,
+          display: "flex",
+          alignItems: "center",
+        }}
+        aria-label={`Switch to ${theme === "dark" ? "light" : "dark"} mode`}
+      >
+        {theme === "dark" ? "\u2600\ufe0f" : "\u{1f319}"}
+      </button>
     </div>
   );
-}
-
-function btnStyle(bg: string, disabled?: boolean): React.CSSProperties {
-  return {
-    background: bg,
-    color: "#fff",
-    border: "none",
-    borderRadius: 6,
-    padding: "4px 12px",
-    fontSize: 12,
-    fontWeight: 600,
-    cursor: disabled ? "not-allowed" : "pointer",
-    opacity: disabled ? 0.5 : 1,
-  };
 }
