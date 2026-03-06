@@ -267,6 +267,32 @@ export function ZyraNode({ id, data, selected }: NodeProps) {
         </div>
       </div>
 
+      {/* Value preview for control nodes */}
+      {stageDef.stage === "control" && (() => {
+        const val = argValues.value;
+        if (val === undefined || val === "") return null;
+        const display = typeof val === "boolean" ? (val ? "true" : "false") : String(val);
+        return (
+          <div
+            style={{
+              padding: "4px 12px",
+              fontSize: 11,
+              fontFamily: "var(--font-mono)",
+              color: "var(--accent-blue)",
+              background: "rgba(0,0,0,0.15)",
+              overflow: "hidden",
+              textOverflow: "ellipsis",
+              whiteSpace: "nowrap",
+              borderBottom: "1px solid var(--border-default)",
+              flexShrink: 0,
+            }}
+            title={display}
+          >
+            {display}
+          </div>
+        );
+      })()}
+
       {/* Ports — flex column so outputs stay pinned at the bottom */}
       <div style={{
         display: "flex",
