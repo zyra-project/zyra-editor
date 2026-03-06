@@ -370,8 +370,8 @@ function InputPortRow({ port, isConnected, argDef, argValue }: {
           overflow: "hidden",
           textOverflow: "ellipsis",
           whiteSpace: "nowrap",
-          maxWidth: 120,
-          flexShrink: 0,
+          maxWidth: "50%",
+          flexShrink: 1,
           textAlign: "right",
         }} title={String(argValue)}>
           {sensitive ? "••••••••" : String(argValue)}

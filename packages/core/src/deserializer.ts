@@ -130,10 +130,19 @@ function remapArgs(
     }
   }
 
+  /** Try suffix match: YAML "period" matches manifest "since_period" */
+  function suffixMatch(key: string): string | undefined {
+    const nk = norm(key);
+    for (const arg of argDefs) {
+      const nArg = norm(arg.key);
+      if (nArg.endsWith(nk) && nArg.length > nk.length) return arg.key;
+    }
+    return undefined;
+  }
+
   const out: Record<string, string | number | boolean> = {};
   for (const [k, v] of Object.entries(yamlArgs)) {
-    // Try exact match first
-    const canonical = exactMap.get(k) ?? normMap.get(norm(k)) ?? k;
+    const canonical = exactMap.get(k) ?? normMap.get(norm(k)) ?? suffixMatch(k) ?? k;
     out[canonical] = v;
   }
   return out;
