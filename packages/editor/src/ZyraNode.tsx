@@ -1,7 +1,7 @@
-import { useState } from "react";
+import { useState, useMemo } from "react";
 import { Handle, Position, NodeResizer, useReactFlow, type NodeProps } from "@xyflow/react";
-import type { ArgDef, StageDef, NodeRunStatus } from "@zyra/core";
-import { STATUS_COLORS } from "@zyra/core";
+import type { ArgDef, StageDef, NodeRunStatus, PortDef } from "@zyra/core";
+import { STATUS_COLORS, getEffectivePorts } from "@zyra/core";
 
 export const SENSITIVE_PATTERNS = /password|secret|token|credential|auth|api.?key/i;
 export function isSensitive(arg: ArgDef): boolean {
@@ -17,6 +17,10 @@ export interface ZyraNodeData {
   dryRunArgv?: string;
   /** Callback to run this single node. Injected by App. */
   onRunNode?: (nodeId: string) => void;
+  /** Set of port IDs that have incoming edges (for arg-port linked state). */
+  connectedInputPorts?: Set<string>;
+  /** Set of port IDs that have outgoing edges (for implicit output visibility). */
+  connectedOutputPorts?: Set<string>;
   [key: string]: unknown;
 }
 
@@ -34,14 +38,58 @@ const statusIndicator: Record<
 };
 
 export function ZyraNode({ id, data, selected }: NodeProps) {
-  const { stageDef, argValues, nodeLabel, runStatus, dryRunArgv, onRunNode } = data as unknown as ZyraNodeData;
+  const {
+    stageDef, argValues, nodeLabel, runStatus, dryRunArgv, onRunNode,
+    connectedInputPorts, connectedOutputPorts,
+  } = data as unknown as ZyraNodeData;
   const indicator = statusIndicator[runStatus ?? "idle"];
   const [hovered, setHovered] = useState(false);
   const [editing, setEditing] = useState(false);
   const [editValue, setEditValue] = useState("");
+  const [expanded, setExpanded] = useState(false);
   const { deleteElements, updateNodeData } = useReactFlow();
 
   const displayLabel = nodeLabel || stageDef.label;
+
+  const connIn = connectedInputPorts ?? new Set<string>();
+  const connOut = connectedOutputPorts ?? new Set<string>();
+
+  // Compute effective ports (explicit + arg-inputs + implicit outputs)
+  const { inputs: allInputs, outputs: allOutputs } = useMemo(
+    () => getEffectivePorts(stageDef),
+    [stageDef],
+  );
+
+  // Visible inputs: explicit ports always shown, arg-ports shown if connected/filled/expanded
+  const visibleInputs = useMemo(() => {
+    return allInputs.filter((port) => {
+      if (!port.implicit) return true; // explicit ports always visible
+      if (connIn.has(port.id)) return true; // connected
+      if (port.argKey && argValues[port.argKey] !== undefined && argValues[port.argKey] !== "") return true; // filled
+      return expanded;
+    });
+  }, [allInputs, connIn, argValues, expanded]);
+
+  // Visible outputs: explicit ports always shown, implicit shown if connected or expanded
+  const visibleOutputs = useMemo(() => {
+    return allOutputs.filter((port) => {
+      if (!port.implicit) return true;
+      if (connOut.has(port.id)) return true;
+      return expanded;
+    });
+  }, [allOutputs, connOut, expanded]);
+
+  // Count hidden ports for the expand toggle
+  const hiddenInputCount = allInputs.length - visibleInputs.length;
+  const hiddenOutputCount = allOutputs.length - visibleOutputs.length;
+  const hiddenCount = hiddenInputCount + hiddenOutputCount;
+
+  // Build a map from argKey -> ArgDef for looking up sensitive status
+  const argDefMap = useMemo(() => {
+    const m = new Map<string, ArgDef>();
+    for (const a of stageDef.args) m.set(a.key, a);
+    return m;
+  }, [stageDef.args]);
 
   return (
     <div
@@ -197,92 +245,46 @@ export function ZyraNode({ id, data, selected }: NodeProps) {
 
       {/* Ports */}
       <div style={{ padding: "8px 12px", position: "relative" }}>
-        {stageDef.inputs.map((port) => (
-          <div key={port.id} style={{ position: "relative", marginBottom: 4 }}>
-            <Handle
-              type="target"
-              position={Position.Left}
-              id={port.id}
-              style={{
-                ...handleStyle,
-                top: "50%",
-                background: "var(--handle-input)",
-              }}
-            />
-            <span style={{ fontSize: 11, color: "var(--text-secondary)", marginLeft: 8 }}>
-              {port.label}
-              <span style={{ fontSize: 9, color: "var(--text-muted)", marginLeft: 4 }}>
-                [{port.types.join(", ")}]
-              </span>
-            </span>
-          </div>
-        ))}
-        {stageDef.outputs.map((port) => (
-          <div
+        {/* Input ports (explicit + visible arg-ports) */}
+        {visibleInputs.map((port) => (
+          <InputPortRow
             key={port.id}
-            style={{
-              position: "relative",
-              textAlign: "right",
-              marginBottom: 4,
-            }}
-          >
-            <Handle
-              type="source"
-              position={Position.Right}
-              id={port.id}
-              style={{
-                ...handleStyle,
-                top: "50%",
-                background: "var(--handle-output)",
-              }}
-            />
-            <span style={{ fontSize: 11, color: "var(--text-secondary)", marginRight: 8 }}>
-              <span style={{ fontSize: 9, color: "var(--text-muted)", marginRight: 4 }}>
-                [{port.types.join(", ")}]
-              </span>
-              {port.label}
-            </span>
-          </div>
+            port={port}
+            isConnected={connIn.has(port.id)}
+            argDef={port.argKey ? argDefMap.get(port.argKey) : undefined}
+            argValue={port.argKey ? argValues[port.argKey] : undefined}
+          />
         ))}
 
-        {/* Args summary */}
-        {(() => {
-          const definedKeys = new Set(stageDef.args.map((a) => a.key));
-          const filled = stageDef.args.filter(
-            (a) => argValues[a.key] !== undefined && argValues[a.key] !== "",
-          );
-          const extraFilled = Object.entries(argValues)
-            .filter(([k, v]) => !definedKeys.has(k) && v !== undefined && v !== "");
-          const totalArgs = stageDef.args.length + extraFilled.length;
-          if (totalArgs === 0) return null;
-          return (
-            <div
-              style={{
-                borderTop: "1px solid var(--border-default)",
-                marginTop: 6,
-                paddingTop: 6,
-                fontSize: 11,
-                color: "var(--text-muted)",
-              }}
-            >
-              {filled.length === 0 && extraFilled.length === 0 ? (
-                <span>{totalArgs} arg{totalArgs !== 1 ? "s" : ""}</span>
-              ) : (
-                <>
-                  {filled.map((a) => (
-                    <ArgRow key={a.key} label={a.label} value={
-                      isSensitive(a) ? "••••••••" : String(argValues[a.key])
-                    } />
-                  ))}
-                  {extraFilled.map(([k, v]) => {
-                    const displayValue = SENSITIVE_PATTERNS.test(k) ? "••••••••" : String(v);
-                    return <ArgRow key={k} label={k} value={displayValue} />;
-                  })}
-                </>
-              )}
-            </div>
-          );
-        })()}
+        {/* Output ports (explicit + visible implicit) */}
+        {visibleOutputs.map((port) => (
+          <OutputPortRow key={port.id} port={port} isImplicit={!!port.implicit} />
+        ))}
+
+        {/* Expand/collapse toggle */}
+        {hiddenCount > 0 && !expanded && (
+          <button
+            onClick={(e) => { e.stopPropagation(); setExpanded(true); }}
+            style={{
+              ...expandButtonStyle,
+              marginTop: 4,
+            }}
+          >
+            + {hiddenCount} more port{hiddenCount !== 1 ? "s" : ""}
+          </button>
+        )}
+        {expanded && hiddenCount === 0 && allInputs.length + allOutputs.length > visibleInputs.length + visibleOutputs.length ? null : null}
+        {expanded && (
+          <button
+            onClick={(e) => { e.stopPropagation(); setExpanded(false); }}
+            style={{
+              ...expandButtonStyle,
+              marginTop: 4,
+            }}
+          >
+            show less
+          </button>
+        )}
 
         {/* Dry-run resolved command */}
         {dryRunArgv && (
@@ -307,36 +309,109 @@ export function ZyraNode({ id, data, selected }: NodeProps) {
   );
 }
 
-function ArgRow({ label, value }: { label: string; value: string }) {
+/* ── Port row components ──────────────────────────────────────── */
+
+function InputPortRow({ port, isConnected, argDef, argValue }: {
+  port: PortDef;
+  isConnected: boolean;
+  argDef?: ArgDef;
+  argValue?: string | number | boolean;
+}) {
+  const isArgPort = !!port.argKey;
+  const hasFill = argValue !== undefined && argValue !== "";
+  const sensitive = argDef ? isSensitive(argDef) : false;
+
   return (
-    <div
-      style={{
-        display: "flex",
-        justifyContent: "space-between",
-        gap: 8,
-        marginBottom: 2,
-      }}
-    >
-      <span style={{ color: "var(--text-secondary)", flexShrink: 0 }}>{label}</span>
-      <span
+    <div style={{ position: "relative", marginBottom: 4, display: "flex", alignItems: "center", gap: 6 }}>
+      <Handle
+        type="target"
+        position={Position.Left}
+        id={port.id}
         style={{
+          ...handleStyle,
+          top: "50%",
+          background: isConnected ? "var(--accent-blue)" : isArgPort ? "var(--handle-arg)" : "var(--handle-input)",
+          borderStyle: isArgPort && !isConnected ? "dashed" : "solid",
+        }}
+      />
+      <span style={{
+        fontSize: 11,
+        color: isConnected ? "var(--accent-blue)" : "var(--text-secondary)",
+        marginLeft: 8,
+        flex: 1,
+        minWidth: 0,
+        overflow: "hidden",
+        textOverflow: "ellipsis",
+        whiteSpace: "nowrap",
+      }}>
+        {port.label}
+        {!isArgPort && (
+          <span style={{ fontSize: 9, color: "var(--text-muted)", marginLeft: 4 }}>
+            [{port.types.join(", ")}]
+          </span>
+        )}
+      </span>
+      {/* Show value for arg-ports (or linked indicator) */}
+      {isArgPort && isConnected && (
+        <span style={{
+          fontSize: 9,
           color: "var(--accent-blue)",
           fontFamily: "var(--font-mono)",
+          flexShrink: 0,
+        }}>
+          linked
+        </span>
+      )}
+      {isArgPort && !isConnected && hasFill && (
+        <span style={{
           fontSize: 10,
+          color: "var(--accent-blue)",
+          fontFamily: "var(--font-mono)",
           overflow: "hidden",
           textOverflow: "ellipsis",
           whiteSpace: "nowrap",
-          flex: 1,
-          minWidth: 0,
+          maxWidth: 120,
+          flexShrink: 0,
           textAlign: "right",
+        }} title={String(argValue)}>
+          {sensitive ? "••••••••" : String(argValue)}
+        </span>
+      )}
+    </div>
+  );
+}
+
+function OutputPortRow({ port, isImplicit }: { port: PortDef; isImplicit: boolean }) {
+  return (
+    <div
+      style={{
+        position: "relative",
+        textAlign: "right",
+        marginBottom: 4,
+      }}
+    >
+      <Handle
+        type="source"
+        position={Position.Right}
+        id={port.id}
+        style={{
+          ...handleStyle,
+          top: "50%",
+          background: isImplicit ? "var(--handle-arg)" : "var(--handle-output)",
+          borderStyle: isImplicit ? "dashed" : "solid",
         }}
-        title={value}
-      >
-        {value}
+      />
+      <span style={{ fontSize: 11, color: isImplicit ? "var(--text-muted)" : "var(--text-secondary)", marginRight: 8 }}>
+        <span style={{ fontSize: 9, color: "var(--text-muted)", marginRight: 4 }}>
+          [{port.types.join(", ")}]
+        </span>
+        {port.label}
       </span>
     </div>
   );
 }
+
+/* ── Styles ──────────────────────────────────────────────────── */
 
 const handleStyle: React.CSSProperties = {
   width: 10,
@@ -344,4 +419,16 @@ const handleStyle: React.CSSProperties = {
   borderRadius: "50%",
   border: "2px solid var(--handle-border)",
   transition: "transform 0.1s",
+};
+
+const expandButtonStyle: React.CSSProperties = {
+  background: "none",
+  border: "none",
+  color: "var(--text-muted)",
+  fontSize: 10,
+  cursor: "pointer",
+  padding: "2px 0",
+  fontFamily: "inherit",
+  textAlign: "left",
+  width: "100%",
 };

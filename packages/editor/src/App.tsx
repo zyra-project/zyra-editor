@@ -16,7 +16,7 @@ import {
 } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
 import type { StageDef, Graph, GraphNode, GraphEdge, Pipeline, PipelineGroup, NodeRunStatus } from "@zyra/core";
-import { portsCompatible, graphToPipeline, pipelineToGraph } from "@zyra/core";
+import { portsCompatible, getEffectivePorts, graphToPipeline, pipelineToGraph } from "@zyra/core";
 import { ManifestProvider, useManifest } from "./ManifestLoader";
 import { NodePalette } from "./NodePalette";
 import { ZyraNode, type ZyraNodeData } from "./ZyraNode";
@@ -249,7 +249,20 @@ function Editor() {
   const runNodeRef = useRef<(nodeId: string) => void>(() => {});
   const onRunNode = useCallback((nodeId: string) => runNodeRef.current(nodeId), []);
 
-  // Inject run status into node data (skip group nodes)
+  // Build per-node connected port sets from edges
+  const { connectedInputMap, connectedOutputMap } = useMemo(() => {
+    const inMap = new Map<string, Set<string>>();
+    const outMap = new Map<string, Set<string>>();
+    for (const e of edges) {
+      if (!inMap.has(e.target)) inMap.set(e.target, new Set());
+      if (e.targetHandle) inMap.get(e.target)!.add(e.targetHandle);
+      if (!outMap.has(e.source)) outMap.set(e.source, new Set());
+      if (e.sourceHandle) outMap.get(e.source)!.add(e.sourceHandle);
+    }
+    return { connectedInputMap: inMap, connectedOutputMap: outMap };
+  }, [edges]);
+
+  // Inject run status + connected port sets into node data (skip group nodes)
   const nodesWithStatus = useMemo(() => {
     return nodes.map((n) => {
       if (n.type === "group") return n;
@@ -257,7 +270,15 @@ function Editor() {
       const d = n.data as ZyraNodeData;
       const newStatus = rs?.status;
       const newArgv = rs?.dryRunArgv;
-      if (d.runStatus === newStatus && d.dryRunArgv === newArgv && d.onRunNode === onRunNode) {
+      const connIn = connectedInputMap.get(n.id);
+      const connOut = connectedOutputMap.get(n.id);
+      if (
+        d.runStatus === newStatus &&
+        d.dryRunArgv === newArgv &&
+        d.onRunNode === onRunNode &&
+        d.connectedInputPorts === connIn &&
+        d.connectedOutputPorts === connOut
+      ) {
         return n;
       }
       return {
@@ -267,10 +288,12 @@ function Editor() {
           runStatus: newStatus,
           dryRunArgv: newArgv,
           onRunNode,
+          connectedInputPorts: connIn,
+          connectedOutputPorts: connOut,
         },
       };
     });
-  }, [nodes, exec.runState, onRunNode]);
+  }, [nodes, exec.runState, onRunNode, connectedInputMap, connectedOutputMap]);
 
   // Pipeline from current canvas state
   const pipeline = useMemo<Pipeline>(() => {
@@ -488,8 +511,11 @@ function Editor() {
 
       const srcDef = (srcNode.data as ZyraNodeData).stageDef;
       const tgtDef = (tgtNode.data as ZyraNodeData).stageDef;
-      const srcPort = srcDef.outputs.find((p) => p.id === connection.sourceHandle);
-      const tgtPort = tgtDef.inputs.find((p) => p.id === connection.targetHandle);
+      // Use effective ports so arg-ports and implicit outputs participate
+      const srcPorts = getEffectivePorts(srcDef);
+      const tgtPorts = getEffectivePorts(tgtDef);
+      const srcPort = srcPorts.outputs.find((p) => p.id === connection.sourceHandle);
+      const tgtPort = tgtPorts.inputs.find((p) => p.id === connection.targetHandle);
       if (!srcPort || !tgtPort) return false;
 
       return portsCompatible(srcPort, tgtPort);

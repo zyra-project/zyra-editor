@@ -4,7 +4,7 @@ export type {
   PortDef,
   ArgDef,
 } from "./manifest.js";
-export { portsCompatible } from "./manifest.js";
+export { portsCompatible, argToPort, getImplicitOutputs, getEffectivePorts } from "./manifest.js";
 
 export type {
   Graph,

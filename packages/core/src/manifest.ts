@@ -4,6 +4,10 @@ export interface PortDef {
   label: string;
   /** Accepted/produced data types. "any" matches everything. */
   types: string[];
+  /** True for auto-generated ports (arg-ports, stdout/stderr/exitcode). */
+  implicit?: boolean;
+  /** If this input port maps to an ArgDef, its key. */
+  argKey?: string;
 }
 
 /** A CLI argument / option exposed by the command. */
@@ -53,4 +57,43 @@ export function portsCompatible(
 ): boolean {
   if (output.types.includes("any") || input.types.includes("any")) return true;
   return output.types.some((t) => input.types.includes(t));
+}
+
+// ── arg-port helpers ──────────────────────────────────────────────
+
+const ARG_TYPE_MAP: Record<string, string[]> = {
+  string: ["string"],
+  number: ["number"],
+  boolean: ["boolean"],
+  filepath: ["filepath", "string"],
+  enum: ["string"],
+};
+
+/** Convert an ArgDef into an implicit input PortDef. */
+export function argToPort(arg: ArgDef): PortDef {
+  return {
+    id: `arg:${arg.key}`,
+    label: arg.label,
+    types: ARG_TYPE_MAP[arg.type] ?? ["string"],
+    implicit: true,
+    argKey: arg.key,
+  };
+}
+
+/** Standard implicit output ports added to every node. */
+export function getImplicitOutputs(): PortDef[] {
+  return [
+    { id: "implicit:stdout", label: "stdout", types: ["string"], implicit: true },
+    { id: "implicit:stderr", label: "stderr", types: ["string"], implicit: true },
+    { id: "implicit:exitcode", label: "exit code", types: ["number"], implicit: true },
+  ];
+}
+
+/** Full port list for a node: explicit manifest ports + arg-ports + implicit outputs. */
+export function getEffectivePorts(stageDef: StageDef): { inputs: PortDef[]; outputs: PortDef[] } {
+  const argPorts = stageDef.args.map(argToPort);
+  return {
+    inputs: [...stageDef.inputs, ...argPorts],
+    outputs: [...stageDef.outputs, ...getImplicitOutputs()],
+  };
 }

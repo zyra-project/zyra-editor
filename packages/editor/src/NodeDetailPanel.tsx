@@ -1,6 +1,6 @@
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, useMemo } from "react";
 import type { ArgDef, NodeRunStatus } from "@zyra/core";
-import { STATUS_COLORS } from "@zyra/core";
+import { STATUS_COLORS, getEffectivePorts } from "@zyra/core";
 import type { ZyraNodeData } from "./ZyraNode";
 import { isSensitive, SENSITIVE_PATTERNS } from "./ZyraNode";
 import type { NodeRunState } from "@zyra/core";
@@ -149,6 +149,7 @@ export function NodeDetailPanel({
             nodeId={nodeId}
             stageDef={stageDef}
             argValues={argValues}
+            connectedInputs={connectedInputs}
             onArgChange={onArgChange}
           />
         )}
@@ -178,15 +179,26 @@ function SettingsTab({
   nodeId,
   stageDef,
   argValues,
+  connectedInputs,
   onArgChange,
 }: {
   nodeId: string;
   stageDef: ZyraNodeData["stageDef"];
   argValues: ZyraNodeData["argValues"];
+  connectedInputs: Props["connectedInputs"];
   onArgChange: Props["onArgChange"];
 }) {
   const definedKeys = new Set(stageDef.args.map((a) => a.key));
   const extraKeys = Object.keys(argValues).filter((k) => !definedKeys.has(k));
+
+  // Build a map of arg key -> linked peer label for wired arg-ports
+  const linkedArgs = new Map<string, string>();
+  for (const conn of connectedInputs) {
+    // arg-port IDs have the format "arg:<key>"
+    if (conn.portId.startsWith("arg:")) {
+      linkedArgs.set(conn.portId.slice(4), conn.peerLabel);
+    }
+  }
 
   return (
     <>
@@ -195,14 +207,18 @@ function SettingsTab({
           No configurable arguments for this node.
         </div>
       )}
-      {stageDef.args.map((arg) => (
-        <ArgField
-          key={arg.key}
-          arg={arg}
-          value={argValues[arg.key]}
-          onChange={(v) => onArgChange(nodeId, arg.key, v)}
-        />
-      ))}
+      {stageDef.args.map((arg) => {
+        const linkedFrom = linkedArgs.get(arg.key);
+        return (
+          <ArgField
+            key={arg.key}
+            arg={arg}
+            value={argValues[arg.key]}
+            linkedFrom={linkedFrom}
+            onChange={(v) => onArgChange(nodeId, arg.key, v)}
+          />
+        );
+      })}
       {extraKeys.length > 0 && (
         <>
           <div style={{
@@ -247,9 +263,16 @@ function InputTab({
   connectedInputs: Props["connectedInputs"];
   onSelectNode: Props["onSelectNode"];
 }) {
+  const { inputs: allInputs } = useMemo(() => getEffectivePorts(stageDef), [stageDef]);
+  // Show explicit ports always, arg-ports only if they have connections
+  const visiblePorts = allInputs.filter((port) => {
+    if (!port.implicit) return true;
+    return connectedInputs.some((c) => c.portId === port.id);
+  });
+
   return (
     <>
-      {stageDef.inputs.map((port) => {
+      {visiblePorts.map((port) => {
         const connections = connectedInputs.filter((c) => c.portId === port.id);
         return (
           <div key={port.id} style={{ marginBottom: 16 }}>
@@ -302,9 +325,9 @@ function InputTab({
           </div>
         );
       })}
-      {stageDef.inputs.length === 0 && (
+      {visiblePorts.length === 0 && (
         <div style={{ color: "var(--text-muted)", fontSize: 12 }}>
-          This node has no input ports.
+          No connected input ports. Connect arg-ports on the canvas to see them here.
         </div>
       )}
     </>
@@ -336,10 +359,17 @@ function OutputTab({
     scrollToBottom(stderrRef.current);
   }, [runState?.stderr]);
 
+  const { outputs: allOutputs } = useMemo(() => getEffectivePorts(stageDef), [stageDef]);
+  // Show explicit ports always, implicit ports only if connected
+  const visibleOutputPorts = allOutputs.filter((port) => {
+    if (!port.implicit) return true;
+    return connectedOutputs.some((c) => c.portId === port.id);
+  });
+
   return (
     <>
       {/* Port info */}
-      {stageDef.outputs.map((port) => {
+      {visibleOutputPorts.map((port) => {
         const connections = connectedOutputs.filter((c) => c.portId === port.id);
         return (
           <div key={port.id} style={{ marginBottom: 12 }}>
@@ -526,10 +556,13 @@ function OutputTab({
 function ArgField({
   arg,
   value,
+  linkedFrom,
   onChange,
 }: {
   arg: ArgDef;
   value: string | number | boolean | undefined;
+  /** If this arg is wired from another node, the peer node's label. */
+  linkedFrom?: string;
   onChange: (v: string | number | boolean) => void;
 }) {
   const id = `arg-${arg.key}`;
@@ -557,42 +590,62 @@ function ArgField({
         </div>
       )}
 
-      {arg.type === "enum" && arg.options ? (
-        <select
-          id={id}
-          className="zyra-input"
-          value={(value as string) ?? arg.default ?? ""}
-          onChange={(e) => onChange(e.target.value)}
-        >
-          <option value="" disabled>Select...</option>
-          {arg.options.map((opt) => (
-            <option key={opt} value={opt}>{opt}</option>
-          ))}
-        </select>
-      ) : arg.type === "boolean" ? (
-        <label style={{ display: "flex", alignItems: "center", gap: 8, cursor: "pointer" }}>
+      {/* Linked from another node — show read-only badge */}
+      {linkedFrom && (
+        <div style={{
+          display: "flex",
+          alignItems: "center",
+          gap: 6,
+          padding: "6px 8px",
+          background: "var(--bg-primary)",
+          borderRadius: "var(--radius-sm)",
+          border: "1px solid var(--accent-blue)",
+          fontSize: 11,
+          color: "var(--accent-blue)",
+        }}>
+          <span style={{ fontSize: 9, opacity: 0.7 }}>linked</span>
+          <span style={{ fontWeight: 600 }}>{linkedFrom}</span>
+        </div>
+      )}
+
+      {!linkedFrom && (
+        arg.type === "enum" && arg.options ? (
+          <select
+            id={id}
+            className="zyra-input"
+            value={(value as string) ?? arg.default ?? ""}
+            onChange={(e) => onChange(e.target.value)}
+          >
+            <option value="" disabled>Select...</option>
+            {arg.options.map((opt) => (
+              <option key={opt} value={opt}>{opt}</option>
+            ))}
+          </select>
+        ) : arg.type === "boolean" ? (
+          <label style={{ display: "flex", alignItems: "center", gap: 8, cursor: "pointer" }}>
+            <input
+              id={id}
+              type="checkbox"
+              checked={!!value}
+              onChange={(e) => onChange(e.target.checked)}
+              style={{ accentColor: "var(--accent-blue)" }}
+            />
+            <span style={{ fontSize: 12, color: "var(--text-secondary)" }}>
+              {value ? "Enabled" : "Disabled"}
+            </span>
+          </label>
+        ) : (
           <input
             id={id}
-            type="checkbox"
-            checked={!!value}
-            onChange={(e) => onChange(e.target.checked)}
-            style={{ accentColor: "var(--accent-blue)" }}
+            className="zyra-input"
+            type={isSensitive(arg) ? "password" : arg.type === "number" ? "number" : "text"}
+            value={(value as string) ?? ""}
+            placeholder={arg.placeholder ?? ""}
+            onChange={(e) =>
+              onChange(arg.type === "number" ? Number(e.target.value) : e.target.value)
+            }
           />
-          <span style={{ fontSize: 12, color: "var(--text-secondary)" }}>
-            {value ? "Enabled" : "Disabled"}
-          </span>
-        </label>
-      ) : (
-        <input
-          id={id}
-          className="zyra-input"
-          type={isSensitive(arg) ? "password" : arg.type === "number" ? "number" : "text"}
-          value={(value as string) ?? ""}
-          placeholder={arg.placeholder ?? ""}
-          onChange={(e) =>
-            onChange(arg.type === "number" ? Number(e.target.value) : e.target.value)
-          }
-        />
+        )
       )}
     </div>
   );

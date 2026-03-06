@@ -38,6 +38,7 @@
   /* Handles / Ports */
   --handle-input: #58a6ff;
   --handle-output: #3fb950;
+  --handle-arg: #8b949e;
   --handle-border: #1a1a2e;
 
   /* Node selected */
@@ -103,6 +104,7 @@
   /* Handles / Ports */
   --handle-input: #0969da;
   --handle-output: #1a7f37;
+  --handle-arg: #656d76;
   --handle-border: #f0f3f6;
 
   /* Node selected */

@@ -124,7 +124,8 @@ export function graphToPipeline(
       args: { ...node.argValues },
     };
     if (node.label && node.label !== id) step.label = node.label;
-    if (deps.length > 0) step.depends_on = deps;
+    const uniqueDeps = [...new Set(deps)];
+    if (uniqueDeps.length > 0) step.depends_on = uniqueDeps;
     if (node.position || node.size) {
       const layout: PipelineStep["_layout"] = {
         x: Math.round(node.position?.x ?? 0),
