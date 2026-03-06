@@ -159,7 +159,7 @@ export function NodeDetailPanel({
             stageDef={stageDef}
             connectedOutputs={connectedOutputs}
             runState={runState}
-
+            onSelectNode={onSelectNode}
           />
         )}
       </div>
@@ -312,10 +312,12 @@ function OutputTab({
   stageDef,
   connectedOutputs,
   runState,
+  onSelectNode,
 }: {
   stageDef: ZyraNodeData["stageDef"];
   connectedOutputs: Props["connectedOutputs"];
   runState?: NodeRunState;
+  onSelectNode: Props["onSelectNode"];
 }) {
   const stdoutRef = useRef<HTMLPreElement>(null);
   const stderrRef = useRef<HTMLPreElement>(null);
@@ -350,16 +352,30 @@ function OutputTab({
               </span>
             </div>
             {connections.length > 0 && connections.map((conn, i) => (
-              <div key={i} style={{
-                marginLeft: 18,
-                padding: "4px 8px",
-                fontSize: 12,
-                color: "var(--text-secondary)",
-                background: "var(--bg-primary)",
-                borderRadius: "var(--radius-sm)",
-                marginBottom: 4,
-              }}>
-                &#8594; {conn.peerLabel}
+              <div
+                key={i}
+                onClick={() => onSelectNode(conn.peerNodeId)}
+                style={{
+                  marginLeft: 18,
+                  padding: "4px 8px",
+                  fontSize: 12,
+                  color: "var(--text-secondary)",
+                  background: "var(--bg-primary)",
+                  borderRadius: "var(--radius-sm)",
+                  marginBottom: 4,
+                  display: "flex",
+                  alignItems: "center",
+                  gap: 6,
+                  cursor: "pointer",
+                }}
+                onMouseEnter={(e) => { e.currentTarget.style.background = "var(--bg-secondary)"; }}
+                onMouseLeave={(e) => { e.currentTarget.style.background = "var(--bg-primary)"; }}
+                title={`Jump to ${conn.peerLabel}`}
+              >
+                <span style={{ color: "var(--text-primary)" }}>{conn.peerLabel}</span>
+                {conn.peerStatus && (
+                  <StatusBadge status={conn.peerStatus} />
+                )}
               </div>
             ))}
           </div>
