@@ -8,9 +8,10 @@ Usage:
 import os
 from pathlib import Path
 
-# Enable verbose logging for CLI jobs so the editor can stream debug-level
-# messages (e.g., FTP download progress) through the WebSocket log panel.
-os.environ.setdefault("ZYRA_VERBOSITY", "debug")
+# Ensure a sane default logging verbosity for CLI jobs so the editor can
+# still stream useful log messages through the WebSocket log panel, while
+# allowing environments to opt into more verbose levels (e.g., debug).
+os.environ.setdefault("ZYRA_VERBOSITY", "info")
 
 import logging
 import requests as http_requests
