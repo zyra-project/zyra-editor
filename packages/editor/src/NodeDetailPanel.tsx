@@ -91,6 +91,11 @@ export function NodeDetailPanel({
           <div style={{ fontSize: 11, color: "var(--text-secondary)", fontFamily: "var(--font-mono)" }}>
             {stageDef.cli}
           </div>
+          {stageDef.description && (
+            <div style={{ fontSize: 11, color: "var(--text-muted)", marginTop: 4, lineHeight: 1.4 }}>
+              {stageDef.description}
+            </div>
+          )}
         </div>
         <button
           onClick={onClose}
