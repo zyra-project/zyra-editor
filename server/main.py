@@ -29,53 +29,62 @@ from zyra.api.workers import jobs as _jobs_mod
 # the WebSocket.  By clearing handlers just before cli_main(), the CLI's
 # configure_logging_from_env() call creates a fresh handler that writes
 # to the tee.
-import threading
-
 _orig_start_job = _jobs_mod.start_job
-_start_job_lock = threading.Lock()
+_zyra_cli = None
+_orig_cli_main = None
+
+
+def _cli_main_with_logging_reset(argv):
+    """
+    Wrapper around zyra.cli.main that clears and restores logging handlers
+    so that handlers created by the CLI write to the swapped stderr tee.
+    """
+    root = logging.getLogger()
+    # Save existing handlers so we can restore them after the CLI run
+    prev_handlers = list(root.handlers)
+    try:
+        # Clear existing handlers so basicConfig creates new ones on
+        # the swapped sys.stderr (the _LocalPubTee)
+        root.handlers.clear()
+        return _orig_cli_main(argv)
+    finally:
+        # Close any handlers added during the CLI run, then restore
+        # the original handler list
+        for handler in root.handlers:
+            if handler not in prev_handlers:
+                try:
+                    handler.close()
+                except Exception:
+                    pass
+        root.handlers[:] = prev_handlers
+
+
+def _ensure_cli_wrapper_installed():
+    """
+    Lazily install the logging-reset wrapper around zyra.cli.main once.
+
+    This avoids per-call global swapping and does not serialize job starts.
+    """
+    global _zyra_cli, _orig_cli_main
+    if _orig_cli_main is not None:
+        return
+    try:
+        import zyra.cli as cli_mod
+    except Exception:
+        return
+    main = getattr(cli_mod, "main", None)
+    if main is None:
+        return
+    _zyra_cli = cli_mod
+    _orig_cli_main = main
+    cli_mod.main = _cli_main_with_logging_reset
+
 
 def _patched_start_job(*args, **kwargs):
-    """Wrap start_job to reset root logging handlers inside the tee context."""
-    _orig_cli_main = None
-    try:
-        from zyra.cli import main as _cm
-        _orig_cli_main = _cm
-    except Exception:
-        pass
+    """Wrap start_job to ensure zyra.cli.main uses the logging-reset wrapper."""
+    _ensure_cli_wrapper_installed()
+    return _orig_start_job(*args, **kwargs)
 
-    if _orig_cli_main is not None:
-        def _cli_main_with_logging_reset(argv):
-            root = logging.getLogger()
-            # Save existing handlers so we can restore them after the CLI run
-            prev_handlers = list(root.handlers)
-            try:
-                # Clear existing handlers so basicConfig creates new ones on
-                # the swapped sys.stderr (the _LocalPubTee)
-                root.handlers.clear()
-                return _orig_cli_main(argv)
-            finally:
-                # Close any handlers added during the CLI run, then restore
-                # the original handler list
-                for handler in root.handlers:
-                    if handler not in prev_handlers:
-                        try:
-                            handler.close()
-                        except Exception:
-                            pass
-                root.handlers[:] = prev_handlers
-
-        # Guard the global swap with a lock so concurrent job starts
-        # don't race on zyra.cli.main.
-        import zyra.cli
-        with _start_job_lock:
-            _saved = zyra.cli.main
-            zyra.cli.main = _cli_main_with_logging_reset
-            try:
-                _orig_start_job(*args, **kwargs)
-            finally:
-                zyra.cli.main = _saved
-    else:
-        _orig_start_job(*args, **kwargs)
 
 _jobs_mod.start_job = _patched_start_job
 
