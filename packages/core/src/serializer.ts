@@ -42,9 +42,23 @@ export interface PipelineStep {
   _layout?: { x: number; y: number; w?: number; h?: number };
 }
 
+/** Editor-only group box metadata — ignored by the Zyra CLI. */
+export interface PipelineGroup {
+  id: string;
+  label: string;
+  description?: string;
+  color: string;
+  locked?: boolean;
+  position: { x: number; y: number };
+  size: { w: number; h: number };
+  children: string[];
+}
+
 export interface Pipeline {
   version: string;
   steps: PipelineStep[];
+  /** Editor-only group box layout — not used by the Zyra CLI. */
+  _groups?: PipelineGroup[];
 }
 
 /**

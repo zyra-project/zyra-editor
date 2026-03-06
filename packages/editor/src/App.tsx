@@ -15,7 +15,7 @@ import {
   BackgroundVariant,
 } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
-import type { StageDef, Graph, GraphNode, GraphEdge, Pipeline, NodeRunStatus } from "@zyra/core";
+import type { StageDef, Graph, GraphNode, GraphEdge, Pipeline, PipelineGroup, NodeRunStatus } from "@zyra/core";
 import { portsCompatible, graphToPipeline, pipelineToGraph } from "@zyra/core";
 import { ManifestProvider, useManifest } from "./ManifestLoader";
 import { NodePalette } from "./NodePalette";
@@ -275,7 +275,35 @@ function Editor() {
   // Pipeline from current canvas state
   const pipeline = useMemo<Pipeline>(() => {
     try {
-      return graphToPipeline(toGraph(nodes, edges), manifest.stages);
+      const p = graphToPipeline(toGraph(nodes, edges), manifest.stages);
+
+      // Serialize group boxes into _groups (editor-only metadata)
+      const groupNodes = nodes.filter((n) => n.type === "group");
+      if (groupNodes.length > 0) {
+        // Derive children from current parentId — always in sync with node IDs
+        const stepNames = new Set(p.steps.map((s) => s.name));
+        p._groups = groupNodes.map((g) => {
+          const d = g.data as GroupBoxData;
+          const w = g.measured?.width ?? (typeof g.style?.width === "number" ? g.style.width : 400);
+          const h = g.measured?.height ?? (typeof g.style?.height === "number" ? g.style.height : 260);
+          const children = nodes
+            .filter((n) => n.parentId === g.id && stepNames.has(n.id))
+            .map((n) => n.id);
+          const group: PipelineGroup = {
+            id: g.id,
+            label: d.label,
+            color: d.color,
+            position: { x: Math.round(g.position.x), y: Math.round(g.position.y) },
+            size: { w: Math.round(w), h: Math.round(h) },
+            children,
+          };
+          if (d.description) group.description = d.description;
+          if (d.locked) group.locked = true;
+          return group;
+        });
+      }
+
+      return p;
     } catch {
       return { version: "1", steps: [] };
     }
@@ -294,7 +322,7 @@ function Editor() {
         ? new Map<string, { x: number; y: number }>()
         : computeAutoLayout(graph);
 
-      const newNodes: Node[] = graph.nodes.map((gn) => {
+      let newNodes: Node[] = graph.nodes.map((gn) => {
         const stageDef = stageMap.get(gn.stageCommand);
         const existing = nodes.find((n) => n.id === gn.id);
         const pos =
@@ -330,6 +358,51 @@ function Editor() {
         style: { stroke: "var(--accent-blue)", strokeWidth: 2 },
         animated: exec.running,
       }));
+
+      // Restore group boxes and parent-child relationships from _groups
+      if (newPipeline._groups && newPipeline._groups.length > 0) {
+        const nodeIdSet = new Set(newNodes.map((n) => n.id));
+        const groupNodes: Node[] = [];
+
+        for (const g of newPipeline._groups) {
+          groupNodes.push({
+            id: g.id,
+            type: "group",
+            position: { x: g.position.x, y: g.position.y },
+            style: { width: g.size.w, height: g.size.h },
+            zIndex: -1,
+            data: {
+              label: g.label,
+              description: g.description,
+              color: g.color,
+              locked: g.locked,
+            } satisfies GroupBoxData,
+          });
+
+          // Set parentId on children and convert their positions to relative
+          for (const childId of g.children) {
+            if (!nodeIdSet.has(childId)) continue;
+            const child = newNodes.find((n) => n.id === childId);
+            if (child) {
+              child.parentId = g.id;
+              child.position = {
+                x: child.position.x - g.position.x,
+                y: child.position.y - g.position.y,
+              };
+            }
+          }
+        }
+
+        // Update group ID counter
+        const maxGroupNum = newPipeline._groups.reduce((max, g) => {
+          const m = g.id.match(/^group-(\d+)$/);
+          return m ? Math.max(max, Number(m[1])) : max;
+        }, groupIdCounter);
+        groupIdCounter = maxGroupNum;
+
+        // Groups before children (React Flow requirement)
+        newNodes = ensureParentOrder([...groupNodes, ...newNodes]);
+      }
 
       const maxNum = graph.nodes.reduce((max, n) => {
         const m = n.id.match(/^node-(\d+)$/);

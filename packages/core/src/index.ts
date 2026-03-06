@@ -12,6 +12,7 @@ export type {
   GraphEdge,
   Pipeline,
   PipelineStep,
+  PipelineGroup,
 } from "./serializer.js";
 export { graphToPipeline } from "./serializer.js";
 

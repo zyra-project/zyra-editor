@@ -1,6 +1,6 @@
 import { useState, useCallback, useEffect, useRef } from "react";
 import yaml from "js-yaml";
-import type { Pipeline, PipelineStep } from "@zyra/core";
+import type { Pipeline, PipelineStep, PipelineGroup } from "@zyra/core";
 
 /** Zyra native YAML format: stages array with stage/command fields. */
 interface NativeStage {
@@ -80,7 +80,38 @@ function normalizePipeline(raw: unknown): Pipeline | null {
     }
 
     if (steps.length === 0) return null;
-    return { version: "1", steps };
+
+    // Pass through _groups if present
+    const pipeline: Pipeline = { version: "1", steps };
+    if (Array.isArray(obj._groups)) {
+      const groups: PipelineGroup[] = [];
+      const stepNames = new Set(steps.map((s) => s.name));
+      for (const g of obj._groups as unknown[]) {
+        if (!g || typeof g !== "object") continue;
+        const go = g as Record<string, unknown>;
+        if (typeof go.id !== "string" || typeof go.label !== "string") continue;
+        const pos = go.position as Record<string, unknown> | undefined;
+        const sz = go.size as Record<string, unknown> | undefined;
+        if (!pos || typeof pos.x !== "number" || typeof pos.y !== "number") continue;
+        if (!sz || typeof sz.w !== "number" || typeof sz.h !== "number") continue;
+        const children = Array.isArray(go.children)
+          ? (go.children as unknown[]).filter((c): c is string => typeof c === "string" && stepNames.has(c))
+          : [];
+        groups.push({
+          id: go.id,
+          label: go.label,
+          description: typeof go.description === "string" ? go.description : undefined,
+          color: typeof go.color === "string" ? go.color : "#3b82f6",
+          locked: typeof go.locked === "boolean" ? go.locked : undefined,
+          position: { x: pos.x, y: pos.y },
+          size: { w: sz.w, h: sz.h },
+          children,
+        });
+      }
+      if (groups.length > 0) pipeline._groups = groups;
+    }
+
+    return pipeline;
   }
 
   // Zyra native format
