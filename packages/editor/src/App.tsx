@@ -140,7 +140,7 @@ function Editor() {
   const [paletteCollapsed, setPaletteCollapsed] = useState(false);
   const exec = useExecution();
   const reactFlowWrapper = useRef<HTMLDivElement>(null);
-  const { screenToFlowPosition } = useReactFlow();
+  const { screenToFlowPosition, setCenter } = useReactFlow();
 
   const nodeTypes = useMemo(() => ({ zyra: ZyraNode }), []);
 
@@ -314,6 +314,19 @@ function Editor() {
     setSelectedNodeId(node.id);
   }, []);
 
+  const handleSelectNode = useCallback(
+    (nodeId: string) => {
+      setSelectedNodeId(nodeId);
+      const target = nodes.find((n) => n.id === nodeId);
+      if (target) {
+        const x = (target.position.x ?? 0) + ((target.measured?.width ?? 200) / 2);
+        const y = (target.position.y ?? 0) + ((target.measured?.height ?? 100) / 2);
+        setCenter(x, y, { zoom: 1, duration: 300 });
+      }
+    },
+    [nodes, setCenter],
+  );
+
   const handleArgChange = useCallback(
     (nodeId: string, key: string, value: string | number | boolean) => {
       setNodes((nds) =>
@@ -474,7 +487,7 @@ function Editor() {
           connectedInputs={connectedInputs}
           connectedOutputs={connectedOutputs}
           onArgChange={handleArgChange}
-          onSelectNode={setSelectedNodeId}
+          onSelectNode={handleSelectNode}
           onClose={() => setSelectedNodeId(null)}
         />
       )}
@@ -483,7 +496,7 @@ function Editor() {
         runState={exec.runState}
         selectedNodeId={selectedNodeId}
         onClearNode={exec.clearNode}
-        onSelectNode={setSelectedNodeId}
+        onSelectNode={handleSelectNode}
       />
 
       {/* YAML Drawer Overlay */}
