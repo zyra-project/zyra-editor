@@ -226,7 +226,8 @@ export function YamlPanel({ pipeline, onPipelineChange, onClose }: YamlPanelProp
     a.href = url;
     a.download = "pipeline.yaml";
     a.click();
-    URL.revokeObjectURL(url);
+    // Defer revoking the URL to avoid racing the download in some browsers.
+    setTimeout(() => URL.revokeObjectURL(url), 0);
   }, [yamlText]);
 
   return (
