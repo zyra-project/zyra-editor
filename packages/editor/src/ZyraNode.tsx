@@ -108,6 +108,8 @@ export function ZyraNode({ id, data, selected }: NodeProps) {
         overflow: "hidden",
         boxShadow: `0 2px 8px var(--node-shadow)`,
         transition: "border-color 0.15s, box-shadow 0.15s",
+        display: "flex",
+        flexDirection: "column" as const,
       }}
     >
       <NodeResizer
@@ -128,6 +130,7 @@ export function ZyraNode({ id, data, selected }: NodeProps) {
           display: "flex",
           justifyContent: "space-between",
           alignItems: "center",
+          flexShrink: 0,
         }}
       >
         {editing ? (
@@ -243,67 +246,79 @@ export function ZyraNode({ id, data, selected }: NodeProps) {
         </div>
       </div>
 
-      {/* Ports */}
-      <div style={{ padding: "8px 12px", position: "relative" }}>
-        {/* Input ports (explicit + visible arg-ports) */}
-        {visibleInputs.map((port) => (
-          <InputPortRow
-            key={port.id}
-            port={port}
-            isConnected={connIn.has(port.id)}
-            argDef={port.argKey ? argDefMap.get(port.argKey) : undefined}
-            argValue={port.argKey ? argValues[port.argKey] : undefined}
-          />
-        ))}
+      {/* Ports — flex column so outputs stay pinned at the bottom */}
+      <div style={{
+        display: "flex",
+        flexDirection: "column",
+        flex: 1,
+        overflow: "hidden",
+        position: "relative",
+      }}>
+        {/* Scrollable input ports */}
+        <div style={{
+          flex: 1,
+          overflowY: "auto",
+          padding: "8px 12px 0",
+          minHeight: 0,
+        }}>
+          {visibleInputs.map((port) => (
+            <InputPortRow
+              key={port.id}
+              port={port}
+              isConnected={connIn.has(port.id)}
+              argDef={port.argKey ? argDefMap.get(port.argKey) : undefined}
+              argValue={port.argKey ? argValues[port.argKey] : undefined}
+            />
+          ))}
 
-        {/* Output ports (explicit + visible implicit) */}
-        {visibleOutputs.map((port) => (
-          <OutputPortRow key={port.id} port={port} isImplicit={!!port.implicit} />
-        ))}
+          {/* Expand/collapse toggle */}
+          {hiddenCount > 0 && !expanded && (
+            <button
+              onClick={(e) => { e.stopPropagation(); setExpanded(true); }}
+              style={{ ...expandButtonStyle, marginTop: 4 }}
+            >
+              + {hiddenCount} more port{hiddenCount !== 1 ? "s" : ""}
+            </button>
+          )}
+          {expanded && (
+            <button
+              onClick={(e) => { e.stopPropagation(); setExpanded(false); }}
+              style={{ ...expandButtonStyle, marginTop: 4 }}
+            >
+              show less
+            </button>
+          )}
+        </div>
 
-        {/* Expand/collapse toggle */}
-        {hiddenCount > 0 && !expanded && (
-          <button
-            onClick={(e) => { e.stopPropagation(); setExpanded(true); }}
-            style={{
-              ...expandButtonStyle,
-              marginTop: 4,
-            }}
-          >
-            + {hiddenCount} more port{hiddenCount !== 1 ? "s" : ""}
-          </button>
-        )}
-        {expanded && hiddenCount === 0 && allInputs.length + allOutputs.length > visibleInputs.length + visibleOutputs.length ? null : null}
-        {expanded && (
-          <button
-            onClick={(e) => { e.stopPropagation(); setExpanded(false); }}
-            style={{
-              ...expandButtonStyle,
-              marginTop: 4,
-            }}
-          >
-            show less
-          </button>
-        )}
+        {/* Pinned output ports + dry-run (always visible at bottom) */}
+        <div style={{
+          flexShrink: 0,
+          padding: "4px 12px 8px",
+          borderTop: visibleOutputs.length > 0 ? "1px solid var(--border-default)" : undefined,
+        }}>
+          {visibleOutputs.map((port) => (
+            <OutputPortRow key={port.id} port={port} isImplicit={!!port.implicit} />
+          ))}
 
-        {/* Dry-run resolved command */}
-        {dryRunArgv && (
-          <div
-            style={{
-              borderTop: "1px solid var(--border-default)",
-              marginTop: 6,
-              paddingTop: 6,
-              fontSize: 10,
-              color: "var(--accent-blue)",
-              fontFamily: "var(--font-mono)",
-              wordBreak: "break-all",
-              maxHeight: 40,
-              overflow: "auto",
-            }}
-          >
-            {dryRunArgv}
-          </div>
-        )}
+          {/* Dry-run resolved command */}
+          {dryRunArgv && (
+            <div
+              style={{
+                borderTop: "1px solid var(--border-default)",
+                marginTop: 6,
+                paddingTop: 6,
+                fontSize: 10,
+                color: "var(--accent-blue)",
+                fontFamily: "var(--font-mono)",
+                wordBreak: "break-all",
+                maxHeight: 40,
+                overflow: "auto",
+              }}
+            >
+              {dryRunArgv}
+            </div>
+          )}
+        </div>
       </div>
     </div>
   );
