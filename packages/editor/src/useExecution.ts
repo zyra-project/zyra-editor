@@ -149,6 +149,11 @@ export function useExecution(): ExecutionControls {
           wsRefs.current.push(ws);
           let done = false;
 
+          const removeWsRef = () => {
+            const idx = wsRefs.current.indexOf(ws);
+            if (idx !== -1) wsRefs.current.splice(idx, 1);
+          };
+
           const appendStderr = (text: string) => {
             setRunState((prev) => {
               const next = new Map(prev);
@@ -259,9 +264,11 @@ export function useExecution(): ExecutionControls {
           ws.onerror = () => {
             appendStderr("[ws] Connection error\n");
             ws.close();
+          };
+          ws.onclose = () => {
+            removeWsRef();
             startPollingFallback();
           };
-          ws.onclose = () => { startPollingFallback(); };
         });
       } catch (err) {
         updateNode(nodeId, {
@@ -377,6 +384,11 @@ export function useExecution(): ExecutionControls {
               const ws = connectJobWs(jobId, ["stdout", "stderr", "progress"]);
               wsRefs.current.push(ws);
 
+              const removeWsRef = () => {
+                const idx = wsRefs.current.indexOf(ws);
+                if (idx !== -1) wsRefs.current.splice(idx, 1);
+              };
+
               ws.onmessage = (ev) => {
                 try {
                   const msg = JSON.parse(ev.data);
@@ -421,10 +433,10 @@ export function useExecution(): ExecutionControls {
 
               ws.onerror = () => {
                 ws.close();
-                startPollingFallback();
               };
 
               ws.onclose = () => {
+                removeWsRef();
                 startPollingFallback();
               };
             });

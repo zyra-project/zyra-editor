@@ -140,14 +140,11 @@ export function YamlPanel({ pipeline, onPipelineChange, onClose }: YamlPanelProp
     }
   }, [onPipelineChange]);
 
-  // When the textarea loses focus, allow pipeline prop to sync back
+  // When the textarea loses focus, stop treating the user as actively editing
   const handleBlur = useCallback(() => {
     userEditingRef.current = false;
     setEditing(false);
-    // Immediately sync to latest pipeline state
-    setYamlText(yaml.dump(pipeline, { lineWidth: -1, noRefs: true }));
-    setParseError(null);
-  }, [pipeline]);
+  }, []);
 
   const handleSync = useCallback(() => {
     userEditingRef.current = false;
