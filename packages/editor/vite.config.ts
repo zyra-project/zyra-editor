@@ -13,7 +13,7 @@ export default defineConfig({
   server: {
     port: 5173,
     watch: {
-      usePolling: true,
+      usePolling: !!process.env.VITE_USE_POLLING,
       interval: 1000,
     },
     proxy: {

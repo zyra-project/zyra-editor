@@ -657,7 +657,7 @@ function ArgField({
             <input
               id={id}
               type="checkbox"
-              checked={!!value}
+              checked={value !== undefined ? !!value : !!arg.default}
               onChange={(e) => onChange(e.target.checked)}
               style={{ accentColor: "var(--accent-blue)" }}
             />
@@ -672,9 +672,13 @@ function ArgField({
             type={isSensitive(arg) ? "password" : arg.type === "number" ? "number" : "text"}
             value={(value as string) ?? ""}
             placeholder={arg.placeholder ?? ""}
-            onChange={(e) =>
-              onChange(arg.type === "number" ? Number(e.target.value) : e.target.value)
-            }
+            onChange={(e) => {
+              if (arg.type === "number") {
+                onChange(e.target.value === "" ? "" : Number(e.target.value));
+              } else {
+                onChange(e.target.value);
+              }
+            }}
           />
         )
       )}

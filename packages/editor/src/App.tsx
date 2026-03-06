@@ -253,13 +253,14 @@ function Editor() {
   // connectedInputMap: nodeId → Map<portId, displayValue>
   // connectedOutputMap: nodeId → Set<portId>
   const { connectedInputMap, connectedOutputMap } = useMemo(() => {
+    const nodeById = new Map(nodes.map((n) => [n.id, n]));
     const inMap = new Map<string, Map<string, string>>();
     const outMap = new Map<string, Set<string>>();
     for (const e of edges) {
       if (!inMap.has(e.target)) inMap.set(e.target, new Map());
       if (e.targetHandle) {
         // Look up the source node to extract a display value
-        const srcNode = nodes.find((n) => n.id === e.source);
+        const srcNode = nodeById.get(e.source);
         const srcData = srcNode?.data as ZyraNodeData | undefined;
         let displayValue = srcData?.nodeLabel || srcData?.stageDef.label || "";
         // For control nodes, show the actual value (or placeholder/default as fallback)
@@ -630,8 +631,18 @@ function Editor() {
       setSelectedNodeId(nodeId);
       const target = nodes.find((n) => n.id === nodeId);
       if (target) {
-        const x = (target.position.x ?? 0) + ((target.measured?.width ?? 200) / 2);
-        const y = (target.position.y ?? 0) + ((target.measured?.height ?? 100) / 2);
+        // Compute absolute position for nodes inside groups (which have relative positions)
+        let absX = target.position.x ?? 0;
+        let absY = target.position.y ?? 0;
+        if (target.parentId) {
+          const parent = nodes.find((n) => n.id === target.parentId);
+          if (parent) {
+            absX += parent.position.x;
+            absY += parent.position.y;
+          }
+        }
+        const x = absX + ((target.measured?.width ?? 200) / 2);
+        const y = absY + ((target.measured?.height ?? 100) / 2);
         setCenter(x, y, { zoom: 1, duration: 300 });
       }
     },
