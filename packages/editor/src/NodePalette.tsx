@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useRef } from "react";
 import type { StageDef } from "@zyra/core";
 import { useManifest } from "./ManifestLoader";
 
@@ -21,19 +21,35 @@ const STAGE_ORDER: string[] = [
 ];
 
 const STAGE_ICONS: Record<string, string> = {
-  control: "\u2699",   // gear
-  search: "\ud83d\udd0d",  // magnifying glass
-  acquire: "\u2b07",   // down arrow
-  process: "\u26a1",   // lightning
+  control: "\u2699",         // gear
+  search: "\ud83d\udd0d",   // magnifying glass
+  acquire: "\u2b07",         // down arrow
+  process: "\u26a1",         // lightning
   visualize: "\ud83d\udcca", // chart
-  narrate: "\ud83d\udcdd",  // memo
-  verify: "\u2705",    // check
-  export: "\ud83d\udce4",   // outbox
+  narrate: "\ud83d\udcdd",   // memo
+  verify: "\u2705",          // check
+  export: "\ud83d\udce4",    // outbox
+  download: "\ud83d\udce5",  // inbox tray
+  report: "\ud83d\udcc4",    // page facing up
+  summarize: "\ud83d\udcac", // speech bubble
+  transform: "\ud83d\udd00", // shuffle
+  filter: "\ud83d\udcd0",    // triangular ruler
+  merge: "\ud83d\udd17",     // link
+  split: "\u2702",           // scissors
+  validate: "\ud83d\udee1",  // shield
+  analyze: "\ud83e\udde0",   // brain
+  upload: "\u2b06",          // up arrow
+  convert: "\ud83d\udd04",   // cycle
+  clean: "\ud83e\uddf9",     // broom
+  ingest: "\ud83d\udce8",    // incoming envelope
+  publish: "\ud83d\udce2",   // loudspeaker
 };
 
 export function NodePalette({ onAddNode, collapsed, onToggleCollapse }: Props) {
   const manifest = useManifest();
   const [searchQuery, setSearchQuery] = useState("");
+  const [hoveredStage, setHoveredStage] = useState<string | null>(null);
+  const hoverTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // Group stages by their stage category
   const groups = new Map<string, StageDef[]>();
@@ -126,25 +142,120 @@ export function NodePalette({ onAddNode, collapsed, onToggleCollapse }: Props) {
       {/* Node list */}
       <div style={{ flex: 1, overflowY: "auto", padding: collapsed ? "8px 4px" : "4px 12px 12px" }}>
         {collapsed ? (
-          // Collapsed: show stage category icons
-          sortedEntries.map(([stage]) => (
+          // Collapsed: show stage category icons with hover popout
+          sortedEntries.map(([stage, defs]) => (
             <div
               key={stage}
-              title={stage}
-              style={{
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "center",
-                width: 36,
-                height: 36,
-                margin: "0 auto 4px",
-                borderRadius: "var(--radius-md)",
-                fontSize: 16,
-                cursor: "default",
-                background: "var(--bg-node)",
+              style={{ position: "relative" }}
+              onMouseEnter={() => {
+                if (hoverTimeoutRef.current) clearTimeout(hoverTimeoutRef.current);
+                setHoveredStage(stage);
+              }}
+              onMouseLeave={() => {
+                hoverTimeoutRef.current = setTimeout(() => setHoveredStage(null), 150);
               }}
             >
-              {STAGE_ICONS[stage] ?? stage[0].toUpperCase()}
+              <div
+                title={stage}
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  width: 36,
+                  height: 36,
+                  margin: "0 auto 4px",
+                  borderRadius: "var(--radius-md)",
+                  fontSize: 16,
+                  cursor: "pointer",
+                  background: hoveredStage === stage ? "var(--bg-secondary)" : "var(--bg-node)",
+                  transition: "background 0.1s",
+                }}
+              >
+                {STAGE_ICONS[stage] ?? stage[0].toUpperCase()}
+              </div>
+
+              {/* Popout menu */}
+              {hoveredStage === stage && (
+                <div
+                  style={{
+                    position: "absolute",
+                    left: 44,
+                    top: 0,
+                    zIndex: 200,
+                    background: "var(--bg-tertiary)",
+                    border: "1px solid var(--border-default)",
+                    borderRadius: "var(--radius-md)",
+                    boxShadow: "0 4px 16px rgba(0,0,0,0.4)",
+                    padding: "6px",
+                    minWidth: 180,
+                    maxWidth: 240,
+                  }}
+                >
+                  <div style={{
+                    fontSize: 10,
+                    textTransform: "uppercase",
+                    letterSpacing: "0.08em",
+                    color: "var(--text-muted)",
+                    marginBottom: 4,
+                    paddingLeft: 6,
+                  }}>
+                    {STAGE_ICONS[stage] ?? ""} {stage}
+                  </div>
+                  {defs.map((def) => (
+                    <button
+                      key={`${def.stage}/${def.command}`}
+                      onClick={() => {
+                        onAddNode(def);
+                        setHoveredStage(null);
+                      }}
+                      draggable
+                      onDragStart={(e) => {
+                        e.dataTransfer.setData("application/zyra-stage", JSON.stringify(def));
+                        e.dataTransfer.effectAllowed = "move";
+                        setHoveredStage(null);
+                      }}
+                      title={def.cli}
+                      style={{
+                        display: "flex",
+                        alignItems: "center",
+                        justifyContent: "space-between",
+                        width: "100%",
+                        padding: "6px 8px",
+                        marginBottom: 2,
+                        background: "var(--bg-node)",
+                        border: "none",
+                        borderLeft: `3px solid ${def.color}`,
+                        borderRadius: "var(--radius-sm)",
+                        color: "var(--text-primary)",
+                        cursor: "grab",
+                        fontSize: 12,
+                        textAlign: "left",
+                        fontFamily: "var(--font-sans)",
+                        transition: "background 0.1s",
+                      }}
+                      onMouseEnter={(e) => {
+                        (e.currentTarget as HTMLButtonElement).style.background = "var(--bg-secondary)";
+                      }}
+                      onMouseLeave={(e) => {
+                        (e.currentTarget as HTMLButtonElement).style.background = "var(--bg-node)";
+                      }}
+                    >
+                      <span>{def.label}</span>
+                      {def.status !== "implemented" && (
+                        <span style={{
+                          fontSize: 9,
+                          padding: "2px 5px",
+                          borderRadius: 3,
+                          background: "var(--border-default)",
+                          color: "var(--text-secondary)",
+                        }}>
+                          {def.status}
+                        </span>
+                      )}
+                    </button>
+                  ))}
+                </div>
+              )}
             </div>
           ))
         ) : (
