@@ -5,6 +5,7 @@ export interface GroupBoxData {
   label: string;
   description?: string;
   color: string;
+  locked?: boolean;
   [key: string]: unknown;
 }
 
@@ -20,7 +21,7 @@ const PRESET_COLORS = [
 ];
 
 export function GroupBoxNode({ id, data, selected }: NodeProps) {
-  const { label, description, color } = data as unknown as GroupBoxData;
+  const { label, description, color, locked } = data as unknown as GroupBoxData;
   const { deleteElements, updateNodeData } = useReactFlow();
   const [editingLabel, setEditingLabel] = useState(false);
   const [editingDesc, setEditingDesc] = useState(false);
@@ -36,7 +37,9 @@ export function GroupBoxNode({ id, data, selected }: NodeProps) {
         width: "100%",
         height: "100%",
         background: `${color}10`,
-        border: selected ? `2px dashed ${color}` : `1px dashed ${color}88`,
+        border: selected
+          ? `2px ${locked ? "solid" : "dashed"} ${color}`
+          : `1px ${locked ? "solid" : "dashed"} ${color}88`,
         borderRadius: "var(--radius-lg)",
         fontFamily: "var(--font-sans)",
         position: "relative",
@@ -161,6 +164,29 @@ export function GroupBoxNode({ id, data, selected }: NodeProps) {
             {label}
           </span>
         )}
+
+        {/* Lock toggle */}
+        <button
+          title={locked ? "Unlock group" : "Lock group in place"}
+          onClick={(e) => {
+            e.stopPropagation();
+            updateNodeData(id, { locked: !locked });
+          }}
+          style={{
+            background: locked ? `${color}33` : "rgba(0,0,0,0.3)",
+            border: "none",
+            borderRadius: 3,
+            color: locked ? color : "var(--text-muted)",
+            cursor: "pointer",
+            fontSize: 12,
+            lineHeight: 1,
+            padding: "2px 5px",
+            display: "inline-flex",
+            alignItems: "center",
+          }}
+        >
+          {locked ? "\u{1F512}" : "\u{1F513}"}
+        </button>
 
         {/* Delete button */}
         {hovered && (

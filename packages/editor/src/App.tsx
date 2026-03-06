@@ -11,6 +11,7 @@ import {
   type Connection,
   type Node,
   type Edge,
+  type NodeChange,
   BackgroundVariant,
 } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
@@ -36,17 +37,55 @@ function nextGroupId() {
   return `group-${++groupIdCounter}`;
 }
 
+/** Find the group box that contains the given absolute point. */
+function findContainingGroup(
+  point: { x: number; y: number },
+  nodes: Node[],
+  excludeNodeId?: string,
+): string | null {
+  for (const n of nodes) {
+    if (n.type !== "group" || n.id === excludeNodeId) continue;
+    const w = n.measured?.width ?? (typeof n.style?.width === "number" ? n.style.width : 400);
+    const h = n.measured?.height ?? (typeof n.style?.height === "number" ? n.style.height : 260);
+    if (
+      point.x >= n.position.x &&
+      point.x <= n.position.x + w &&
+      point.y >= n.position.y &&
+      point.y <= n.position.y + h
+    ) {
+      return n.id;
+    }
+  }
+  return null;
+}
+
+/** Ensure parent nodes appear before their children in the array (React Flow requirement). */
+function ensureParentOrder(nodes: Node[]): Node[] {
+  const parentIds = new Set(nodes.filter((n) => n.parentId).map((n) => n.parentId!));
+  const parents = nodes.filter((n) => parentIds.has(n.id));
+  const rest = nodes.filter((n) => !parentIds.has(n.id));
+  return [...parents, ...rest];
+}
+
 /** Convert React Flow state to @zyra/core Graph for serialization.
  *  Group box nodes are filtered out — they're visual-only. */
 function toGraph(nodes: Node[], edges: Edge[]): Graph {
   const graphNodes: GraphNode[] = nodes.filter((n) => n.type !== "group").map((n) => {
     const d = n.data as ZyraNodeData;
+    // Convert relative position to absolute if node has a parent
+    let pos = { x: n.position.x, y: n.position.y };
+    if (n.parentId) {
+      const parent = nodes.find((p) => p.id === n.parentId);
+      if (parent) {
+        pos = { x: parent.position.x + n.position.x, y: parent.position.y + n.position.y };
+      }
+    }
     return {
       id: n.id,
       label: d.nodeLabel || undefined,
       stageCommand: `${d.stageDef.stage}/${d.stageDef.command}`,
       argValues: { ...d.argValues },
-      position: { x: n.position.x, y: n.position.y },
+      position: pos,
       size: n.measured?.width && n.measured?.height
         ? { w: n.measured.width, h: n.measured.height }
         : n.width && n.height
@@ -139,7 +178,7 @@ function computeAutoLayout(graph: Graph): Map<string, { x: number; y: number }> 
 function Editor() {
   const manifest = useManifest();
   const { theme, toggle: toggleTheme } = useTheme();
-  const [nodes, setNodes, onNodesChange] = useNodesState<Node>([]);
+  const [nodes, setNodes, defaultOnNodesChange] = useNodesState<Node>([]);
   const [edges, setEdges, onEdgesChange] = useEdgesState<Edge>([]);
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
   const [yamlOpen, setYamlOpen] = useState(false);
@@ -149,6 +188,62 @@ function Editor() {
   const { screenToFlowPosition, setCenter } = useReactFlow();
 
   const nodeTypes = useMemo(() => ({ zyra: ZyraNode, group: GroupBoxNode }), []);
+
+  // Use a ref for lock checks to avoid recreating onNodesChange on every node update
+  const nodesRef = useRef(nodes);
+  nodesRef.current = nodes;
+
+  const onNodesChange = useCallback(
+    (changes: NodeChange[]) => {
+      const nds = nodesRef.current;
+
+      // On group deletion, un-parent children first
+      for (const change of changes) {
+        if (change.type === "remove") {
+          const node = nds.find((n) => n.id === change.id);
+          if (node?.type === "group") {
+            setNodes((prev) =>
+              prev.map((n) => {
+                if (n.parentId !== change.id) return n;
+                const parent = prev.find((p) => p.id === change.id);
+                return {
+                  ...n,
+                  parentId: undefined,
+                  expandParent: undefined,
+                  position: parent
+                    ? { x: parent.position.x + n.position.x, y: parent.position.y + n.position.y }
+                    : n.position,
+                };
+              }),
+            );
+          }
+        }
+      }
+
+      // Filter out position changes for locked groups and their children
+      const filtered = changes.filter((change) => {
+        if (change.type !== "position" || !("id" in change)) return true;
+        const node = nds.find((n) => n.id === change.id);
+        if (!node) return true;
+
+        // Locked group itself
+        if (node.type === "group" && (node.data as GroupBoxData).locked) {
+          return false;
+        }
+        // Child of a locked group
+        if (node.parentId) {
+          const parent = nds.find((n) => n.id === node.parentId);
+          if (parent && (parent.data as GroupBoxData).locked) {
+            return false;
+          }
+        }
+        return true;
+      });
+
+      defaultOnNodesChange(filtered);
+    },
+    [defaultOnNodesChange, setNodes],
+  );
 
   // Stable ref for the per-node run callback
   const runNodeRef = useRef<(nodeId: string) => void>(() => {});
@@ -249,7 +344,7 @@ function Editor() {
   );
 
   const handleAddNode = useCallback(
-    (stageDef: StageDef, position?: { x: number; y: number }) => {
+    (stageDef: StageDef, position?: { x: number; y: number }, parentId?: string) => {
       const id = nextId();
       const newNode: Node = {
         id,
@@ -259,6 +354,7 @@ function Editor() {
           stageDef,
           argValues: {},
         } satisfies ZyraNodeData,
+        ...(parentId ? { parentId, expandParent: true } : {}),
       };
       setNodes((nds) => [...nds, newNode]);
     },
@@ -293,9 +389,21 @@ function Editor() {
       if (!json) return;
       const stageDef: StageDef = JSON.parse(json);
       const position = screenToFlowPosition({ x: e.clientX, y: e.clientY });
-      handleAddNode(stageDef, position);
+
+      // Check if the drop lands inside a group box
+      const groupId = findContainingGroup(position, nodes);
+      if (groupId) {
+        const group = nodes.find((n) => n.id === groupId)!;
+        const relativePos = {
+          x: position.x - group.position.x,
+          y: position.y - group.position.y,
+        };
+        handleAddNode(stageDef, relativePos, groupId);
+      } else {
+        handleAddNode(stageDef, position);
+      }
     },
-    [screenToFlowPosition, handleAddNode],
+    [screenToFlowPosition, handleAddNode, nodes],
   );
 
   const isValidConnection = useCallback(
@@ -331,6 +439,66 @@ function Editor() {
       );
     },
     [setEdges, exec.running],
+  );
+
+  const onNodeDragStop = useCallback(
+    (_event: React.MouseEvent, node: Node) => {
+      if (node.type === "group") return;
+
+      setNodes((nds) => {
+        const currentNode = nds.find((n) => n.id === node.id);
+        if (!currentNode) return nds;
+
+        // Compute absolute position
+        let absPos = { ...currentNode.position };
+        if (currentNode.parentId) {
+          const parent = nds.find((n) => n.id === currentNode.parentId);
+          if (parent) {
+            absPos = {
+              x: parent.position.x + currentNode.position.x,
+              y: parent.position.y + currentNode.position.y,
+            };
+          }
+        }
+
+        const newGroupId = findContainingGroup(absPos, nds, node.id);
+
+        // No change needed
+        if (newGroupId === (currentNode.parentId ?? null)) return nds;
+
+        // Entering or switching to a group
+        if (newGroupId) {
+          const group = nds.find((n) => n.id === newGroupId)!;
+          return ensureParentOrder(
+            nds.map((n) =>
+              n.id === node.id
+                ? {
+                    ...n,
+                    parentId: newGroupId,
+                    expandParent: true,
+                    position: { x: absPos.x - group.position.x, y: absPos.y - group.position.y },
+                  }
+                : n,
+            ),
+          );
+        }
+
+        // Leaving all groups
+        return ensureParentOrder(
+          nds.map((n) =>
+            n.id === node.id
+              ? {
+                  ...n,
+                  parentId: undefined,
+                  expandParent: undefined,
+                  position: absPos,
+                }
+              : n,
+          ),
+        );
+      });
+    },
+    [setNodes],
   );
 
   const handleNodeClick = useCallback((_: React.MouseEvent, node: Node) => {
@@ -482,6 +650,7 @@ function Editor() {
           onNodesChange={onNodesChange}
           onEdgesChange={onEdgesChange}
           onConnect={onConnect}
+          onNodeDragStop={onNodeDragStop}
           onNodeClick={handleNodeClick}
           onPaneClick={() => setSelectedNodeId(null)}
           onDragOver={onDragOver}
