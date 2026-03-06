@@ -62,7 +62,10 @@ export function pipelineToGraph(
         : normalizeCommand(step.command),
       argValues: { ...step.args },
       position: step._layout ? { x: step._layout.x, y: step._layout.y } : undefined,
-      size: step._layout?.w && step._layout?.h ? { w: step._layout.w, h: step._layout.h } : undefined,
+      size:
+        step._layout && step._layout.w != null && step._layout.h != null
+          ? { w: step._layout.w, h: step._layout.h }
+          : undefined,
     };
     nodes.push(node);
     nodeMap.set(step.name, { node, stage });
