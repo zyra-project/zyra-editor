@@ -92,7 +92,7 @@ export function NodePalette({ onAddNode, collapsed, onToggleCollapse }: Props) {
       borderRight: "1px solid var(--border-default)",
       display: "flex",
       flexDirection: "column",
-      overflow: "hidden",
+      overflow: collapsed ? "visible" : "hidden",
       transition: "width 0.2s ease, min-width 0.2s ease",
     }}>
       {/* Header */}
@@ -144,7 +144,7 @@ export function NodePalette({ onAddNode, collapsed, onToggleCollapse }: Props) {
       )}
 
       {/* Node list */}
-      <div style={{ flex: 1, overflowY: "auto", padding: collapsed ? "8px 4px" : "4px 12px 12px" }}>
+      <div style={{ flex: 1, overflowY: collapsed ? "visible" : "auto", padding: collapsed ? "8px 4px" : "4px 12px 12px" }}>
         {collapsed ? (
           // Collapsed: show stage category icons with hover popout
           sortedEntries.map(([stage, defs]) => (
