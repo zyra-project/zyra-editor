@@ -416,7 +416,7 @@ function InputPortRow({ port, isConnected, linkedValue, argDef, argValue }: {
         )}
       </span>
       {/* Show value for arg-ports (or linked indicator) */}
-      {isArgPort && isConnected && (
+      {isArgPort && isConnected && linkedValue && (
         <span style={{
           fontSize: 10,
           color: "var(--accent-blue)",
@@ -424,11 +424,20 @@ function InputPortRow({ port, isConnected, linkedValue, argDef, argValue }: {
           overflow: "hidden",
           textOverflow: "ellipsis",
           whiteSpace: "nowrap",
-          maxWidth: "50%",
+          maxWidth: "55%",
           flexShrink: 1,
           textAlign: "right",
-        }} title={linkedValue || "linked"}>
-          {linkedValue || "linked"}
+        }} title={linkedValue}>
+          {linkedValue}
+        </span>
+      )}
+      {isArgPort && isConnected && !linkedValue && (
+        <span style={{
+          fontSize: 10,
+          color: "var(--text-muted)",
+          fontStyle: "italic",
+        }}>
+          linked
         </span>
       )}
       {isArgPort && !isConnected && hasFill && (

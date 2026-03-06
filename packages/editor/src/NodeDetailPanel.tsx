@@ -309,9 +309,22 @@ function InputTab({
                   }}
                   onMouseEnter={(e) => { e.currentTarget.style.background = "var(--bg-secondary)"; }}
                   onMouseLeave={(e) => { e.currentTarget.style.background = "var(--bg-primary)"; }}
-                  title={`Jump to ${conn.peerLabel}`}
+                  title={`Jump to ${conn.peerLabel}${conn.peerValue ? ` (${conn.peerValue})` : ""}`}
                 >
                   <span style={{ color: "var(--text-primary)" }}>{conn.peerLabel}</span>
+                  {conn.peerValue && (
+                    <span style={{
+                      color: "var(--text-muted)",
+                      fontFamily: "var(--font-mono)",
+                      fontSize: 10,
+                      overflow: "hidden",
+                      textOverflow: "ellipsis",
+                      whiteSpace: "nowrap",
+                      minWidth: 0,
+                    }}>
+                      {conn.peerValue.length > 24 ? conn.peerValue.slice(0, 24) + "\u2026" : conn.peerValue}
+                    </span>
+                  )}
                   {conn.peerStatus && (
                     <StatusBadge status={conn.peerStatus} />
                   )}
