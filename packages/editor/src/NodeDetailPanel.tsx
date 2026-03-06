@@ -16,9 +16,10 @@ interface Props {
   nodeId: string;
   data: ZyraNodeData;
   runState?: NodeRunState;
-  connectedInputs: { portId: string; peerLabel: string; peerStatus?: NodeRunStatus }[];
-  connectedOutputs: { portId: string; peerLabel: string; peerStatus?: NodeRunStatus }[];
+  connectedInputs: { portId: string; peerNodeId: string; peerLabel: string; peerStatus?: NodeRunStatus }[];
+  connectedOutputs: { portId: string; peerNodeId: string; peerLabel: string; peerStatus?: NodeRunStatus }[];
   onArgChange: (nodeId: string, key: string, value: string | number | boolean) => void;
+  onSelectNode: (nodeId: string) => void;
   onClose: () => void;
 }
 
@@ -29,6 +30,7 @@ export function NodeDetailPanel({
   connectedInputs,
   connectedOutputs,
   onArgChange,
+  onSelectNode,
   onClose,
 }: Props) {
   const { stageDef, argValues } = data;
@@ -149,6 +151,7 @@ export function NodeDetailPanel({
           <InputTab
             stageDef={stageDef}
             connectedInputs={connectedInputs}
+            onSelectNode={onSelectNode}
           />
         )}
         {activeTab === "output" && (
@@ -233,9 +236,11 @@ function SettingsTab({
 function InputTab({
   stageDef,
   connectedInputs,
+  onSelectNode,
 }: {
   stageDef: ZyraNodeData["stageDef"];
   connectedInputs: Props["connectedInputs"];
+  onSelectNode: Props["onSelectNode"];
 }) {
   return (
     <>
@@ -258,18 +263,26 @@ function InputTab({
             </div>
             {connections.length > 0 ? (
               connections.map((conn, i) => (
-                <div key={i} style={{
-                  marginLeft: 18,
-                  padding: "4px 8px",
-                  fontSize: 12,
-                  color: "var(--text-secondary)",
-                  background: "var(--bg-primary)",
-                  borderRadius: "var(--radius-sm)",
-                  marginBottom: 4,
-                  display: "flex",
-                  alignItems: "center",
-                  gap: 6,
-                }}>
+                <div
+                  key={i}
+                  onClick={() => onSelectNode(conn.peerNodeId)}
+                  style={{
+                    marginLeft: 18,
+                    padding: "4px 8px",
+                    fontSize: 12,
+                    color: "var(--text-secondary)",
+                    background: "var(--bg-primary)",
+                    borderRadius: "var(--radius-sm)",
+                    marginBottom: 4,
+                    display: "flex",
+                    alignItems: "center",
+                    gap: 6,
+                    cursor: "pointer",
+                  }}
+                  onMouseEnter={(e) => { e.currentTarget.style.background = "var(--bg-secondary)"; }}
+                  onMouseLeave={(e) => { e.currentTarget.style.background = "var(--bg-primary)"; }}
+                  title={`Jump to ${conn.peerLabel}`}
+                >
                   <span style={{ color: "var(--text-primary)" }}>{conn.peerLabel}</span>
                   {conn.peerStatus && (
                     <StatusBadge status={conn.peerStatus} />

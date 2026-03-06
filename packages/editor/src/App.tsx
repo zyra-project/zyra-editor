@@ -392,6 +392,7 @@ function Editor() {
         const srcData = srcNode?.data as ZyraNodeData | undefined;
         return {
           portId: e.targetHandle ?? "",
+          peerNodeId: e.source,
           peerLabel: srcData?.nodeLabel || srcData?.stageDef.label || e.source,
           peerStatus: exec.runState.get(e.source)?.status as NodeRunStatus | undefined,
         };
@@ -407,6 +408,7 @@ function Editor() {
         const tgtData = tgtNode?.data as ZyraNodeData | undefined;
         return {
           portId: e.sourceHandle ?? "",
+          peerNodeId: e.target,
           peerLabel: tgtData?.nodeLabel || tgtData?.stageDef.label || e.target,
           peerStatus: exec.runState.get(e.target)?.status as NodeRunStatus | undefined,
         };
@@ -472,6 +474,7 @@ function Editor() {
           connectedInputs={connectedInputs}
           connectedOutputs={connectedOutputs}
           onArgChange={handleArgChange}
+          onSelectNode={setSelectedNodeId}
           onClose={() => setSelectedNodeId(null)}
         />
       )}
