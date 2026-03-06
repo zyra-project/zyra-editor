@@ -1,4 +1,4 @@
-import type { StageDef } from "./manifest.js";
+import type { StageDef, ArgDef } from "./manifest.js";
 import type { Graph, GraphNode, GraphEdge, Pipeline } from "./serializer.js";
 
 /**
@@ -60,7 +60,7 @@ export function pipelineToGraph(
       stageCommand: stage
         ? `${stage.stage}/${stage.command}`
         : normalizeCommand(step.command),
-      argValues: { ...step.args },
+      argValues: stage ? remapArgs(step.args, stage.args) : { ...step.args },
       position: step._layout ? { x: step._layout.x, y: step._layout.y } : undefined,
       size:
         step._layout && step._layout.w != null && step._layout.h != null
@@ -95,4 +95,46 @@ export function pipelineToGraph(
   }
 
   return { nodes, edges };
+}
+
+// ── arg key normalization ──────────────────────────────────────────
+
+/** Normalize a key for fuzzy matching: lowercase, strip hyphens/underscores. */
+function norm(key: string): string {
+  return key.toLowerCase().replace(/[-_]/g, "");
+}
+
+/**
+ * Remap YAML arg keys to manifest arg keys using fuzzy matching.
+ * For each YAML key, tries:
+ *   1. Exact match against manifest arg key
+ *   2. Normalized match (ignore hyphens/underscores/case)
+ *   3. Match against the flag field (e.g. --since-period → since_period)
+ * Unmatched keys are preserved as-is (they'll show as "Extra Arguments").
+ */
+function remapArgs(
+  yamlArgs: Record<string, string | number | boolean>,
+  argDefs: ArgDef[],
+): Record<string, string | number | boolean> {
+  // Build lookup maps from various key forms → canonical manifest key
+  const exactMap = new Map<string, string>();
+  const normMap = new Map<string, string>();
+
+  for (const arg of argDefs) {
+    exactMap.set(arg.key, arg.key);
+    normMap.set(norm(arg.key), arg.key);
+    if (arg.flag) {
+      const flagKey = arg.flag.replace(/^-+/, "");
+      exactMap.set(flagKey, arg.key);
+      normMap.set(norm(flagKey), arg.key);
+    }
+  }
+
+  const out: Record<string, string | number | boolean> = {};
+  for (const [k, v] of Object.entries(yamlArgs)) {
+    // Try exact match first
+    const canonical = exactMap.get(k) ?? normMap.get(norm(k)) ?? k;
+    out[canonical] = v;
+  }
+  return out;
 }
