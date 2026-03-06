@@ -5,6 +5,11 @@ import type { ZyraNodeData } from "./ZyraNode";
 import { isSensitive, SENSITIVE_PATTERNS } from "./ZyraNode";
 import type { NodeRunState } from "@zyra/core";
 
+/** Scroll an element to its bottom. */
+function scrollToBottom(el: HTMLElement | null) {
+  if (el) el.scrollTop = el.scrollHeight;
+}
+
 type Tab = "settings" | "input" | "output";
 
 interface Props {
@@ -28,7 +33,6 @@ export function NodeDetailPanel({
 }: Props) {
   const { stageDef, argValues } = data;
   const [activeTab, setActiveTab] = useState<Tab>("settings");
-  const logEndRef = useRef<HTMLDivElement>(null!);
 
 
   // Auto-switch to output tab when node starts running
@@ -38,12 +42,13 @@ export function NodeDetailPanel({
     }
   }, [runState?.status]);
 
-  // Auto-scroll logs
+  // Auto-scroll the outer tab content to bottom so latest output is visible
+  const tabContentRef = useRef<HTMLDivElement>(null!);
   useEffect(() => {
     if (activeTab === "output") {
-      logEndRef.current?.scrollIntoView({ behavior: "smooth" });
+      scrollToBottom(tabContentRef.current);
     }
-  }, [runState?.stdout, runState?.stderr, activeTab]);
+  }, [runState?.stdout, runState?.stderr, runState?.exitCode, runState?.status, activeTab]);
 
   const statusColor = runState?.status
     ? (STATUS_COLORS as Record<string, string>)[runState.status]
@@ -131,7 +136,7 @@ export function NodeDetailPanel({
       </div>
 
       {/* Tab Content */}
-      <div style={{ flex: 1, overflow: "auto", padding: 16 }}>
+      <div ref={tabContentRef} style={{ flex: 1, overflow: "auto", padding: 16 }}>
         {activeTab === "settings" && (
           <SettingsTab
             nodeId={nodeId}
@@ -151,7 +156,7 @@ export function NodeDetailPanel({
             stageDef={stageDef}
             connectedOutputs={connectedOutputs}
             runState={runState}
-            logEndRef={logEndRef}
+
           />
         )}
       </div>
@@ -294,13 +299,23 @@ function OutputTab({
   stageDef,
   connectedOutputs,
   runState,
-  logEndRef,
 }: {
   stageDef: ZyraNodeData["stageDef"];
   connectedOutputs: Props["connectedOutputs"];
   runState?: NodeRunState;
-  logEndRef: React.RefObject<HTMLDivElement>;
 }) {
+  const stdoutRef = useRef<HTMLPreElement>(null);
+  const stderrRef = useRef<HTMLPreElement>(null);
+
+  // Auto-scroll stdout and stderr pre blocks to bottom when content changes
+  useEffect(() => {
+    scrollToBottom(stdoutRef.current);
+  }, [runState?.stdout]);
+
+  useEffect(() => {
+    scrollToBottom(stderrRef.current);
+  }, [runState?.stderr]);
+
   return (
     <>
       {/* Port info */}
@@ -399,7 +414,7 @@ function OutputTab({
 
           {/* stdout */}
           {runState.stdout && (
-            <pre style={{
+            <pre ref={stdoutRef} style={{
               margin: "0 0 8px",
               whiteSpace: "pre-wrap",
               wordBreak: "break-word",
@@ -418,7 +433,7 @@ function OutputTab({
 
           {/* stderr */}
           {runState.stderr && (
-            <pre style={{
+            <pre ref={stderrRef} style={{
               margin: "0 0 8px",
               whiteSpace: "pre-wrap",
               wordBreak: "break-word",
@@ -455,7 +470,7 @@ function OutputTab({
           {/* Running indicator */}
           {runState.status === "running" && <RunningIndicator />}
 
-          <div ref={logEndRef} />
+
         </div>
       ) : (
         <div style={{
