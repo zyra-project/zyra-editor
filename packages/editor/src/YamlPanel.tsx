@@ -26,7 +26,43 @@ function normalizePipeline(raw: unknown): Pipeline | null {
 
   // Editor format
   if (Array.isArray(obj.steps)) {
-    return raw as Pipeline;
+    const rawSteps = obj.steps as unknown[];
+    const steps: PipelineStep[] = [];
+
+    for (const s of rawSteps) {
+      if (!s || typeof s !== "object") continue;
+      const stepObj = s as Record<string, unknown>;
+
+      const name = typeof stepObj.name === "string" ? stepObj.name : undefined;
+      const command = typeof stepObj.command === "string" ? stepObj.command : undefined;
+      if (!name || !command) continue;
+
+      let args: Record<string, string | number | boolean> = {};
+      const rawArgs = stepObj.args;
+      if (rawArgs && typeof rawArgs === "object" && !Array.isArray(rawArgs)) {
+        for (const [key, value] of Object.entries(rawArgs as Record<string, unknown>)) {
+          if (typeof value === "string" || typeof value === "number" || typeof value === "boolean") {
+            args[key] = value;
+          }
+        }
+      }
+
+      const step: PipelineStep = { name, command, args };
+
+      if (Array.isArray(stepObj.depends_on)) {
+        const deps = (stepObj.depends_on as unknown[]).filter(
+          (d): d is string => typeof d === "string",
+        );
+        if (deps.length > 0) {
+          step.depends_on = deps;
+        }
+      }
+
+      steps.push(step);
+    }
+
+    if (steps.length === 0) return null;
+    return { version: "1", steps };
   }
 
   // Zyra native format
@@ -91,7 +127,7 @@ export function YamlPanel({ pipeline, onPipelineChange, onClose }: YamlPanelProp
     setEditing(true);
 
     try {
-      const raw = yaml.load(text);
+      const raw = yaml.load(text, { schema: yaml.JSON_SCHEMA });
       const p = normalizePipeline(raw);
       if (p) {
         setParseError(null);
@@ -133,7 +169,7 @@ export function YamlPanel({ pipeline, onPipelineChange, onClose }: YamlPanelProp
         userEditingRef.current = true;
         setEditing(true);
         try {
-          const raw = yaml.load(text);
+          const raw = yaml.load(text, { schema: yaml.JSON_SCHEMA });
           const p = normalizePipeline(raw);
           if (p) {
             setParseError(null);

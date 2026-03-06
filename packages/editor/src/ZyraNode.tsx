@@ -3,7 +3,7 @@ import { Handle, Position, NodeResizer, useReactFlow, type NodeProps } from "@xy
 import type { ArgDef, StageDef, NodeRunStatus } from "@zyra/core";
 import { STATUS_COLORS } from "@zyra/core";
 
-const SENSITIVE_PATTERNS = /password|secret|token|credential|auth|api.?key/i;
+export const SENSITIVE_PATTERNS = /password|secret|token|credential|auth|api.?key/i;
 export function isSensitive(arg: ArgDef): boolean {
   return SENSITIVE_PATTERNS.test(arg.key) || SENSITIVE_PATTERNS.test(arg.label);
 }
@@ -272,9 +272,10 @@ export function ZyraNode({ id, data, selected }: NodeProps) {
                       isSensitive(a) ? "••••••••" : String(argValues[a.key])
                     } />
                   ))}
-                  {extraFilled.map(([k, v]) => (
-                    <ArgRow key={k} label={k} value={String(v)} />
-                  ))}
+                  {extraFilled.map(([k, v]) => {
+                    const displayValue = SENSITIVE_PATTERNS.test(k) ? "••••••••" : String(v);
+                    return <ArgRow key={k} label={k} value={displayValue} />;
+                  })}
                 </>
               )}
             </div>

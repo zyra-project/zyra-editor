@@ -149,23 +149,32 @@ function Editor() {
   // Stable ref for the per-node run callback so memo doesn't churn
   const runNodeRef = useRef<(nodeId: string) => void>(() => {});
 
+  // Stable callback that delegates to the mutable ref — avoids recreating
+  // node data objects every time exec.runState changes.
+  const onRunNode = useCallback((nodeId: string) => runNodeRef.current(nodeId), []);
+
   // Inject run status + run callback into node data so ZyraNode can render badges / play button
   const nodesWithStatus = useMemo(() => {
-    const onRunNode = (nodeId: string) => runNodeRef.current(nodeId);
     return nodes.map((n) => {
       const rs = exec.runState.get(n.id);
       const d = n.data as ZyraNodeData;
+      const newStatus = rs?.status;
+      const newArgv = rs?.dryRunArgv;
+      // Only clone when run-related fields actually differ
+      if (d.runStatus === newStatus && d.dryRunArgv === newArgv && d.onRunNode === onRunNode) {
+        return n;
+      }
       return {
         ...n,
         data: {
           ...d,
-          runStatus: rs?.status,
-          dryRunArgv: rs?.dryRunArgv,
+          runStatus: newStatus,
+          dryRunArgv: newArgv,
           onRunNode,
         },
       };
     });
-  }, [nodes, exec.runState]);
+  }, [nodes, exec.runState, onRunNode]);
 
   // Compute pipeline from current canvas state (for YAML panel)
   const pipeline = useMemo<Pipeline>(() => {
