@@ -250,8 +250,8 @@ export function YamlPanel({ pipeline, onPipelineChange, onClose }: YamlPanelProp
           Save
         </button>
         {editing && (
-          <button className="zyra-btn zyra-btn--info" onClick={handleSync} title="Reset to canvas state" style={{ fontSize: 11, padding: "4px 10px" }}>
-            Sync
+          <button className="zyra-btn zyra-btn--info" onClick={handleSync} title="Discard edits and reload YAML from the canvas" style={{ fontSize: 11, padding: "4px 10px" }}>
+            Reset
           </button>
         )}
         <button
