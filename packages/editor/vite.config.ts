@@ -2,7 +2,11 @@ import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
 
 const backend = process.env.VITE_BACKEND_URL ?? "http://localhost:8765";
-const wsBackend = backend.replace(/^http/, "ws");
+const wsBackend = (() => {
+  const url = new URL(backend);
+  url.protocol = url.protocol === "https:" ? "wss:" : "ws:";
+  return url.toString().replace(/\/$/, "");
+})();
 
 export default defineConfig({
   plugins: [react()],

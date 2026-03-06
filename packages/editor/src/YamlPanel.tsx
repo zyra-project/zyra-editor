@@ -49,6 +49,24 @@ function normalizePipeline(raw: unknown): Pipeline | null {
 
       const step: PipelineStep = { name, command, args };
 
+      if (typeof stepObj.label === "string" && stepObj.label) {
+        step.label = stepObj.label;
+      }
+
+      if (
+        stepObj._layout &&
+        typeof stepObj._layout === "object" &&
+        !Array.isArray(stepObj._layout)
+      ) {
+        const lo = stepObj._layout as Record<string, unknown>;
+        if (typeof lo.x === "number" && typeof lo.y === "number") {
+          const layout: PipelineStep["_layout"] = { x: lo.x, y: lo.y };
+          if (typeof lo.w === "number") layout.w = lo.w;
+          if (typeof lo.h === "number") layout.h = lo.h;
+          step._layout = layout;
+        }
+      }
+
       if (Array.isArray(stepObj.depends_on)) {
         const deps = (stepObj.depends_on as unknown[]).filter(
           (d): d is string => typeof d === "string",
@@ -67,19 +85,36 @@ function normalizePipeline(raw: unknown): Pipeline | null {
 
   // Zyra native format
   if (Array.isArray(obj.stages)) {
-    const native = raw as NativeYaml;
+    const rawStages = obj.stages as unknown[];
     const seen = new Map<string, number>();
     const steps: PipelineStep[] = [];
-    for (const s of native.stages!) {
-      const base = `${s.stage}/${s.command}`;
+    for (const s of rawStages) {
+      if (!s || typeof s !== "object") continue;
+      const stageObj = s as Record<string, unknown>;
+
+      const stage = typeof stageObj.stage === "string" ? stageObj.stage : undefined;
+      const command = typeof stageObj.command === "string" ? stageObj.command : undefined;
+      if (!stage || !command) continue;
+
+      const base = `${stage}/${command}`;
       const count = (seen.get(base) ?? 0) + 1;
       seen.set(base, count);
       const name = count === 1 ? base : `${base}-${count}`;
 
+      let args: Record<string, string | number | boolean> = {};
+      const rawArgs = stageObj.args;
+      if (rawArgs && typeof rawArgs === "object" && !Array.isArray(rawArgs)) {
+        for (const [key, value] of Object.entries(rawArgs as Record<string, unknown>)) {
+          if (typeof value === "string" || typeof value === "number" || typeof value === "boolean") {
+            args[key] = value;
+          }
+        }
+      }
+
       const step: PipelineStep = {
         name,
-        command: `${s.stage}/${s.command}`,
-        args: { ...s.args } as Record<string, string | number | boolean>,
+        command: `${stage}/${command}`,
+        args,
       };
 
       // Infer sequential dependencies from list order
@@ -240,6 +275,7 @@ export function YamlPanel({ pipeline, onPipelineChange, onClose }: YamlPanelProp
             padding: "0 4px",
           }}
           title="Close YAML panel"
+          aria-label="Close YAML panel"
         >
           x
         </button>
