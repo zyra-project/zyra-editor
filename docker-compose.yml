@@ -17,5 +17,9 @@ services:
       - "5173:5173"
     environment:
       - VITE_BACKEND_URL=http://zyra-server:8765
+    volumes:
+      - ./packages/core/src:/app/packages/core/src
+      - ./packages/editor/src:/app/packages/editor/src
+      - ./packages/editor/index.html:/app/packages/editor/index.html
     depends_on:
       - zyra-server

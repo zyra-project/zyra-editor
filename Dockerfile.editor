@@ -21,5 +21,6 @@ RUN ./node_modules/.bin/tsc -p packages/core
 
 EXPOSE 5173
 
-# Run vite from root node_modules against the editor package
-CMD ["./node_modules/.bin/vite", "--host", "0.0.0.0", "--config", "packages/editor/vite.config.ts", "packages/editor"]
+# In dev mode with volume mounts, rebuild core then start vite.
+# The core rebuild ensures mounted src/ changes are compiled.
+CMD ["sh", "-c", "./node_modules/.bin/tsc -p packages/core && exec ./node_modules/.bin/vite --host 0.0.0.0 --config packages/editor/vite.config.ts packages/editor"]
