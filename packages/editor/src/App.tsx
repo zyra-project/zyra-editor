@@ -707,10 +707,17 @@ function Editor() {
       .map((e) => {
         const srcNode = nodes.find((n) => n.id === e.source);
         const srcData = srcNode?.data as ZyraNodeData | undefined;
+        // For control nodes, extract the actual value to show alongside the label
+        let peerValue: string | undefined;
+        if (srcData?.stageDef.stage === "control") {
+          const val = srcData.argValues?.value;
+          if (val !== undefined && val !== "") peerValue = String(val);
+        }
         return {
           portId: e.targetHandle ?? "",
           peerNodeId: e.source,
           peerLabel: srcData?.nodeLabel || srcData?.stageDef.label || e.source,
+          peerValue,
           peerStatus: exec.runState.get(e.source)?.status as NodeRunStatus | undefined,
         };
       });

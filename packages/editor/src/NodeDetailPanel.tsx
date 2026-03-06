@@ -16,7 +16,7 @@ interface Props {
   nodeId: string;
   data: ZyraNodeData;
   runState?: NodeRunState;
-  connectedInputs: { portId: string; peerNodeId: string; peerLabel: string; peerStatus?: NodeRunStatus }[];
+  connectedInputs: { portId: string; peerNodeId: string; peerLabel: string; peerValue?: string; peerStatus?: NodeRunStatus }[];
   connectedOutputs: { portId: string; peerNodeId: string; peerLabel: string; peerStatus?: NodeRunStatus }[];
   onArgChange: (nodeId: string, key: string, value: string | number | boolean) => void;
   onSelectNode: (nodeId: string) => void;
@@ -191,12 +191,12 @@ function SettingsTab({
   const definedKeys = new Set(stageDef.args.map((a) => a.key));
   const extraKeys = Object.keys(argValues).filter((k) => !definedKeys.has(k));
 
-  // Build a map of arg key -> linked peer label for wired arg-ports
-  const linkedArgs = new Map<string, string>();
+  // Build a map of arg key -> { label, value } for wired arg-ports
+  const linkedArgs = new Map<string, { label: string; value?: string }>();
   for (const conn of connectedInputs) {
     // arg-port IDs have the format "arg:<key>"
     if (conn.portId.startsWith("arg:")) {
-      linkedArgs.set(conn.portId.slice(4), conn.peerLabel);
+      linkedArgs.set(conn.portId.slice(4), { label: conn.peerLabel, value: conn.peerValue });
     }
   }
 
@@ -561,8 +561,8 @@ function ArgField({
 }: {
   arg: ArgDef;
   value: string | number | boolean | undefined;
-  /** If this arg is wired from another node, the peer node's label. */
-  linkedFrom?: string;
+  /** If this arg is wired from another node, the peer node's label and optional value. */
+  linkedFrom?: { label: string; value?: string };
   onChange: (v: string | number | boolean) => void;
 }) {
   const id = `arg-${arg.key}`;
@@ -590,7 +590,7 @@ function ArgField({
         </div>
       )}
 
-      {/* Linked from another node — show read-only badge */}
+      {/* Linked from another node — show read-only badge with optional value preview */}
       {linkedFrom && (
         <div style={{
           display: "flex",
@@ -602,9 +602,27 @@ function ArgField({
           border: "1px solid var(--accent-blue)",
           fontSize: 11,
           color: "var(--accent-blue)",
+          overflow: "hidden",
         }}>
-          <span style={{ fontSize: 9, opacity: 0.7 }}>linked</span>
-          <span style={{ fontWeight: 600 }}>{linkedFrom}</span>
+          <span style={{ fontSize: 9, opacity: 0.7, flexShrink: 0 }}>linked</span>
+          <span style={{ fontWeight: 600, flexShrink: 0 }}>{linkedFrom.label}</span>
+          {linkedFrom.value && (
+            <span
+              style={{
+                color: "var(--text-secondary)",
+                fontFamily: "var(--font-mono)",
+                fontSize: 10,
+                overflow: "hidden",
+                textOverflow: "ellipsis",
+                whiteSpace: "nowrap",
+                flexShrink: 1,
+                minWidth: 0,
+              }}
+              title={linkedFrom.value}
+            >
+              {linkedFrom.value}
+            </span>
+          )}
         </div>
       )}
 
