@@ -12,6 +12,7 @@ interface ToolbarProps {
   runState: RunStateMap;
   yamlOpen: boolean;
   onToggleYaml: () => void;
+  onAddGroup: () => void;
   theme: Theme;
   onToggleTheme: () => void;
 }
@@ -26,6 +27,7 @@ export function Toolbar({
   runState,
   yamlOpen,
   onToggleYaml,
+  onAddGroup,
   theme,
   onToggleTheme,
 }: ToolbarProps) {
@@ -105,6 +107,14 @@ export function Toolbar({
         title="Toggle YAML editor (Ctrl+S)"
       >
         YAML
+      </button>
+
+      <button
+        className="zyra-btn zyra-btn--neutral"
+        onClick={onAddGroup}
+        title="Add a group box to organize nodes"
+      >
+        + Group
       </button>
 
       {/* Spacer */}

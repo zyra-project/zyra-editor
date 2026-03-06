@@ -19,6 +19,7 @@ import { portsCompatible, graphToPipeline, pipelineToGraph } from "@zyra/core";
 import { ManifestProvider, useManifest } from "./ManifestLoader";
 import { NodePalette } from "./NodePalette";
 import { ZyraNode, type ZyraNodeData } from "./ZyraNode";
+import { GroupBoxNode, type GroupBoxData } from "./GroupBoxNode";
 import { NodeDetailPanel } from "./NodeDetailPanel";
 import { Toolbar } from "./Toolbar";
 import { LogPanel } from "./LogPanel";
@@ -30,10 +31,15 @@ let nodeIdCounter = 0;
 function nextId() {
   return `node-${++nodeIdCounter}`;
 }
+let groupIdCounter = 0;
+function nextGroupId() {
+  return `group-${++groupIdCounter}`;
+}
 
-/** Convert React Flow state to @zyra/core Graph for serialization. */
+/** Convert React Flow state to @zyra/core Graph for serialization.
+ *  Group box nodes are filtered out — they're visual-only. */
 function toGraph(nodes: Node[], edges: Edge[]): Graph {
-  const graphNodes: GraphNode[] = nodes.map((n) => {
+  const graphNodes: GraphNode[] = nodes.filter((n) => n.type !== "group").map((n) => {
     const d = n.data as ZyraNodeData;
     return {
       id: n.id,
@@ -142,15 +148,16 @@ function Editor() {
   const reactFlowWrapper = useRef<HTMLDivElement>(null);
   const { screenToFlowPosition, setCenter } = useReactFlow();
 
-  const nodeTypes = useMemo(() => ({ zyra: ZyraNode }), []);
+  const nodeTypes = useMemo(() => ({ zyra: ZyraNode, group: GroupBoxNode }), []);
 
   // Stable ref for the per-node run callback
   const runNodeRef = useRef<(nodeId: string) => void>(() => {});
   const onRunNode = useCallback((nodeId: string) => runNodeRef.current(nodeId), []);
 
-  // Inject run status into node data
+  // Inject run status into node data (skip group nodes)
   const nodesWithStatus = useMemo(() => {
     return nodes.map((n) => {
+      if (n.type === "group") return n;
       const rs = exec.runState.get(n.id);
       const d = n.data as ZyraNodeData;
       const newStatus = rs?.status;
@@ -258,6 +265,22 @@ function Editor() {
     [setNodes],
   );
 
+  const handleAddGroup = useCallback(() => {
+    const id = nextGroupId();
+    const newNode: Node = {
+      id,
+      type: "group",
+      position: { x: 200 + Math.random() * 100, y: 80 + Math.random() * 100 },
+      style: { width: 400, height: 260 },
+      zIndex: -1,
+      data: {
+        label: "Group",
+        color: "#3b82f6",
+      } satisfies GroupBoxData,
+    };
+    setNodes((nds) => [newNode, ...nds]);
+  }, [setNodes]);
+
   const onDragOver = useCallback((e: React.DragEvent) => {
     e.preventDefault();
     e.dataTransfer.dropEffect = "move";
@@ -311,6 +334,7 @@ function Editor() {
   );
 
   const handleNodeClick = useCallback((_: React.MouseEvent, node: Node) => {
+    if (node.type === "group") return; // groups don't open detail panel
     setSelectedNodeId(node.id);
   }, []);
 
@@ -436,10 +460,11 @@ function Editor() {
         onCancel={exec.cancelAll}
         onReset={exec.reset}
         running={exec.running}
-        nodeCount={nodes.length}
+        nodeCount={nodes.filter((n) => n.type !== "group").length}
         runState={exec.runState}
         yamlOpen={yamlOpen}
         onToggleYaml={() => setYamlOpen((v) => !v)}
+        onAddGroup={handleAddGroup}
         theme={theme}
         onToggleTheme={toggleTheme}
       />
