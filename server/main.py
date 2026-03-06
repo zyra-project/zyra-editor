@@ -175,6 +175,9 @@ def _opt_to_arg(flag: str, info) -> dict | None:
 # Stages that should not appear as editor nodes (handled by the editor UI itself)
 HIDDEN_STAGES: set[str] = {"run"}
 
+# Stages still under development — shown in the palette but not usable
+WIP_STAGES: set[str] = {"decide", "simulate"}
+
 # Map deprecated / alias stage names to canonical stage names
 STAGE_ALIASES: dict[str, str] = {
     "decimate": "export",
@@ -227,7 +230,7 @@ def _commands_to_manifest(commands: dict) -> dict:
             "command": command,
             "label": cmd_key.replace("-", " ").title(),
             "cli": f"zyra {cmd_key}",
-            "status": "implemented",
+            "status": "planned" if stage in WIP_STAGES else "implemented",
             "color": STAGE_COLORS.get(stage, DEFAULT_COLOR),
             "inputs": inputs,
             "outputs": outputs,

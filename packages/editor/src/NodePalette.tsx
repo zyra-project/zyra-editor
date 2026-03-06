@@ -205,20 +205,22 @@ export function NodePalette({ onAddNode, collapsed, onToggleCollapse }: Props) {
                   }}>
                     {STAGE_ICONS[stage] ?? ""} {stage}
                   </div>
-                  {defs.map((def) => (
+                  {defs.map((def) => {
+                    const disabled = def.status !== "implemented";
+                    return (
                     <button
                       key={`${def.stage}/${def.command}`}
-                      onClick={() => {
+                      onClick={disabled ? undefined : () => {
                         onAddNode(def);
                         setHoveredStage(null);
                       }}
-                      draggable
-                      onDragStart={(e) => {
+                      draggable={!disabled}
+                      onDragStart={disabled ? undefined : (e) => {
                         e.dataTransfer.setData("application/zyra-stage", JSON.stringify(def));
                         e.dataTransfer.effectAllowed = "move";
                         setHoveredStage(null);
                       }}
-                      title={def.cli}
+                      title={disabled ? `${def.label} (${def.status})` : def.cli}
                       style={{
                         display: "flex",
                         alignItems: "center",
@@ -228,24 +230,25 @@ export function NodePalette({ onAddNode, collapsed, onToggleCollapse }: Props) {
                         marginBottom: 2,
                         background: "var(--bg-node)",
                         border: "none",
-                        borderLeft: `3px solid ${def.color}`,
+                        borderLeft: `3px solid ${disabled ? "var(--text-muted)" : def.color}`,
                         borderRadius: "var(--radius-sm)",
-                        color: "var(--text-primary)",
-                        cursor: "grab",
+                        color: disabled ? "var(--text-muted)" : "var(--text-primary)",
+                        cursor: disabled ? "default" : "grab",
                         fontSize: 12,
                         textAlign: "left",
                         fontFamily: "var(--font-sans)",
                         transition: "background 0.1s",
+                        opacity: disabled ? 0.5 : 1,
                       }}
-                      onMouseEnter={(e) => {
+                      onMouseEnter={disabled ? undefined : (e) => {
                         (e.currentTarget as HTMLButtonElement).style.background = "var(--bg-secondary)";
                       }}
-                      onMouseLeave={(e) => {
+                      onMouseLeave={disabled ? undefined : (e) => {
                         (e.currentTarget as HTMLButtonElement).style.background = "var(--bg-node)";
                       }}
                     >
                       <span>{def.label}</span>
-                      {def.status !== "implemented" && (
+                      {disabled && (
                         <span style={{
                           fontSize: 9,
                           padding: "2px 5px",
@@ -257,7 +260,8 @@ export function NodePalette({ onAddNode, collapsed, onToggleCollapse }: Props) {
                         </span>
                       )}
                     </button>
-                  ))}
+                    );
+                  })}
                 </div>
               )}
             </div>
@@ -275,16 +279,18 @@ export function NodePalette({ onAddNode, collapsed, onToggleCollapse }: Props) {
               }}>
                 {STAGE_ICONS[stage] ?? ""} {stage}
               </div>
-              {defs.map((def) => (
+              {defs.map((def) => {
+                const disabled = def.status !== "implemented";
+                return (
                 <button
                   key={`${def.stage}/${def.command}`}
-                  onClick={() => onAddNode(def)}
-                  draggable
-                  onDragStart={(e) => {
+                  onClick={disabled ? undefined : () => onAddNode(def)}
+                  draggable={!disabled}
+                  onDragStart={disabled ? undefined : (e) => {
                     e.dataTransfer.setData("application/zyra-stage", JSON.stringify(def));
                     e.dataTransfer.effectAllowed = "move";
                   }}
-                  title={def.cli}
+                  title={disabled ? `${def.label} (${def.status})` : def.cli}
                   style={{
                     display: "flex",
                     alignItems: "center",
@@ -294,19 +300,20 @@ export function NodePalette({ onAddNode, collapsed, onToggleCollapse }: Props) {
                     marginBottom: 3,
                     background: "var(--bg-node)",
                     border: "none",
-                    borderLeft: `3px solid ${def.color}`,
+                    borderLeft: `3px solid ${disabled ? "var(--text-muted)" : def.color}`,
                     borderRadius: "var(--radius-sm)",
-                    color: "var(--text-primary)",
-                    cursor: "grab",
+                    color: disabled ? "var(--text-muted)" : "var(--text-primary)",
+                    cursor: disabled ? "default" : "grab",
                     fontSize: 12,
                     textAlign: "left",
                     fontFamily: "var(--font-sans)",
                     transition: "background 0.1s",
+                    opacity: disabled ? 0.5 : 1,
                   }}
-                  onMouseEnter={(e) => {
+                  onMouseEnter={disabled ? undefined : (e) => {
                     (e.currentTarget as HTMLButtonElement).style.background = "var(--bg-secondary)";
                   }}
-                  onMouseLeave={(e) => {
+                  onMouseLeave={disabled ? undefined : (e) => {
                     (e.currentTarget as HTMLButtonElement).style.background = "var(--bg-node)";
                   }}
                 >
@@ -323,7 +330,8 @@ export function NodePalette({ onAddNode, collapsed, onToggleCollapse }: Props) {
                     </span>
                   )}
                 </button>
-              ))}
+                );
+              })}
             </div>
           ))
         )}
