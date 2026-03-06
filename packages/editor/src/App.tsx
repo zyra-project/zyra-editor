@@ -249,18 +249,31 @@ function Editor() {
   const runNodeRef = useRef<(nodeId: string) => void>(() => {});
   const onRunNode = useCallback((nodeId: string) => runNodeRef.current(nodeId), []);
 
-  // Build per-node connected port sets from edges
+  // Build per-node connected port maps from edges
+  // connectedInputMap: nodeId → Map<portId, displayValue>
+  // connectedOutputMap: nodeId → Set<portId>
   const { connectedInputMap, connectedOutputMap } = useMemo(() => {
-    const inMap = new Map<string, Set<string>>();
+    const inMap = new Map<string, Map<string, string>>();
     const outMap = new Map<string, Set<string>>();
     for (const e of edges) {
-      if (!inMap.has(e.target)) inMap.set(e.target, new Set());
-      if (e.targetHandle) inMap.get(e.target)!.add(e.targetHandle);
+      if (!inMap.has(e.target)) inMap.set(e.target, new Map());
+      if (e.targetHandle) {
+        // Look up the source node to extract a display value
+        const srcNode = nodes.find((n) => n.id === e.source);
+        const srcData = srcNode?.data as ZyraNodeData | undefined;
+        let displayValue = srcData?.nodeLabel || srcData?.stageDef.label || "";
+        // For control nodes with a "value" arg, show the actual value
+        if (srcData?.stageDef.stage === "control") {
+          const val = srcData.argValues?.value;
+          if (val !== undefined && val !== "") displayValue = String(val);
+        }
+        inMap.get(e.target)!.set(e.targetHandle, displayValue);
+      }
       if (!outMap.has(e.source)) outMap.set(e.source, new Set());
       if (e.sourceHandle) outMap.get(e.source)!.add(e.sourceHandle);
     }
     return { connectedInputMap: inMap, connectedOutputMap: outMap };
-  }, [edges]);
+  }, [edges, nodes]);
 
   // Inject run status + connected port sets into node data (skip group nodes)
   const nodesWithStatus = useMemo(() => {

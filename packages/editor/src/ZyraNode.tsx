@@ -17,8 +17,8 @@ export interface ZyraNodeData {
   dryRunArgv?: string;
   /** Callback to run this single node. Injected by App. */
   onRunNode?: (nodeId: string) => void;
-  /** Set of port IDs that have incoming edges (for arg-port linked state). */
-  connectedInputPorts?: Set<string>;
+  /** Map of port ID → display value for incoming edges (for arg-port linked state). */
+  connectedInputPorts?: Map<string, string>;
   /** Set of port IDs that have outgoing edges (for implicit output visibility). */
   connectedOutputPorts?: Set<string>;
   [key: string]: unknown;
@@ -53,7 +53,7 @@ export function ZyraNode({ id, data, selected }: NodeProps) {
 
   const displayLabel = nodeLabel || stageDef.label;
 
-  const connIn = connectedInputPorts ?? new Set<string>();
+  const connIn = connectedInputPorts ?? new Map<string, string>();
   const connOut = connectedOutputPorts ?? new Set<string>();
 
   // Compute effective ports (explicit + arg-inputs + implicit outputs)
@@ -287,6 +287,7 @@ export function ZyraNode({ id, data, selected }: NodeProps) {
               key={port.id}
               port={port}
               isConnected={connIn.has(port.id)}
+              linkedValue={connIn.get(port.id)}
               argDef={port.argKey ? argDefMap.get(port.argKey) : undefined}
               argValue={port.argKey ? argValues[port.argKey] : undefined}
             />
@@ -347,9 +348,10 @@ export function ZyraNode({ id, data, selected }: NodeProps) {
 
 /* ── Port row components ──────────────────────────────────────── */
 
-function InputPortRow({ port, isConnected, argDef, argValue }: {
+function InputPortRow({ port, isConnected, linkedValue, argDef, argValue }: {
   port: PortDef;
   isConnected: boolean;
+  linkedValue?: string;
   argDef?: ArgDef;
   argValue?: string | number | boolean;
 }) {
@@ -390,12 +392,17 @@ function InputPortRow({ port, isConnected, argDef, argValue }: {
       {/* Show value for arg-ports (or linked indicator) */}
       {isArgPort && isConnected && (
         <span style={{
-          fontSize: 9,
+          fontSize: 10,
           color: "var(--accent-blue)",
           fontFamily: "var(--font-mono)",
-          flexShrink: 0,
-        }}>
-          linked
+          overflow: "hidden",
+          textOverflow: "ellipsis",
+          whiteSpace: "nowrap",
+          maxWidth: "50%",
+          flexShrink: 1,
+          textAlign: "right",
+        }} title={linkedValue || "linked"}>
+          {linkedValue || "linked"}
         </span>
       )}
       {isArgPort && !isConnected && hasFill && (
