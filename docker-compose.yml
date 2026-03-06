@@ -21,5 +21,6 @@ services:
       - ./packages/core/src:/app/packages/core/src
       - ./packages/editor/src:/app/packages/editor/src
       - ./packages/editor/index.html:/app/packages/editor/index.html
+      - ./packages/editor/vite.config.ts:/app/packages/editor/vite.config.ts
     depends_on:
       - zyra-server
