@@ -322,8 +322,9 @@ function Editor() {
       // Serialize group boxes into _groups (editor-only metadata)
       const groupNodes = nodes.filter((n) => n.type === "group");
       if (groupNodes.length > 0) {
-        // Derive children from current parentId — always in sync with node IDs
+        // Derive children from current parentId — includes steps and control nodes
         const stepNames = new Set(p.steps.map((s) => s.name));
+        if (p._controls) for (const c of p._controls) stepNames.add(c.id);
         p._groups = groupNodes.map((g) => {
           const d = g.data as GroupBoxData;
           const w = g.measured?.width ?? (typeof g.style?.width === "number" ? g.style.width : 400);

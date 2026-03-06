@@ -13,6 +13,7 @@ export type {
   Pipeline,
   PipelineStep,
   PipelineGroup,
+  PipelineControl,
 } from "./serializer.js";
 export { graphToPipeline } from "./serializer.js";
 

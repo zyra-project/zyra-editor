@@ -94,6 +94,36 @@ export function pipelineToGraph(
     }
   }
 
+  // Reconstruct control nodes from _controls metadata
+  if (pipeline._controls) {
+    for (const ctrl of pipeline._controls) {
+      const node: GraphNode = {
+        id: ctrl.id,
+        label: ctrl.label,
+        stageCommand: ctrl.stageCommand,
+        argValues: { ...ctrl.argValues },
+        position: ctrl._layout ? { x: ctrl._layout.x, y: ctrl._layout.y } : undefined,
+        size:
+          ctrl._layout && ctrl._layout.w != null && ctrl._layout.h != null
+            ? { w: ctrl._layout.w, h: ctrl._layout.h }
+            : undefined,
+      };
+      nodes.push(node);
+
+      // Reconstruct edges from control node to downstream arg-ports
+      const stage = findStage(ctrl.stageCommand) ?? byKey.get(ctrl.stageCommand);
+      const sourcePort = stage?.outputs[0]?.id ?? "value";
+      for (const ce of ctrl.edges) {
+        edges.push({
+          sourceNode: ctrl.id,
+          sourcePort,
+          targetNode: ce.targetNode,
+          targetPort: ce.targetPort,
+        });
+      }
+    }
+  }
+
   return { nodes, edges };
 }
 
