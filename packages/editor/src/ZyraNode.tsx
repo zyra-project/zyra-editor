@@ -123,6 +123,7 @@ export function ZyraNode({ id, data, selected }: NodeProps) {
           {hovered && onRunNode && runStatus !== "running" && (
             <button
               title="Run this step"
+              aria-label="Run this step"
               onClick={(e) => {
                 e.stopPropagation();
                 onRunNode(id);

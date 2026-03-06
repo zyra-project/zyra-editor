@@ -34,7 +34,7 @@ import threading
 _orig_start_job = _jobs_mod.start_job
 _start_job_lock = threading.Lock()
 
-def _patched_start_job(job_id, stage, command, args):
+def _patched_start_job(*args, **kwargs):
     """Wrap start_job to reset root logging handlers inside the tee context."""
     _orig_cli_main = None
     try:
@@ -62,7 +62,7 @@ def _patched_start_job(job_id, stage, command, args):
                             handler.close()
                         except Exception:
                             pass
-                root.handlers = prev_handlers
+                root.handlers[:] = prev_handlers
 
         # Guard the global swap with a lock so concurrent job starts
         # don't race on zyra.cli.main.
@@ -71,11 +71,11 @@ def _patched_start_job(job_id, stage, command, args):
             _saved = zyra.cli.main
             zyra.cli.main = _cli_main_with_logging_reset
             try:
-                _orig_start_job(job_id, stage, command, args)
+                _orig_start_job(*args, **kwargs)
             finally:
                 zyra.cli.main = _saved
     else:
-        _orig_start_job(job_id, stage, command, args)
+        _orig_start_job(*args, **kwargs)
 
 _jobs_mod.start_job = _patched_start_job
 
