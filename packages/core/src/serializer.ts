@@ -6,8 +6,14 @@ import type { StageDef } from "./manifest.js";
  */
 export interface GraphNode {
   id: string;
+  /** User-facing display label for the editor (optional, display-only metadata). */
+  label?: string;
   stageCommand: string;   // "acquire/http"
   argValues: Record<string, string | number | boolean>;
+  /** Canvas position (for round-tripping through YAML). */
+  position?: { x: number; y: number };
+  /** Canvas size (for round-tripping through YAML). */
+  size?: { w: number; h: number };
 }
 
 /** An edge between two nodes (output port → input port). */
@@ -27,9 +33,13 @@ export interface Graph {
 
 export interface PipelineStep {
   name: string;
+  /** User-facing label for YAML display (defaults to name if unset). */
+  label?: string;
   command: string;
   args: Record<string, string | number | boolean>;
   depends_on?: string[];
+  /** Editor layout metadata — not used by the Zyra CLI. */
+  _layout?: { x: number; y: number; w?: number; h?: number };
 }
 
 export interface Pipeline {
@@ -99,7 +109,19 @@ export function graphToPipeline(
       command: stage?.cli ?? node.stageCommand,
       args: { ...node.argValues },
     };
+    if (node.label && node.label !== id) step.label = node.label;
     if (deps.length > 0) step.depends_on = deps;
+    if (node.position || node.size) {
+      const layout: PipelineStep["_layout"] = {
+        x: Math.round(node.position?.x ?? 0),
+        y: Math.round(node.position?.y ?? 0),
+      };
+      if (node.size) {
+        layout.w = Math.round(node.size.w);
+        layout.h = Math.round(node.size.h);
+      }
+      step._layout = layout;
+    }
     return step;
   });
 

@@ -1,0 +1,21 @@
+services:
+  zyra-server:
+    build: ./server
+    ports:
+      - "8765:8765"
+    volumes:
+      - ./_work:/data
+    environment:
+      - ZYRA_VERBOSITY=debug
+      - ZYRA_DATA_DIR=/data
+
+  zyra-editor:
+    build:
+      context: .
+      dockerfile: Dockerfile.editor
+    ports:
+      - "5173:5173"
+    environment:
+      - VITE_BACKEND_URL=http://zyra-server:8765
+    depends_on:
+      - zyra-server

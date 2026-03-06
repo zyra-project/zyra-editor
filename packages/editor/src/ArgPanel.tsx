@@ -32,6 +32,32 @@ export function ArgPanel({ nodeId, data, onArgChange, onClose }: Props) {
           onChange={(v) => onArgChange(nodeId, arg.key, v)}
         />
       ))}
+
+      {/* Show extra args from YAML that aren't defined in the stage manifest */}
+      {(() => {
+        const definedKeys = new Set(stageDef.args.map((a) => a.key));
+        const extraKeys = Object.keys(argValues).filter((k) => !definedKeys.has(k));
+        if (extraKeys.length === 0) return null;
+        return (
+          <>
+            {extraKeys.map((key) => (
+              <ArgField
+                key={key}
+                arg={{
+                  key,
+                  label: key,
+                  type: typeof argValues[key] === "number" ? "number"
+                    : typeof argValues[key] === "boolean" ? "boolean"
+                    : "string",
+                  required: false,
+                }}
+                value={argValues[key]}
+                onChange={(v) => onArgChange(nodeId, key, v)}
+              />
+            ))}
+          </>
+        );
+      })()}
     </div>
   );
 }

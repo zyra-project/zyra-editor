@@ -27,18 +27,32 @@ This is a TypeScript monorepo (pnpm workspaces) with three components:
 ## Tech Stack
 
 - **Frontend:** React 18, TypeScript, Vite, XYFlow (React Flow)
-- **Backend:** FastAPI, Uvicorn, Python 3
+- **Backend:** FastAPI, Uvicorn, Python 3.11
+- **Containers:** Docker Compose (two-service stack)
 - **Tooling:** pnpm, Node 18+
 
 ## Getting Started
 
-### Prerequisites
+### Docker (recommended)
 
-- Node.js 18+
-- pnpm
-- Python 3 (for the backend server)
+Requires [Docker Desktop](https://www.docker.com/products/docker-desktop/) or Docker Engine with Compose.
 
-### Install & Run
+```bash
+docker compose up --build
+```
+
+| Service | URL | Description |
+|---------|-----|-------------|
+| Editor | http://localhost:5173 | Vite dev server (React UI) |
+| Server | http://localhost:8765 | FastAPI backend (API, WebSocket, jobs) |
+
+The `_work/` directory is mounted into the server container at `/data` for persistent job data (downloads, outputs).
+
+> **Why Docker?** The server container uses Linux ffmpeg, which supports glob patterns required for video composition. Windows ffmpeg does not include glob support.
+
+### Local Development
+
+Requires Node.js 18+, pnpm, and Python 3.11+.
 
 ```bash
 # Install JavaScript dependencies
@@ -61,7 +75,7 @@ pip install -r requirements.txt
 uvicorn main:app --port 8765
 ```
 
-The Vite dev server proxies `/v1` and `/ws` requests to `localhost:8765`.
+The Vite dev server proxies `/v1` and `/ws` requests to `localhost:8765`. Set `VITE_BACKEND_URL` to override the backend target (e.g., `http://zyra-server:8765` in Docker).
 
 ### Build
 
@@ -101,7 +115,11 @@ zyra-editor/
 │           ├── useExecution.ts    # Execution orchestration hook
 │           └── api.ts             # Zyra API client (fetch + WebSocket)
 ├── server/
-│   └── main.py         # Mounts zyra.api.server; serves editor build
+│   ├── main.py          # Mounts zyra.api.server; serves editor build
+│   ├── Dockerfile       # Python 3.11 + Linux ffmpeg
+│   └── requirements.txt
+├── docker-compose.yml   # Editor + server containers
+├── Dockerfile.editor    # Node 20 + pnpm + Vite dev server
 ├── manifest.schema.json
 └── pnpm-workspace.yaml
 ```

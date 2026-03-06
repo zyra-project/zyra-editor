@@ -47,6 +47,8 @@ export interface NodeRunState {
   exitCode?: number;
   /** Resolved CLI command returned by a dry-run. */
   dryRunArgv?: string;
+  /** The request that was submitted to the server (for debugging). */
+  submittedRequest?: RunStepRequest;
 }
 
 export function emptyRunState(): NodeRunState {
