@@ -228,7 +228,7 @@ def _commands_to_manifest(commands: dict) -> dict:
         # Extract command-level description (the CLI "help" text)
         description = ""
         if isinstance(cmd_info, dict):
-            description = cmd_info.get("help", "") or cmd_info.get("description", "") or ""
+            description = cmd_info.get("description", "") or cmd_info.get("help", "") or ""
 
         entry: dict = {
             "stage": stage,
