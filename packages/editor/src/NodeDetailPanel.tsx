@@ -369,7 +369,7 @@ function OutputTab({
               <pre style={{
                 margin: 0,
                 whiteSpace: "pre-wrap",
-                color: "var(--text-muted)",
+                color: "var(--text-secondary)",
                 fontSize: 10,
               }}>
                 {JSON.stringify(
