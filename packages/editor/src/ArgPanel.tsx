@@ -20,9 +20,14 @@ export function ArgPanel({ nodeId, data, onArgChange, onClose }: Props) {
           &times;
         </button>
       </div>
-      <div style={{ fontSize: 11, color: "#888", marginBottom: 12 }}>
+      <div style={{ fontSize: 11, color: "#888", marginBottom: stageDef.description ? 4 : 12 }}>
         {stageDef.cli}
       </div>
+      {stageDef.description && (
+        <div style={{ fontSize: 12, color: "#aaa", marginBottom: 12, lineHeight: 1.4 }}>
+          {stageDef.description}
+        </div>
+      )}
 
       {stageDef.args.map((arg) => (
         <ArgField

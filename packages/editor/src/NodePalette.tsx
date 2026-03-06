@@ -70,15 +70,18 @@ export function NodePalette({ onAddNode, collapsed, onToggleCollapse }: Props) {
     return (ia === -1 ? Infinity : ia) - (ib === -1 ? Infinity : ib);
   });
 
-  // Filter by search
+  // Filter by search (also matches against description)
   const filteredEntries = searchQuery
     ? sortedEntries
         .map(([stage, defs]) => [
           stage,
           defs.filter(
-            (d) =>
-              d.label.toLowerCase().includes(searchQuery.toLowerCase()) ||
-              d.command.toLowerCase().includes(searchQuery.toLowerCase()),
+            (d) => {
+              const q = searchQuery.toLowerCase();
+              return d.label.toLowerCase().includes(q) ||
+                d.command.toLowerCase().includes(q) ||
+                (d.description ?? "").toLowerCase().includes(q);
+            },
           ),
         ] as [string, StageDef[]])
         .filter(([, defs]) => defs.length > 0)
@@ -220,7 +223,7 @@ export function NodePalette({ onAddNode, collapsed, onToggleCollapse }: Props) {
                         e.dataTransfer.effectAllowed = "move";
                         setHoveredStage(null);
                       }}
-                      title={disabled ? `${def.label} (${def.status})` : def.cli}
+                      title={disabled ? `${def.label} (${def.status})` : (def.description ?? def.cli)}
                       style={{
                         display: "flex",
                         alignItems: "center",
@@ -290,11 +293,11 @@ export function NodePalette({ onAddNode, collapsed, onToggleCollapse }: Props) {
                     e.dataTransfer.setData("application/zyra-stage", JSON.stringify(def));
                     e.dataTransfer.effectAllowed = "move";
                   }}
-                  title={disabled ? `${def.label} (${def.status})` : def.cli}
+                  title={disabled ? `${def.label} (${def.status})` : (def.description ?? def.cli)}
                   style={{
                     display: "flex",
-                    alignItems: "center",
-                    justifyContent: "space-between",
+                    alignItems: "flex-start",
+                    flexDirection: "column",
                     width: "100%",
                     padding: "7px 10px",
                     marginBottom: 3,
@@ -317,17 +320,29 @@ export function NodePalette({ onAddNode, collapsed, onToggleCollapse }: Props) {
                     (e.currentTarget as HTMLButtonElement).style.background = "var(--bg-node)";
                   }}
                 >
-                  <span>{def.label}</span>
-                  {def.status !== "implemented" && (
-                    <span style={{
-                      fontSize: 9,
-                      padding: "2px 5px",
-                      borderRadius: 3,
-                      background: "var(--border-default)",
-                      color: "var(--text-secondary)",
+                  <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", width: "100%" }}>
+                    <span>{def.label}</span>
+                    {def.status !== "implemented" && (
+                      <span style={{
+                        fontSize: 9,
+                        padding: "2px 5px",
+                        borderRadius: 3,
+                        background: "var(--border-default)",
+                        color: "var(--text-secondary)",
+                      }}>
+                        {def.status}
+                      </span>
+                    )}
+                  </div>
+                  {def.description && (
+                    <div style={{
+                      fontSize: 10,
+                      color: "var(--text-muted)",
+                      marginTop: 2,
+                      lineHeight: 1.3,
                     }}>
-                      {def.status}
-                    </span>
+                      {def.description}
+                    </div>
                   )}
                 </button>
                 );

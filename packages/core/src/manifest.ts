@@ -26,6 +26,8 @@ export interface StageDef {
   stage: string;
   command: string;
   label: string;
+  /** Short description of what this command does. */
+  description?: string;
   /** Full CLI invocation, e.g. "zyra acquire http". */
   cli: string;
   status: "implemented" | "planned" | "experimental";

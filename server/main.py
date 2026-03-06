@@ -225,7 +225,12 @@ def _commands_to_manifest(commands: dict) -> dict:
         inputs = STAGE_INPUTS.get(stage, DEFAULT_INPUTS)
         outputs = [] if stage in SINK_STAGES else DEFAULT_OUTPUTS
 
-        stages.append({
+        # Extract command-level description (the CLI "help" text)
+        description = ""
+        if isinstance(cmd_info, dict):
+            description = cmd_info.get("help", "") or cmd_info.get("description", "") or ""
+
+        entry: dict = {
             "stage": stage,
             "command": command,
             "label": cmd_key.replace("-", " ").title(),
@@ -235,13 +240,17 @@ def _commands_to_manifest(commands: dict) -> dict:
             "inputs": inputs,
             "outputs": outputs,
             "args": args,
-        })
+        }
+        if description:
+            entry["description"] = description
+        stages.append(entry)
 
     # Inject editor-only control nodes (not backed by CLI commands)
     stages.insert(0, {
         "stage": "control",
         "command": "variable",
         "label": "Variable",
+        "description": "Define a named variable to pass values into the pipeline",
         "cli": "",
         "status": "implemented",
         "color": STAGE_COLORS.get("control", DEFAULT_COLOR),
