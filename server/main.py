@@ -172,6 +172,9 @@ def _opt_to_arg(flag: str, info) -> dict | None:
     return arg
 
 
+# Stages that should not appear as editor nodes (handled by the editor UI itself)
+HIDDEN_STAGES: set[str] = {"run"}
+
 # Map deprecated / alias stage names to canonical stage names
 STAGE_ALIASES: dict[str, str] = {
     "decimate": "export",
@@ -194,6 +197,10 @@ def _commands_to_manifest(commands: dict) -> dict:
         raw_stage = parts[0]
         stage = STAGE_ALIASES.get(raw_stage, raw_stage)
         command = parts[1] if len(parts) > 1 else raw_stage
+
+        # Skip stages handled by the editor UI (e.g. "run" → toolbar button)
+        if stage in HIDDEN_STAGES:
+            continue
 
         # Only include commands whose raw name matches the canonical stage
         # (skip aliased duplicates like "import ftp" when "acquire ftp" exists)

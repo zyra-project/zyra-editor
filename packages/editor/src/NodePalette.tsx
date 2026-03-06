@@ -14,6 +14,8 @@ const STAGE_ORDER: string[] = [
   "search",
   "acquire",
   "process",
+  "decide",
+  "simulate",
   "visualize",
   "narrate",
   "verify",
@@ -43,6 +45,8 @@ const STAGE_ICONS: Record<string, string> = {
   clean: "\ud83e\uddf9",     // broom
   ingest: "\ud83d\udce8",    // incoming envelope
   publish: "\ud83d\udce2",   // loudspeaker
+  decide: "\ud83c\udfaf",   // bullseye / target
+  simulate: "\ud83c\udfb2", // dice
 };
 
 export function NodePalette({ onAddNode, collapsed, onToggleCollapse }: Props) {
