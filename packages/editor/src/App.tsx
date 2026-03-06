@@ -354,7 +354,7 @@ function Editor() {
           stageDef,
           argValues: {},
         } satisfies ZyraNodeData,
-        ...(parentId ? { parentId, expandParent: true } : {}),
+        ...(parentId ? { parentId } : {}),
       };
       setNodes((nds) => [...nds, newNode]);
     },
@@ -475,7 +475,7 @@ function Editor() {
                 ? {
                     ...n,
                     parentId: newGroupId,
-                    expandParent: true,
+                    expandParent: undefined,
                     position: { x: absPos.x - group.position.x, y: absPos.y - group.position.y },
                   }
                 : n,
