@@ -248,6 +248,8 @@ export function NodePalette({ onAddNode, onAddGroup, collapsed, onToggleCollapse
                     return (
                     <button
                       key={`${def.stage}/${def.command}`}
+                      disabled={disabled}
+                      aria-disabled={disabled}
                       onClick={disabled ? undefined : () => {
                         onAddNode(def);
                         setHoveredStage(null);
@@ -355,6 +357,8 @@ export function NodePalette({ onAddNode, onAddGroup, collapsed, onToggleCollapse
                 return (
                 <button
                   key={`${def.stage}/${def.command}`}
+                  disabled={disabled}
+                  aria-disabled={disabled}
                   onClick={disabled ? undefined : () => onAddNode(def)}
                   draggable={!disabled}
                   onDragStart={disabled ? undefined : (e) => {

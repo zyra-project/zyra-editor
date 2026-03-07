@@ -117,6 +117,15 @@ export function pipelineToGraph(
         // Only reconstruct edges targeting valid arg-ports on existing nodes
         if (!ce.targetPort.startsWith("arg:")) continue;
         if (!nodeMap.has(ce.targetNode)) continue;
+
+        // Validate that the target node's stage actually has this arg key
+        const targetInfo = nodeMap.get(ce.targetNode);
+        if (targetInfo?.stage) {
+          const argKey = ce.targetPort.slice(4);
+          const hasArg = targetInfo.stage.args.some((a) => a.key === argKey);
+          if (!hasArg) continue; // skip edges to non-existent arg handles
+        }
+
         edges.push({
           sourceNode: ctrl.id,
           sourcePort,

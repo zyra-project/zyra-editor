@@ -282,9 +282,13 @@ const HELP_SECTIONS: { title: string; items: string[] }[] = [
 ];
 
 function HelpModal({ onClose }: { onClose: () => void }) {
-  // Close on Escape
+  // Close on Escape — stop propagation so App-level Escape handler doesn't also fire
   const handleKey = useCallback((e: KeyboardEvent) => {
-    if (e.key === "Escape") onClose();
+    if (e.key === "Escape") {
+      e.stopPropagation();
+      e.preventDefault();
+      onClose();
+    }
   }, [onClose]);
 
   useEffect(() => {
