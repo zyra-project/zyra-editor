@@ -9,6 +9,14 @@ export interface GroupBoxData {
   [key: string]: unknown;
 }
 
+/** Convert a 6-digit hex color to rgba with the given alpha (0-1). */
+function hexToRgba(hex: string, alpha: number): string {
+  const r = parseInt(hex.slice(1, 3), 16);
+  const g = parseInt(hex.slice(3, 5), 16);
+  const b = parseInt(hex.slice(5, 7), 16);
+  return `rgba(${r},${g},${b},${alpha})`;
+}
+
 const PRESET_COLORS = [
   "#3b82f6", // blue
   "#8b5cf6", // violet
@@ -36,10 +44,10 @@ export function GroupBoxNode({ id, data, selected }: NodeProps) {
       style={{
         width: "100%",
         height: "100%",
-        background: `${color}10`,
+        background: hexToRgba(color, 0.06),
         border: selected
           ? `2px ${locked ? "solid" : "dashed"} ${color}`
-          : `1px ${locked ? "solid" : "dashed"} ${color}88`,
+          : `1px ${locked ? "solid" : "dashed"} ${hexToRgba(color, 0.53)}`,
         borderRadius: "var(--radius-lg)",
         fontFamily: "var(--font-sans)",
         position: "relative",
@@ -61,7 +69,7 @@ export function GroupBoxNode({ id, data, selected }: NodeProps) {
           alignItems: "center",
           gap: 6,
           padding: "6px 10px",
-          borderBottom: `1px dashed ${color}44`,
+          borderBottom: `1px dashed ${hexToRgba(color, 0.27)}`,
         }}
       >
         {/* Color dot / picker toggle */}
@@ -76,7 +84,7 @@ export function GroupBoxNode({ id, data, selected }: NodeProps) {
               background: color,
               cursor: "pointer",
               flexShrink: 0,
-              border: "2px solid rgba(255,255,255,0.2)",
+              border: "2px solid var(--border-default)",
             }}
             title="Change color"
           />
@@ -93,7 +101,7 @@ export function GroupBoxNode({ id, data, selected }: NodeProps) {
                 background: "var(--bg-secondary)",
                 border: "1px solid var(--border-default)",
                 borderRadius: "var(--radius-md)",
-                boxShadow: "0 4px 12px rgba(0,0,0,0.4)",
+                boxShadow: "0 4px 12px var(--node-shadow)",
               }}
             >
               {PRESET_COLORS.map((c) => (
@@ -134,7 +142,7 @@ export function GroupBoxNode({ id, data, selected }: NodeProps) {
               if (e.key === "Escape") setEditingLabel(false);
             }}
             style={{
-              background: "rgba(0,0,0,0.3)",
+              background: "var(--bg-overlay)",
               border: `1px solid ${color}`,
               borderRadius: 3,
               color: "var(--text-bright)",
@@ -173,7 +181,7 @@ export function GroupBoxNode({ id, data, selected }: NodeProps) {
             updateNodeData(id, { locked: !locked });
           }}
           style={{
-            background: locked ? `${color}33` : "rgba(0,0,0,0.3)",
+            background: locked ? hexToRgba(color, 0.2) : "var(--bg-overlay)",
             border: "none",
             borderRadius: 3,
             color: locked ? color : "var(--text-muted)",
@@ -197,7 +205,7 @@ export function GroupBoxNode({ id, data, selected }: NodeProps) {
               deleteElements({ nodes: [{ id }] });
             }}
             style={{
-              background: "rgba(0,0,0,0.3)",
+              background: "var(--bg-overlay)",
               border: "none",
               borderRadius: 3,
               color: "var(--text-secondary)",
@@ -229,8 +237,8 @@ export function GroupBoxNode({ id, data, selected }: NodeProps) {
               if (e.key === "Escape") setEditingDesc(false);
             }}
             style={{
-              background: "rgba(0,0,0,0.2)",
-              border: `1px solid ${color}44`,
+              background: "var(--bg-tertiary)",
+              border: `1px solid ${hexToRgba(color, 0.27)}`,
               borderRadius: 3,
               color: "var(--text-secondary)",
               fontSize: 11,

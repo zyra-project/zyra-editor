@@ -169,8 +169,8 @@ export function ZyraNode({ id, data, selected }: NodeProps) {
               if (e.key === "Escape") { setEditing(false); }
             }}
             style={{
-              background: "rgba(0,0,0,0.3)",
-              border: "1px solid rgba(255,255,255,0.3)",
+              background: "var(--bg-overlay)",
+              border: "1px solid var(--border-default)",
               borderRadius: 3,
               color: "#fff",
               fontSize: 12,
@@ -203,7 +203,7 @@ export function ZyraNode({ id, data, selected }: NodeProps) {
                 onRunNode(id);
               }}
               style={{
-                background: "rgba(0,0,0,0.3)",
+                background: "var(--bg-overlay)",
                 border: "none",
                 borderRadius: 3,
                 color: "var(--accent-green)",
@@ -227,7 +227,7 @@ export function ZyraNode({ id, data, selected }: NodeProps) {
                 deleteElements({ nodes: [{ id }] });
               }}
               style={{
-                background: "rgba(0,0,0,0.3)",
+                background: "var(--bg-overlay)",
                 border: "none",
                 borderRadius: 3,
                 color: "#fff",
@@ -284,7 +284,7 @@ export function ZyraNode({ id, data, selected }: NodeProps) {
               fontFamily: "var(--font-mono)",
               color: hasValue ? "var(--accent-blue)" : "var(--text-muted)",
               fontStyle: hasValue ? "normal" : "italic",
-              background: "rgba(0,0,0,0.15)",
+              background: "var(--bg-tertiary)",
               overflow: "hidden",
               textOverflow: "ellipsis",
               whiteSpace: "nowrap",

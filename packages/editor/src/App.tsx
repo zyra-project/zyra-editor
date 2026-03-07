@@ -264,15 +264,19 @@ function Editor() {
         const srcNode = nodeById.get(e.source);
         const srcData = srcNode?.data as ZyraNodeData | undefined;
         let displayValue = srcData?.nodeLabel || srcData?.stageDef.label || "";
-        // For control nodes, show the actual value (or placeholder/default as fallback)
+        // For control nodes, show the actual explicitly set value or default;
+        // otherwise mark as unset so the UI doesn't imply a value will be inlined
         if (srcData?.stageDef.stage === "control") {
           const val = srcData.argValues?.value;
           if (val !== undefined && val !== "") {
             displayValue = String(val);
           } else {
             const valueDef = srcData.stageDef.args.find((a) => a.key === "value");
-            const fallback = valueDef?.default ?? valueDef?.placeholder;
-            if (fallback != null && fallback !== "") displayValue = String(fallback);
+            if (valueDef?.default !== undefined && valueDef.default !== "") {
+              displayValue = String(valueDef.default);
+            } else {
+              displayValue = "(unset)";
+            }
           }
         }
         inMap.get(e.target)!.set(e.targetHandle, displayValue);
@@ -327,7 +331,7 @@ function Editor() {
         // Derive children from current parentId — includes steps and control nodes
         const stepNames = new Set(p.steps.map((s) => s.name));
         if (p._controls) for (const c of p._controls) stepNames.add(c.id);
-        p._groups = groupNodes.map((g) => {
+        const groups = groupNodes.map((g) => {
           const d = g.data as GroupBoxData;
           const w = g.measured?.width ?? (typeof g.style?.width === "number" ? g.style.width : 400);
           const h = g.measured?.height ?? (typeof g.style?.height === "number" ? g.style.height : 260);
@@ -346,6 +350,7 @@ function Editor() {
           if (d.locked) group.locked = true;
           return group;
         });
+        return { ...p, _groups: groups };
       }
 
       return p;
@@ -543,6 +548,9 @@ function Editor() {
       // Only control nodes can wire into arg-ports (serialization can't
       // round-trip non-control → arg-port edges yet)
       if (tgtPort.argKey && srcDef.stage !== "control") return false;
+      // Control-node connections are only meaningful/serializable when
+      // targeting arg-ports, so disallow control → non-arg edges.
+      if (srcDef.stage === "control" && !tgtPort.argKey) return false;
 
       return portsCompatible(srcPort, tgtPort);
     },

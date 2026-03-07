@@ -111,8 +111,18 @@ export function graphToPipeline(
     }
     const srcNode = nodeMap.get(e.sourceNode);
     if (!srcNode) continue;
-    const val = srcNode.argValues.value;
-    if (val === undefined) continue;
+    let val = srcNode.argValues.value;
+    // Fall back to the ArgDef default so wired control nodes with
+    // defaults (e.g., boolean false) still serialize correctly.
+    if (val === undefined) {
+      const ctrlStage = stageMap.get(srcNode.stageCommand);
+      const valueDef = ctrlStage?.args?.find((a) => a.key === "value");
+      if (valueDef?.default !== undefined) {
+        val = valueDef.default;
+      } else {
+        continue;
+      }
+    }
     const argKey = e.targetPort.slice(4); // strip "arg:" prefix
     if (!inlinedArgs.has(e.targetNode)) inlinedArgs.set(e.targetNode, new Map());
     inlinedArgs.get(e.targetNode)!.set(argKey, val);

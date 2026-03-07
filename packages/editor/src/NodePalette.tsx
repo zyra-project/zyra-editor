@@ -170,8 +170,16 @@ export function NodePalette({ onAddNode, onAddGroup, collapsed, onToggleCollapse
                 hoverTimeoutRef.current = setTimeout(() => setHoveredStage(null), 150);
               }}
             >
-              <div
+              <button
                 title={stage}
+                aria-label={`${stage} stages`}
+                onFocus={() => {
+                  if (hoverTimeoutRef.current) clearTimeout(hoverTimeoutRef.current);
+                  setHoveredStage(stage);
+                }}
+                onBlur={() => {
+                  hoverTimeoutRef.current = setTimeout(() => setHoveredStage(null), 150);
+                }}
                 style={{
                   display: "flex",
                   alignItems: "center",
@@ -184,10 +192,14 @@ export function NodePalette({ onAddNode, onAddGroup, collapsed, onToggleCollapse
                   cursor: "pointer",
                   background: hoveredStage === stage ? "var(--bg-secondary)" : "var(--bg-node)",
                   transition: "background 0.1s",
+                  border: "none",
+                  padding: 0,
+                  color: "inherit",
+                  fontFamily: "inherit",
                 }}
               >
                 {STAGE_ICONS[stage] ?? stage[0].toUpperCase()}
-              </div>
+              </button>
 
               {/* Popout menu */}
               {hoveredStage === stage && (
