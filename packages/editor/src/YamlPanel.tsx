@@ -255,37 +255,6 @@ export function YamlPanel({ pipeline, onPipelineChange, onClose }: YamlPanelProp
     setParseError(null);
   }, [pipeline]);
 
-  const handleOpen = useCallback(async () => {
-    try {
-      const input = document.createElement("input");
-      input.type = "file";
-      input.accept = ".yaml,.yml";
-      input.onchange = async () => {
-        const file = input.files?.[0];
-        if (!file) return;
-        const text = await file.text();
-        setYamlText(text);
-        userEditingRef.current = true;
-        setEditing(true);
-        try {
-          const raw = yaml.load(text, { schema: yaml.JSON_SCHEMA });
-          const p = normalizePipeline(raw);
-          if (p) {
-            setParseError(null);
-            onPipelineChange(p);
-          } else {
-            setParseError("Unrecognized format — expected 'steps' or 'stages' array");
-          }
-        } catch (err) {
-          setParseError(err instanceof Error ? err.message : String(err));
-        }
-      };
-      input.click();
-    } catch {
-      // User cancelled
-    }
-  }, [onPipelineChange]);
-
   const handleSave = useCallback(() => {
     const blob = new Blob([yamlText], { type: "text/yaml" });
     const url = URL.createObjectURL(blob);
@@ -314,9 +283,6 @@ export function YamlPanel({ pipeline, onPipelineChange, onClose }: YamlPanelProp
         gap: 8,
       }}>
         <span style={{ fontWeight: 600, flex: 1, fontSize: 14 }}>Pipeline YAML</span>
-        <button className="zyra-btn zyra-btn--neutral" onClick={handleOpen} title="Open YAML file" style={{ fontSize: 11, padding: "4px 10px" }}>
-          Open
-        </button>
         <button className="zyra-btn zyra-btn--neutral" onClick={handleSave} title="Save as YAML file" style={{ fontSize: 11, padding: "4px 10px" }}>
           Save
         </button>
