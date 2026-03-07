@@ -91,7 +91,7 @@ export function ZyraNode({ id, data, selected }: NodeProps) {
     // Use requestAnimationFrame so the DOM has updated before recalculating
     const raf = requestAnimationFrame(() => updateNodeInternals(id));
     return () => cancelAnimationFrame(raf);
-  }, [id, updateNodeInternals, visibleInputs.length, visibleOutputs.length]);
+  }, [id, updateNodeInternals, visibleInputs, visibleOutputs]);
 
   // Also recalculate on resize via ResizeObserver
   useEffect(() => {
@@ -306,10 +306,10 @@ export function ZyraNode({ id, data, selected }: NodeProps) {
         overflow: "hidden",
         position: "relative",
       }}>
-        {/* Scrollable input ports */}
+        {/* Input ports — overflow visible so Handle bounds stay correct for React Flow */}
         <div style={{
           flex: 1,
-          overflowY: "auto",
+          overflowY: "visible",
           padding: "8px 12px 0",
           minHeight: 0,
         }}>

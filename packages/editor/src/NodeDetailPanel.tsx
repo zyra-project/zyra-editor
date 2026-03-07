@@ -45,7 +45,7 @@ export function NodeDetailPanel({
   }, [runState?.status]);
 
   // Auto-scroll the outer tab content to bottom so latest output is visible
-  const tabContentRef = useRef<HTMLDivElement>(null!);
+  const tabContentRef = useRef<HTMLDivElement | null>(null);
   useEffect(() => {
     if (activeTab === "output") {
       scrollToBottom(tabContentRef.current);

@@ -91,7 +91,9 @@ export function getImplicitOutputs(): PortDef[] {
 
 /** Full port list for a node: explicit manifest ports + arg-ports + implicit outputs. */
 export function getEffectivePorts(stageDef: StageDef): { inputs: PortDef[]; outputs: PortDef[] } {
-  const argPorts = stageDef.args.map(argToPort);
+  // Control nodes don't accept incoming arg-port connections (those edges aren't round-tripped)
+  const includeArgPorts = stageDef.stage !== "control";
+  const argPorts = includeArgPorts ? stageDef.args.map(argToPort) : [];
   // Only executable stages (non-empty cli) produce implicit stdout/stderr/exitcode
   const hasExecutableCli = stageDef.cli != null && stageDef.cli.trim().length > 0;
   return {
