@@ -80,9 +80,15 @@ export interface Pipeline {
  * The caller is responsible for YAML stringification (keeps this package
  * dependency-free).
  */
+export interface PipelineDiagnostic {
+  level: "warn" | "error";
+  message: string;
+}
+
 export function graphToPipeline(
   graph: Graph,
   stages: StageDef[],
+  diagnostics?: PipelineDiagnostic[],
 ): Pipeline {
   const stageMap = new Map(
     stages.map((s) => [`${s.stage}/${s.command}`, s]),
@@ -103,10 +109,10 @@ export function graphToPipeline(
   for (const e of graph.edges) {
     if (!controlNodeIds.has(e.sourceNode)) continue;
     if (!e.targetPort.startsWith("arg:")) {
-      console.warn(
-        `Control node "${e.sourceNode}" has an unsupported edge to ` +
-        `"${e.targetNode}:${e.targetPort}" — this connection will be dropped from the pipeline.`,
-      );
+      diagnostics?.push({
+        level: "warn",
+        message: `Control node "${e.sourceNode}" has an unsupported edge to "${e.targetNode}:${e.targetPort}" — this connection will be dropped from the pipeline.`,
+      });
       continue;
     }
     const srcNode = nodeMap.get(e.sourceNode);

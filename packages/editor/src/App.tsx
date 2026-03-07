@@ -221,9 +221,9 @@ function Editor() {
         }
       }
 
-      // Filter out position changes for locked groups and their children
+      // Filter out position and dimension changes for locked groups and their children
       const filtered = changes.filter((change) => {
-        if (change.type !== "position" || !("id" in change)) return true;
+        if ((change.type !== "position" && change.type !== "dimensions") || !("id" in change)) return true;
         const node = nds.find((n) => n.id === change.id);
         if (!node) return true;
 

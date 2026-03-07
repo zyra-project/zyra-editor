@@ -14,6 +14,7 @@ export type {
   PipelineStep,
   PipelineGroup,
   PipelineControl,
+  PipelineDiagnostic,
 } from "./serializer.js";
 export { graphToPipeline } from "./serializer.js";
 

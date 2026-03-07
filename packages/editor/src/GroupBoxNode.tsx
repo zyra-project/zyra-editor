@@ -56,7 +56,7 @@ export function GroupBoxNode({ id, data, selected }: NodeProps) {
       }}
     >
       <NodeResizer
-        isVisible={!!selected}
+        isVisible={!!selected && !locked}
         minWidth={200}
         minHeight={120}
         lineStyle={{ borderColor: color }}

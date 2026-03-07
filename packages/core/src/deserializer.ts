@@ -163,20 +163,48 @@ function remapArgs(
     }
   }
 
-  /** Try suffix match: YAML "period" matches manifest "since_period" */
+  /** Try suffix match: YAML "period" matches manifest "since_period" on a word boundary.
+   *  Only matches when unambiguous (exactly one candidate) and key is at least 3 chars. */
   function suffixMatch(key: string): string | undefined {
-    const nk = norm(key);
+    const trimmed = key.trim().toLowerCase();
+    if (trimmed.length < 3) return undefined;
+    const matches: string[] = [];
     for (const arg of argDefs) {
-      const nArg = norm(arg.key);
-      if (nArg.endsWith(nk) && nArg.length > nk.length) return arg.key;
+      const argLower = arg.key.toLowerCase();
+      if (argLower.endsWith(`_${trimmed}`) || argLower.endsWith(`-${trimmed}`)) {
+        matches.push(arg.key);
+      }
     }
-    return undefined;
+    return matches.length === 1 ? matches[0] : undefined;
   }
 
   const out: Record<string, string | number | boolean> = {};
   for (const [k, v] of Object.entries(yamlArgs)) {
-    const canonical = exactMap.get(k) ?? normMap.get(norm(k)) ?? suffixMatch(k) ?? k;
-    out[canonical] = v;
+    const exact = exactMap.get(k);
+    if (exact) {
+      out[exact] = v;
+      continue;
+    }
+    const byNorm = normMap.get(norm(k));
+    if (byNorm) {
+      // Fuzzy match — preserve under raw key if it would collide
+      if (byNorm !== k && Object.prototype.hasOwnProperty.call(out, byNorm)) {
+        out[k] = v;
+      } else {
+        out[byNorm] = v;
+      }
+      continue;
+    }
+    const bySuffix = suffixMatch(k);
+    if (bySuffix) {
+      if (Object.prototype.hasOwnProperty.call(out, bySuffix)) {
+        out[k] = v;
+      } else {
+        out[bySuffix] = v;
+      }
+      continue;
+    }
+    out[k] = v;
   }
   return out;
 }
