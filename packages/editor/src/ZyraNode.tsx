@@ -1,4 +1,4 @@
-import { useState, useMemo, useEffect, useRef, useCallback } from "react";
+import { useState, useMemo, useEffect, useRef } from "react";
 import { Handle, Position, NodeResizer, useReactFlow, useUpdateNodeInternals, type NodeProps } from "@xyflow/react";
 import type { ArgDef, StageDef, NodeRunStatus, PortDef } from "@zyra/core";
 import { STATUS_COLORS, getEffectivePorts } from "@zyra/core";

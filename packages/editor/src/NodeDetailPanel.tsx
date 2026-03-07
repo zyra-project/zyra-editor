@@ -2,7 +2,7 @@ import { useState, useEffect, useRef, useMemo } from "react";
 import type { ArgDef, NodeRunStatus } from "@zyra/core";
 import { STATUS_COLORS, getEffectivePorts } from "@zyra/core";
 import type { ZyraNodeData } from "./ZyraNode";
-import { isSensitive, SENSITIVE_PATTERNS } from "./ZyraNode";
+import { isSensitive } from "./ZyraNode";
 import type { NodeRunState } from "@zyra/core";
 
 /** Scroll an element to its bottom. */
@@ -274,6 +274,8 @@ function InputTab({
     <>
       {visiblePorts.map((port) => {
         const connections = connectedInputs.filter((c) => c.portId === port.id);
+        const argDef = port.argKey ? stageDef.args?.find((a) => a.key === port.argKey) : undefined;
+        const sensitive = argDef ? isSensitive(argDef) : false;
         return (
           <div key={port.id} style={{ marginBottom: 16 }}>
             <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 4 }}>
@@ -309,7 +311,7 @@ function InputTab({
                   }}
                   onMouseEnter={(e) => { e.currentTarget.style.background = "var(--bg-secondary)"; }}
                   onMouseLeave={(e) => { e.currentTarget.style.background = "var(--bg-primary)"; }}
-                  title={`Jump to ${conn.peerLabel}${conn.peerValue ? ` (${conn.peerValue})` : ""}`}
+                  title={`Jump to ${conn.peerLabel}${conn.peerValue && !sensitive ? ` (${conn.peerValue})` : ""}`}
                 >
                   <span style={{ color: "var(--text-primary)" }}>{conn.peerLabel}</span>
                   {conn.peerValue && (
@@ -322,7 +324,7 @@ function InputTab({
                       whiteSpace: "nowrap",
                       minWidth: 0,
                     }}>
-                      {conn.peerValue.length > 24 ? conn.peerValue.slice(0, 24) + "\u2026" : conn.peerValue}
+                      {sensitive ? "••••••••" : conn.peerValue.length > 24 ? conn.peerValue.slice(0, 24) + "\u2026" : conn.peerValue}
                     </span>
                   )}
                   {conn.peerStatus && (
@@ -582,7 +584,7 @@ function ArgField({
 
   return (
     <div style={{ marginBottom: 14 }}>
-      <label htmlFor={id} style={{
+      <label htmlFor={linkedFrom ? undefined : id} style={{
         display: "block",
         fontSize: 12,
         fontWeight: 600,

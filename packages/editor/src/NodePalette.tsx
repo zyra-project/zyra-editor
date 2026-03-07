@@ -1,4 +1,4 @@
-import { useState, useRef } from "react";
+import { useState, useRef, useEffect } from "react";
 import type { StageDef } from "@zyra/core";
 import { useManifest } from "./ManifestLoader";
 
@@ -55,6 +55,13 @@ export function NodePalette({ onAddNode, onAddGroup, collapsed, onToggleCollapse
   const [searchQuery, setSearchQuery] = useState("");
   const [hoveredStage, setHoveredStage] = useState<string | null>(null);
   const hoverTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // Clear hover timeout on unmount
+  useEffect(() => {
+    return () => {
+      if (hoverTimeoutRef.current) clearTimeout(hoverTimeoutRef.current);
+    };
+  }, []);
 
   // Group stages by their stage category
   const groups = new Map<string, StageDef[]>();
