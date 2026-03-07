@@ -12,6 +12,10 @@ export default defineConfig({
   plugins: [react()],
   server: {
     port: 5173,
+    watch: {
+      usePolling: !!process.env.VITE_USE_POLLING,
+      interval: 1000,
+    },
     proxy: {
       "/v1": backend,
       "/ws": {

@@ -172,6 +172,12 @@ def _opt_to_arg(flag: str, info) -> dict | None:
     return arg
 
 
+# Stages that should not appear as editor nodes (handled by the editor UI itself)
+HIDDEN_STAGES: set[str] = {"run"}
+
+# Stages still under development — shown in the palette but not usable
+WIP_STAGES: set[str] = {"decide", "simulate"}
+
 # Map deprecated / alias stage names to canonical stage names
 STAGE_ALIASES: dict[str, str] = {
     "decimate": "export",
@@ -195,6 +201,10 @@ def _commands_to_manifest(commands: dict) -> dict:
         stage = STAGE_ALIASES.get(raw_stage, raw_stage)
         command = parts[1] if len(parts) > 1 else raw_stage
 
+        # Skip stages handled by the editor UI (e.g. "run" → toolbar button)
+        if stage in HIDDEN_STAGES:
+            continue
+
         # Only include commands whose raw name matches the canonical stage
         # (skip aliased duplicates like "import ftp" when "acquire ftp" exists)
         if raw_stage != stage:
@@ -215,23 +225,32 @@ def _commands_to_manifest(commands: dict) -> dict:
         inputs = STAGE_INPUTS.get(stage, DEFAULT_INPUTS)
         outputs = [] if stage in SINK_STAGES else DEFAULT_OUTPUTS
 
-        stages.append({
+        # Extract command-level description (the CLI "help" text)
+        description = ""
+        if isinstance(cmd_info, dict):
+            description = cmd_info.get("description", "") or cmd_info.get("help", "") or ""
+
+        entry: dict = {
             "stage": stage,
             "command": command,
             "label": cmd_key.replace("-", " ").title(),
             "cli": f"zyra {cmd_key}",
-            "status": "implemented",
+            "status": "planned" if stage in WIP_STAGES else "implemented",
             "color": STAGE_COLORS.get(stage, DEFAULT_COLOR),
             "inputs": inputs,
             "outputs": outputs,
             "args": args,
-        })
+        }
+        if description:
+            entry["description"] = description
+        stages.append(entry)
 
     # Inject editor-only control nodes (not backed by CLI commands)
     stages.insert(0, {
         "stage": "control",
         "command": "variable",
         "label": "Variable",
+        "description": "Define a named variable to pass values into the pipeline",
         "cli": "",
         "status": "implemented",
         "color": STAGE_COLORS.get("control", DEFAULT_COLOR),

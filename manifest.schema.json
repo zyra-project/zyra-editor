@@ -61,6 +61,7 @@
         "stage": { "type": "string" },
         "command": { "type": "string" },
         "label": { "type": "string" },
+        "description": { "type": "string" },
         "cli": { "type": "string" },
         "status": {
           "type": "string",

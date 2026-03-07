@@ -1,6 +1,6 @@
 import { useState, useCallback, useEffect, useRef } from "react";
 import yaml from "js-yaml";
-import type { Pipeline, PipelineStep } from "@zyra/core";
+import type { Pipeline, PipelineStep, PipelineGroup, PipelineControl } from "@zyra/core";
 
 /** Zyra native YAML format: stages array with stage/command fields. */
 interface NativeStage {
@@ -20,7 +20,7 @@ interface NativeYaml {
  * - Editor format: { version, steps: [{ name, command, args }] }
  * - Zyra native format: { name?, stages: [{ stage, command, args }] }
  */
-function normalizePipeline(raw: unknown): Pipeline | null {
+export function normalizePipeline(raw: unknown): Pipeline | null {
   if (!raw || typeof raw !== "object") return null;
   const obj = raw as Record<string, unknown>;
 
@@ -80,7 +80,78 @@ function normalizePipeline(raw: unknown): Pipeline | null {
     }
 
     if (steps.length === 0) return null;
-    return { version: "1", steps };
+
+    // Pass through _controls if present
+    const pipeline: Pipeline = { version: "1", steps };
+    const controls: PipelineControl[] = [];
+    if (Array.isArray(obj._controls)) {
+      for (const c of obj._controls as unknown[]) {
+        if (!c || typeof c !== "object") continue;
+        const co = c as Record<string, unknown>;
+        if (typeof co.id !== "string" || typeof co.stageCommand !== "string") continue;
+        let argValues: Record<string, string | number | boolean> = {};
+        if (co.argValues && typeof co.argValues === "object" && !Array.isArray(co.argValues)) {
+          for (const [k, v] of Object.entries(co.argValues as Record<string, unknown>)) {
+            if (typeof v === "string" || typeof v === "number" || typeof v === "boolean") argValues[k] = v;
+          }
+        }
+        const edges: PipelineControl["edges"] = [];
+        if (Array.isArray(co.edges)) {
+          for (const e of co.edges as unknown[]) {
+            if (!e || typeof e !== "object") continue;
+            const eo = e as Record<string, unknown>;
+            if (typeof eo.targetNode === "string" && typeof eo.targetPort === "string") {
+              edges.push({ targetNode: eo.targetNode, targetPort: eo.targetPort });
+            }
+          }
+        }
+        const ctrl: PipelineControl = { id: co.id, stageCommand: co.stageCommand, argValues, edges };
+        if (typeof co.label === "string" && co.label) ctrl.label = co.label;
+        if (co._layout && typeof co._layout === "object" && !Array.isArray(co._layout)) {
+          const lo = co._layout as Record<string, unknown>;
+          if (typeof lo.x === "number" && typeof lo.y === "number") {
+            const layout: PipelineControl["_layout"] = { x: lo.x, y: lo.y };
+            if (typeof lo.w === "number") layout.w = lo.w;
+            if (typeof lo.h === "number") layout.h = lo.h;
+            ctrl._layout = layout;
+          }
+        }
+        controls.push(ctrl);
+      }
+      if (controls.length > 0) pipeline._controls = controls;
+    }
+
+    // Pass through _groups if present
+    if (Array.isArray(obj._groups)) {
+      const groups: PipelineGroup[] = [];
+      const stepNames = new Set(steps.map((s) => s.name));
+      for (const c of controls) stepNames.add(c.id);
+      for (const g of obj._groups as unknown[]) {
+        if (!g || typeof g !== "object") continue;
+        const go = g as Record<string, unknown>;
+        if (typeof go.id !== "string" || typeof go.label !== "string") continue;
+        const pos = go.position as Record<string, unknown> | undefined;
+        const sz = go.size as Record<string, unknown> | undefined;
+        if (!pos || typeof pos.x !== "number" || typeof pos.y !== "number") continue;
+        if (!sz || typeof sz.w !== "number" || typeof sz.h !== "number") continue;
+        const children = Array.isArray(go.children)
+          ? (go.children as unknown[]).filter((c): c is string => typeof c === "string" && stepNames.has(c))
+          : [];
+        groups.push({
+          id: go.id,
+          label: go.label,
+          description: typeof go.description === "string" ? go.description : undefined,
+          color: typeof go.color === "string" && /^#[0-9a-fA-F]{6}$/.test(go.color) ? go.color : "#3b82f6",
+          locked: typeof go.locked === "boolean" ? go.locked : undefined,
+          position: { x: pos.x, y: pos.y },
+          size: { w: sz.w, h: sz.h },
+          children,
+        });
+      }
+      if (groups.length > 0) pipeline._groups = groups;
+    }
+
+    return pipeline;
   }
 
   // Zyra native format
@@ -143,11 +214,8 @@ export function YamlPanel({ pipeline, onPipelineChange, onClose }: YamlPanelProp
   const [parseError, setParseError] = useState<string | null>(null);
   const [editing, setEditing] = useState(false);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
-  // Track whether the textarea is actively being edited by the user
   const userEditingRef = useRef(false);
 
-  // Always sync incoming pipeline to YAML text — unless the user is
-  // actively typing in the textarea (to avoid clobbering their edits).
   useEffect(() => {
     if (!userEditingRef.current) {
       setYamlText(yaml.dump(pipeline, { lineWidth: -1, noRefs: true }));
@@ -175,7 +243,6 @@ export function YamlPanel({ pipeline, onPipelineChange, onClose }: YamlPanelProp
     }
   }, [onPipelineChange]);
 
-  // When the textarea loses focus, stop treating the user as actively editing
   const handleBlur = useCallback(() => {
     userEditingRef.current = false;
     setEditing(false);
@@ -188,37 +255,6 @@ export function YamlPanel({ pipeline, onPipelineChange, onClose }: YamlPanelProp
     setParseError(null);
   }, [pipeline]);
 
-  const handleOpen = useCallback(async () => {
-    try {
-      const input = document.createElement("input");
-      input.type = "file";
-      input.accept = ".yaml,.yml";
-      input.onchange = async () => {
-        const file = input.files?.[0];
-        if (!file) return;
-        const text = await file.text();
-        setYamlText(text);
-        userEditingRef.current = true;
-        setEditing(true);
-        try {
-          const raw = yaml.load(text, { schema: yaml.JSON_SCHEMA });
-          const p = normalizePipeline(raw);
-          if (p) {
-            setParseError(null);
-            onPipelineChange(p);
-          } else {
-            setParseError("Unrecognized format — expected 'steps' or 'stages' array");
-          }
-        } catch (err) {
-          setParseError(err instanceof Error ? err.message : String(err));
-        }
-      };
-      input.click();
-    } catch {
-      // User cancelled
-    }
-  }, [onPipelineChange]);
-
   const handleSave = useCallback(() => {
     const blob = new Blob([yamlText], { type: "text/yaml" });
     const url = URL.createObjectURL(blob);
@@ -226,43 +262,33 @@ export function YamlPanel({ pipeline, onPipelineChange, onClose }: YamlPanelProp
     a.href = url;
     a.download = "pipeline.yaml";
     a.click();
-    // Defer revoking the URL to avoid racing the download in some browsers.
     setTimeout(() => URL.revokeObjectURL(url), 0);
   }, [yamlText]);
 
   return (
-    <div
-      style={{
-        width: 420,
-        background: "#161b22",
-        borderLeft: "1px solid #30363d",
-        display: "flex",
-        flexDirection: "column",
-        fontFamily: "system-ui, sans-serif",
-        fontSize: 13,
-        color: "#c9d1d9",
-      }}
-    >
+    <div style={{
+      display: "flex",
+      flexDirection: "column",
+      height: "100%",
+      fontFamily: "var(--font-sans)",
+      fontSize: 13,
+      color: "var(--text-primary)",
+    }}>
       {/* Header */}
-      <div
-        style={{
-          display: "flex",
-          alignItems: "center",
-          padding: "8px 12px",
-          borderBottom: "1px solid #30363d",
-          gap: 6,
-        }}
-      >
-        <span style={{ fontWeight: 600, flex: 1 }}>Pipeline YAML</span>
-        <button onClick={handleOpen} style={btnStyle("#30363d")} title="Open YAML file">
-          Open
-        </button>
-        <button onClick={handleSave} style={btnStyle("#30363d")} title="Save as YAML file">
+      <div style={{
+        display: "flex",
+        alignItems: "center",
+        padding: "12px 16px",
+        borderBottom: "1px solid var(--border-default)",
+        gap: 8,
+      }}>
+        <span style={{ fontWeight: 600, flex: 1, fontSize: 14 }}>Pipeline YAML</span>
+        <button className="zyra-btn zyra-btn--neutral" onClick={handleSave} title="Save as YAML file" style={{ fontSize: 11, padding: "4px 10px" }}>
           Save
         </button>
         {editing && (
-          <button onClick={handleSync} style={btnStyle("#1f6feb")} title="Reset to canvas state">
-            Sync
+          <button className="zyra-btn zyra-btn--info" onClick={handleSync} title="Discard edits and reload YAML from the canvas" style={{ fontSize: 11, padding: "4px 10px" }}>
+            Reset
           </button>
         )}
         <button
@@ -270,30 +296,29 @@ export function YamlPanel({ pipeline, onPipelineChange, onClose }: YamlPanelProp
           style={{
             background: "none",
             border: "none",
-            color: "#8b949e",
+            color: "var(--text-secondary)",
             cursor: "pointer",
-            fontSize: 16,
+            fontSize: 18,
             padding: "0 4px",
+            lineHeight: 1,
           }}
           title="Close YAML panel"
           aria-label="Close YAML panel"
         >
-          x
+          &times;
         </button>
       </div>
 
       {/* Error bar */}
       {parseError && (
-        <div
-          style={{
-            padding: "6px 12px",
-            background: "#3d1a1a",
-            color: "#f85149",
-            fontSize: 11,
-            borderBottom: "1px solid #30363d",
-            whiteSpace: "pre-wrap",
-          }}
-        >
+        <div style={{
+          padding: "8px 16px",
+          background: "var(--bg-error)",
+          color: "var(--text-error)",
+          fontSize: 11,
+          borderBottom: "1px solid var(--border-default)",
+          whiteSpace: "pre-wrap",
+        }}>
           {parseError}
         </div>
       )}
@@ -307,13 +332,13 @@ export function YamlPanel({ pipeline, onPipelineChange, onClose }: YamlPanelProp
         spellCheck={false}
         style={{
           flex: 1,
-          background: "#0d1117",
-          color: "#c9d1d9",
+          background: "var(--bg-primary)",
+          color: "var(--text-primary)",
           border: "none",
-          padding: 12,
-          fontFamily: "'Cascadia Code', 'Fira Code', 'Consolas', monospace",
+          padding: 16,
+          fontFamily: "var(--font-mono)",
           fontSize: 12,
-          lineHeight: 1.5,
+          lineHeight: 1.6,
           resize: "none",
           outline: "none",
           tabSize: 2,
@@ -321,17 +346,4 @@ export function YamlPanel({ pipeline, onPipelineChange, onClose }: YamlPanelProp
       />
     </div>
   );
-}
-
-function btnStyle(bg: string): React.CSSProperties {
-  return {
-    background: bg,
-    color: "#c9d1d9",
-    border: "1px solid #444c56",
-    borderRadius: 6,
-    padding: "3px 10px",
-    fontSize: 11,
-    fontWeight: 600,
-    cursor: "pointer",
-  };
 }

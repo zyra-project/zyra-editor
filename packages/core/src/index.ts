@@ -4,7 +4,7 @@ export type {
   PortDef,
   ArgDef,
 } from "./manifest.js";
-export { portsCompatible } from "./manifest.js";
+export { portsCompatible, argToPort, getImplicitOutputs, getEffectivePorts } from "./manifest.js";
 
 export type {
   Graph,
@@ -12,6 +12,9 @@ export type {
   GraphEdge,
   Pipeline,
   PipelineStep,
+  PipelineGroup,
+  PipelineControl,
+  PipelineDiagnostic,
 } from "./serializer.js";
 export { graphToPipeline } from "./serializer.js";
 

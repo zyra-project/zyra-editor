@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   ReactFlow,
   Background,
@@ -11,35 +11,82 @@ import {
   type Connection,
   type Node,
   type Edge,
+  type NodeChange,
   BackgroundVariant,
 } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
-import type { StageDef, Graph, GraphNode, GraphEdge, Pipeline } from "@zyra/core";
-import { portsCompatible, graphToPipeline, pipelineToGraph } from "@zyra/core";
+import type { StageDef, Graph, GraphNode, GraphEdge, Pipeline, PipelineGroup, NodeRunStatus } from "@zyra/core";
+import { portsCompatible, getEffectivePorts, graphToPipeline, pipelineToGraph } from "@zyra/core";
 import { ManifestProvider, useManifest } from "./ManifestLoader";
 import { NodePalette } from "./NodePalette";
 import { ZyraNode, type ZyraNodeData } from "./ZyraNode";
-import { ArgPanel } from "./ArgPanel";
+import { GroupBoxNode, type GroupBoxData } from "./GroupBoxNode";
+import { NodeDetailPanel } from "./NodeDetailPanel";
 import { Toolbar } from "./Toolbar";
 import { LogPanel } from "./LogPanel";
 import { useExecution } from "./useExecution";
-import { YamlPanel } from "./YamlPanel";
+import { YamlPanel, normalizePipeline } from "./YamlPanel";
+import yaml from "js-yaml";
+import { useTheme } from "./useTheme";
 
 let nodeIdCounter = 0;
 function nextId() {
   return `node-${++nodeIdCounter}`;
 }
+let groupIdCounter = 0;
+function nextGroupId() {
+  return `group-${++groupIdCounter}`;
+}
 
-/** Convert React Flow state to @zyra/core Graph for serialization. */
+/** Find the group box that contains the given absolute point. */
+function findContainingGroup(
+  point: { x: number; y: number },
+  nodes: Node[],
+  excludeNodeId?: string,
+): string | null {
+  for (const n of nodes) {
+    if (n.type !== "group" || n.id === excludeNodeId) continue;
+    const w = n.measured?.width ?? (typeof n.style?.width === "number" ? n.style.width : 400);
+    const h = n.measured?.height ?? (typeof n.style?.height === "number" ? n.style.height : 260);
+    if (
+      point.x >= n.position.x &&
+      point.x <= n.position.x + w &&
+      point.y >= n.position.y &&
+      point.y <= n.position.y + h
+    ) {
+      return n.id;
+    }
+  }
+  return null;
+}
+
+/** Ensure parent nodes appear before their children in the array (React Flow requirement). */
+function ensureParentOrder(nodes: Node[]): Node[] {
+  const parentIds = new Set(nodes.filter((n) => n.parentId).map((n) => n.parentId!));
+  const parents = nodes.filter((n) => parentIds.has(n.id));
+  const rest = nodes.filter((n) => !parentIds.has(n.id));
+  return [...parents, ...rest];
+}
+
+/** Convert React Flow state to @zyra/core Graph for serialization.
+ *  Group box nodes are filtered out — they're visual-only. */
 function toGraph(nodes: Node[], edges: Edge[]): Graph {
-  const graphNodes: GraphNode[] = nodes.map((n) => {
+  const graphNodes: GraphNode[] = nodes.filter((n) => n.type !== "group").map((n) => {
     const d = n.data as ZyraNodeData;
+    // Convert relative position to absolute if node has a parent
+    let pos = { x: n.position.x, y: n.position.y };
+    if (n.parentId) {
+      const parent = nodes.find((p) => p.id === n.parentId);
+      if (parent) {
+        pos = { x: parent.position.x + n.position.x, y: parent.position.y + n.position.y };
+      }
+    }
     return {
       id: n.id,
       label: d.nodeLabel || undefined,
       stageCommand: `${d.stageDef.stage}/${d.stageDef.command}`,
       argValues: { ...d.argValues },
-      position: { x: n.position.x, y: n.position.y },
+      position: pos,
       size: n.measured?.width && n.measured?.height
         ? { w: n.measured.width, h: n.measured.height }
         : n.width && n.height
@@ -78,7 +125,6 @@ function placeholderStage(stageCommand: string): StageDef {
 
 /**
  * Compute a left-to-right layout based on dependency depth.
- * Nodes at the same depth are stacked vertically.
  */
 function computeAutoLayout(graph: Graph): Map<string, { x: number; y: number }> {
   const NODE_W = 260;
@@ -86,7 +132,6 @@ function computeAutoLayout(graph: Graph): Map<string, { x: number; y: number }> 
   const PADDING_X = 80;
   const PADDING_Y = 40;
 
-  // Build adjacency: parent → children
   const children = new Map<string, string[]>();
   const parents = new Map<string, string[]>();
   for (const n of graph.nodes) {
@@ -98,11 +143,10 @@ function computeAutoLayout(graph: Graph): Map<string, { x: number; y: number }> 
     parents.get(e.targetNode)?.push(e.sourceNode);
   }
 
-  // Compute depth (longest path from a root)
   const depth = new Map<string, number>();
   function getDepth(id: string, visited: Set<string>): number {
     if (depth.has(id)) return depth.get(id)!;
-    if (visited.has(id)) return 0; // cycle guard
+    if (visited.has(id)) return 0;
     visited.add(id);
     const pars = parents.get(id) ?? [];
     const d = pars.length === 0 ? 0 : Math.max(...pars.map((p) => getDepth(p, visited))) + 1;
@@ -111,7 +155,6 @@ function computeAutoLayout(graph: Graph): Map<string, { x: number; y: number }> 
   }
   for (const n of graph.nodes) getDepth(n.id, new Set());
 
-  // Group by depth
   const columns = new Map<number, string[]>();
   for (const n of graph.nodes) {
     const d = depth.get(n.id) ?? 0;
@@ -119,7 +162,6 @@ function computeAutoLayout(graph: Graph): Map<string, { x: number; y: number }> 
     columns.get(d)!.push(n.id);
   }
 
-  // Assign positions
   const positions = new Map<string, { x: number; y: number }>();
   for (const col of Array.from(columns.keys()).sort((a, b) => a - b)) {
     const ids = columns.get(col)!;
@@ -136,32 +178,132 @@ function computeAutoLayout(graph: Graph): Map<string, { x: number; y: number }> 
 
 function Editor() {
   const manifest = useManifest();
-  const [nodes, setNodes, onNodesChange] = useNodesState<Node>([]);
+  const { theme, toggle: toggleTheme } = useTheme();
+  const [nodes, setNodes, defaultOnNodesChange] = useNodesState<Node>([]);
   const [edges, setEdges, onEdgesChange] = useEdgesState<Edge>([]);
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
   const [yamlOpen, setYamlOpen] = useState(false);
+  const [paletteCollapsed, setPaletteCollapsed] = useState(false);
   const exec = useExecution();
   const reactFlowWrapper = useRef<HTMLDivElement>(null);
-  const { screenToFlowPosition } = useReactFlow();
+  const { screenToFlowPosition, setCenter } = useReactFlow();
 
-  const nodeTypes = useMemo(() => ({ zyra: ZyraNode }), []);
+  const nodeTypes = useMemo(() => ({ zyra: ZyraNode, group: GroupBoxNode }), []);
 
-  // Stable ref for the per-node run callback so memo doesn't churn
+  // Use a ref for lock checks to avoid recreating onNodesChange on every node update
+  const nodesRef = useRef(nodes);
+  nodesRef.current = nodes;
+
+  const onNodesChange = useCallback(
+    (changes: NodeChange[]) => {
+      const nds = nodesRef.current;
+
+      // On group deletion, un-parent children first
+      for (const change of changes) {
+        if (change.type === "remove") {
+          const node = nds.find((n) => n.id === change.id);
+          if (node?.type === "group") {
+            setNodes((prev) =>
+              prev.map((n) => {
+                if (n.parentId !== change.id) return n;
+                const parent = prev.find((p) => p.id === change.id);
+                return {
+                  ...n,
+                  parentId: undefined,
+                  expandParent: undefined,
+                  position: parent
+                    ? { x: parent.position.x + n.position.x, y: parent.position.y + n.position.y }
+                    : n.position,
+                };
+              }),
+            );
+          }
+        }
+      }
+
+      // Filter out position and dimension changes for locked groups and their children
+      const filtered = changes.filter((change) => {
+        if ((change.type !== "position" && change.type !== "dimensions") || !("id" in change)) return true;
+        const node = nds.find((n) => n.id === change.id);
+        if (!node) return true;
+
+        // Locked group itself
+        if (node.type === "group" && (node.data as GroupBoxData).locked) {
+          return false;
+        }
+        // Child of a locked group
+        if (node.parentId) {
+          const parent = nds.find((n) => n.id === node.parentId);
+          if (parent && (parent.data as GroupBoxData).locked) {
+            return false;
+          }
+        }
+        return true;
+      });
+
+      defaultOnNodesChange(filtered);
+    },
+    [defaultOnNodesChange, setNodes],
+  );
+
+  // Stable ref for the per-node run callback
   const runNodeRef = useRef<(nodeId: string) => void>(() => {});
-
-  // Stable callback that delegates to the mutable ref — avoids recreating
-  // node data objects every time exec.runState changes.
   const onRunNode = useCallback((nodeId: string) => runNodeRef.current(nodeId), []);
 
-  // Inject run status + run callback into node data so ZyraNode can render badges / play button
+  // Build per-node connected port maps from edges
+  // connectedInputMap: nodeId → Map<portId, displayValue>
+  // connectedOutputMap: nodeId → Set<portId>
+  const { connectedInputMap, connectedOutputMap } = useMemo(() => {
+    const nodeById = new Map(nodes.map((n) => [n.id, n]));
+    const inMap = new Map<string, Map<string, string>>();
+    const outMap = new Map<string, Set<string>>();
+    for (const e of edges) {
+      if (!inMap.has(e.target)) inMap.set(e.target, new Map());
+      if (e.targetHandle) {
+        // Look up the source node to extract a display value
+        const srcNode = nodeById.get(e.source);
+        const srcData = srcNode?.data as ZyraNodeData | undefined;
+        let displayValue = srcData?.nodeLabel || srcData?.stageDef.label || "";
+        // For control nodes, show the actual explicitly set value or default;
+        // otherwise mark as unset so the UI doesn't imply a value will be inlined
+        if (srcData?.stageDef.stage === "control") {
+          const val = srcData.argValues?.value;
+          if (val !== undefined && val !== "") {
+            displayValue = String(val);
+          } else {
+            const valueDef = srcData.stageDef.args.find((a) => a.key === "value");
+            if (valueDef?.default !== undefined && valueDef.default !== "") {
+              displayValue = String(valueDef.default);
+            } else {
+              displayValue = "(unset)";
+            }
+          }
+        }
+        inMap.get(e.target)!.set(e.targetHandle, displayValue);
+      }
+      if (!outMap.has(e.source)) outMap.set(e.source, new Set());
+      if (e.sourceHandle) outMap.get(e.source)!.add(e.sourceHandle);
+    }
+    return { connectedInputMap: inMap, connectedOutputMap: outMap };
+  }, [edges, nodes]);
+
+  // Inject run status + connected port sets into node data (skip group nodes)
   const nodesWithStatus = useMemo(() => {
     return nodes.map((n) => {
+      if (n.type === "group") return n;
       const rs = exec.runState.get(n.id);
       const d = n.data as ZyraNodeData;
       const newStatus = rs?.status;
       const newArgv = rs?.dryRunArgv;
-      // Only clone when run-related fields actually differ
-      if (d.runStatus === newStatus && d.dryRunArgv === newArgv && d.onRunNode === onRunNode) {
+      const connIn = connectedInputMap.get(n.id);
+      const connOut = connectedOutputMap.get(n.id);
+      if (
+        d.runStatus === newStatus &&
+        d.dryRunArgv === newArgv &&
+        d.onRunNode === onRunNode &&
+        d.connectedInputPorts === connIn &&
+        d.connectedOutputPorts === connOut
+      ) {
         return n;
       }
       return {
@@ -171,21 +313,53 @@ function Editor() {
           runStatus: newStatus,
           dryRunArgv: newArgv,
           onRunNode,
+          connectedInputPorts: connIn,
+          connectedOutputPorts: connOut,
         },
       };
     });
-  }, [nodes, exec.runState, onRunNode]);
+  }, [nodes, exec.runState, onRunNode, connectedInputMap, connectedOutputMap]);
 
-  // Compute pipeline from current canvas state (for YAML panel)
+  // Pipeline from current canvas state
   const pipeline = useMemo<Pipeline>(() => {
     try {
-      return graphToPipeline(toGraph(nodes, edges), manifest.stages);
+      const p = graphToPipeline(toGraph(nodes, edges), manifest.stages);
+
+      // Serialize group boxes into _groups (editor-only metadata)
+      const groupNodes = nodes.filter((n) => n.type === "group");
+      if (groupNodes.length > 0) {
+        // Derive children from current parentId — includes steps and control nodes
+        const stepNames = new Set(p.steps.map((s) => s.name));
+        if (p._controls) for (const c of p._controls) stepNames.add(c.id);
+        const groups = groupNodes.map((g) => {
+          const d = g.data as GroupBoxData;
+          const w = g.measured?.width ?? (typeof g.style?.width === "number" ? g.style.width : 400);
+          const h = g.measured?.height ?? (typeof g.style?.height === "number" ? g.style.height : 260);
+          const children = nodes
+            .filter((n) => n.parentId === g.id && stepNames.has(n.id))
+            .map((n) => n.id);
+          const group: PipelineGroup = {
+            id: g.id,
+            label: d.label,
+            color: d.color,
+            position: { x: Math.round(g.position.x), y: Math.round(g.position.y) },
+            size: { w: Math.round(w), h: Math.round(h) },
+            children,
+          };
+          if (d.description) group.description = d.description;
+          if (d.locked) group.locked = true;
+          return group;
+        });
+        return { ...p, _groups: groups };
+      }
+
+      return p;
     } catch {
       return { version: "1", steps: [] };
     }
   }, [nodes, edges, manifest.stages]);
 
-  // YAML → canvas: rebuild React Flow nodes/edges from a parsed Pipeline
+  // YAML -> canvas
   const handlePipelineChange = useCallback(
     (newPipeline: Pipeline) => {
       const graph = pipelineToGraph(newPipeline, manifest.stages);
@@ -193,15 +367,12 @@ function Editor() {
         manifest.stages.map((s) => [`${s.stage}/${s.command}`, s]),
       );
 
-      // Check if any nodes have saved positions
       const hasLayout = graph.nodes.some((gn) => gn.position);
-
-      // Compute auto-layout positions when no _layout metadata exists
       const autoPositions = hasLayout
         ? new Map<string, { x: number; y: number }>()
         : computeAutoLayout(graph);
 
-      const newNodes: Node[] = graph.nodes.map((gn) => {
+      let newNodes: Node[] = graph.nodes.map((gn) => {
         const stageDef = stageMap.get(gn.stageCommand);
         const existing = nodes.find((n) => n.id === gn.id);
         const pos =
@@ -233,11 +404,56 @@ function Editor() {
         sourceHandle: ge.sourcePort,
         target: ge.targetNode,
         targetHandle: ge.targetPort,
-        style: { stroke: "#58a6ff", strokeWidth: 2 },
-        animated: true,
+        type: "smoothstep",
+        style: { stroke: "var(--accent-blue)", strokeWidth: 2 },
+        animated: exec.running,
       }));
 
-      // Update the counter so new nodes don't collide
+      // Restore group boxes and parent-child relationships from _groups
+      if (newPipeline._groups && newPipeline._groups.length > 0) {
+        const nodeIdSet = new Set(newNodes.map((n) => n.id));
+        const groupNodes: Node[] = [];
+
+        for (const g of newPipeline._groups) {
+          groupNodes.push({
+            id: g.id,
+            type: "group",
+            position: { x: g.position.x, y: g.position.y },
+            style: { width: g.size.w, height: g.size.h },
+            zIndex: -1,
+            data: {
+              label: g.label,
+              description: g.description,
+              color: g.color,
+              locked: g.locked,
+            } satisfies GroupBoxData,
+          });
+
+          // Set parentId on children and convert their positions to relative
+          for (const childId of g.children) {
+            if (!nodeIdSet.has(childId)) continue;
+            const child = newNodes.find((n) => n.id === childId);
+            if (child) {
+              child.parentId = g.id;
+              child.position = {
+                x: child.position.x - g.position.x,
+                y: child.position.y - g.position.y,
+              };
+            }
+          }
+        }
+
+        // Update group ID counter
+        const maxGroupNum = newPipeline._groups.reduce((max, g) => {
+          const m = g.id.match(/^group-(\d+)$/);
+          return m ? Math.max(max, Number(m[1])) : max;
+        }, groupIdCounter);
+        groupIdCounter = maxGroupNum;
+
+        // Groups before children (React Flow requirement)
+        newNodes = ensureParentOrder([...groupNodes, ...newNodes]);
+      }
+
       const maxNum = graph.nodes.reduce((max, n) => {
         const m = n.id.match(/^node-(\d+)$/);
         return m ? Math.max(max, Number(m[1])) : max;
@@ -247,11 +463,11 @@ function Editor() {
       setNodes(newNodes);
       setEdges(newEdges);
     },
-    [manifest.stages, nodes, setNodes, setEdges],
+    [manifest.stages, nodes, setNodes, setEdges, exec.running],
   );
 
   const handleAddNode = useCallback(
-    (stageDef: StageDef, position?: { x: number; y: number }) => {
+    (stageDef: StageDef, position?: { x: number; y: number }, parentId?: string) => {
       const id = nextId();
       const newNode: Node = {
         id,
@@ -261,11 +477,28 @@ function Editor() {
           stageDef,
           argValues: {},
         } satisfies ZyraNodeData,
+        ...(parentId ? { parentId } : {}),
       };
       setNodes((nds) => [...nds, newNode]);
     },
     [setNodes],
   );
+
+  const handleAddGroup = useCallback(() => {
+    const id = nextGroupId();
+    const newNode: Node = {
+      id,
+      type: "group",
+      position: { x: 200 + Math.random() * 100, y: 80 + Math.random() * 100 },
+      style: { width: 400, height: 260 },
+      zIndex: -1,
+      data: {
+        label: "Group",
+        color: "#3b82f6",
+      } satisfies GroupBoxData,
+    };
+    setNodes((nds) => [newNode, ...nds]);
+  }, [setNodes]);
 
   const onDragOver = useCallback((e: React.DragEvent) => {
     e.preventDefault();
@@ -279,9 +512,21 @@ function Editor() {
       if (!json) return;
       const stageDef: StageDef = JSON.parse(json);
       const position = screenToFlowPosition({ x: e.clientX, y: e.clientY });
-      handleAddNode(stageDef, position);
+
+      // Check if the drop lands inside a group box
+      const groupId = findContainingGroup(position, nodes);
+      if (groupId) {
+        const group = nodes.find((n) => n.id === groupId)!;
+        const relativePos = {
+          x: position.x - group.position.x,
+          y: position.y - group.position.y,
+        };
+        handleAddNode(stageDef, relativePos, groupId);
+      } else {
+        handleAddNode(stageDef, position);
+      }
     },
-    [screenToFlowPosition, handleAddNode],
+    [screenToFlowPosition, handleAddNode, nodes],
   );
 
   const isValidConnection = useCallback(
@@ -293,9 +538,19 @@ function Editor() {
 
       const srcDef = (srcNode.data as ZyraNodeData).stageDef;
       const tgtDef = (tgtNode.data as ZyraNodeData).stageDef;
-      const srcPort = srcDef.outputs.find((p) => p.id === connection.sourceHandle);
-      const tgtPort = tgtDef.inputs.find((p) => p.id === connection.targetHandle);
+      // Use effective ports so arg-ports and implicit outputs participate
+      const srcPorts = getEffectivePorts(srcDef);
+      const tgtPorts = getEffectivePorts(tgtDef);
+      const srcPort = srcPorts.outputs.find((p) => p.id === connection.sourceHandle);
+      const tgtPort = tgtPorts.inputs.find((p) => p.id === connection.targetHandle);
       if (!srcPort || !tgtPort) return false;
+
+      // Only control nodes can wire into arg-ports (serialization can't
+      // round-trip non-control → arg-port edges yet)
+      if (tgtPort.argKey && srcDef.stage !== "control") return false;
+      // Control-node connections are only meaningful/serializable when
+      // targeting arg-ports, so disallow control → non-arg edges.
+      if (srcDef.stage === "control" && !tgtPort.argKey) return false;
 
       return portsCompatible(srcPort, tgtPort);
     },
@@ -308,19 +563,104 @@ function Editor() {
         addEdge(
           {
             ...connection,
-            style: { stroke: "#58a6ff", strokeWidth: 2 },
-            animated: true,
+            type: "smoothstep",
+            style: { stroke: "var(--accent-blue)", strokeWidth: 2 },
+            animated: exec.running,
           },
           eds,
         ),
       );
     },
-    [setEdges],
+    [setEdges, exec.running],
+  );
+
+  const onNodeDragStop = useCallback(
+    (_event: React.MouseEvent, node: Node) => {
+      if (node.type === "group") return;
+
+      setNodes((nds) => {
+        const currentNode = nds.find((n) => n.id === node.id);
+        if (!currentNode) return nds;
+
+        // Compute absolute position
+        let absPos = { ...currentNode.position };
+        if (currentNode.parentId) {
+          const parent = nds.find((n) => n.id === currentNode.parentId);
+          if (parent) {
+            absPos = {
+              x: parent.position.x + currentNode.position.x,
+              y: parent.position.y + currentNode.position.y,
+            };
+          }
+        }
+
+        const newGroupId = findContainingGroup(absPos, nds, node.id);
+
+        // No change needed
+        if (newGroupId === (currentNode.parentId ?? null)) return nds;
+
+        // Entering or switching to a group
+        if (newGroupId) {
+          const group = nds.find((n) => n.id === newGroupId)!;
+          return ensureParentOrder(
+            nds.map((n) =>
+              n.id === node.id
+                ? {
+                    ...n,
+                    parentId: newGroupId,
+                    expandParent: undefined,
+                    position: { x: absPos.x - group.position.x, y: absPos.y - group.position.y },
+                  }
+                : n,
+            ),
+          );
+        }
+
+        // Leaving all groups
+        return ensureParentOrder(
+          nds.map((n) =>
+            n.id === node.id
+              ? {
+                  ...n,
+                  parentId: undefined,
+                  expandParent: undefined,
+                  position: absPos,
+                }
+              : n,
+          ),
+        );
+      });
+    },
+    [setNodes],
   );
 
   const handleNodeClick = useCallback((_: React.MouseEvent, node: Node) => {
+    if (node.type === "group") return; // groups don't open detail panel
     setSelectedNodeId(node.id);
   }, []);
+
+  const handleSelectNode = useCallback(
+    (nodeId: string) => {
+      setSelectedNodeId(nodeId);
+      const target = nodes.find((n) => n.id === nodeId);
+      if (target) {
+        // Compute absolute position for nodes inside groups (which have relative positions)
+        let absX = target.position.x ?? 0;
+        let absY = target.position.y ?? 0;
+        if (target.parentId) {
+          const parent = nodes.find((n) => n.id === target.parentId);
+          if (parent) {
+            absX += parent.position.x;
+            absY += parent.position.y;
+          }
+        }
+        const x = absX + ((target.measured?.width ?? 200) / 2);
+        const y = absY + ((target.measured?.height ?? 100) / 2);
+        setCenter(x, y, { zoom: 1, duration: 300 });
+      }
+    },
+    [nodes, setCenter],
+  );
 
   const handleArgChange = useCallback(
     (nodeId: string, key: string, value: string | number | boolean) => {
@@ -365,82 +705,194 @@ function Editor() {
   );
   runNodeRef.current = handleRunNode;
 
+  // Open pipeline file from disk
+  const handleOpenFile = useCallback(() => {
+    const input = document.createElement("input");
+    input.type = "file";
+    input.accept = ".yaml,.yml";
+    input.onchange = async () => {
+      const file = input.files?.[0];
+      if (!file) return;
+      const text = await file.text();
+      try {
+        const raw = yaml.load(text, { schema: yaml.JSON_SCHEMA });
+        const p = normalizePipeline(raw);
+        if (p) handlePipelineChange(p);
+      } catch (err) {
+        console.error("Failed to load YAML file", err);
+        alert(`Failed to load pipeline file: ${err instanceof Error ? err.message : "Unknown error"}`);
+      }
+    };
+    input.click();
+  }, [handlePipelineChange]);
+
+  // Keyboard shortcuts
+  useEffect(() => {
+    function handleKeyDown(e: KeyboardEvent) {
+      // Escape: close detail panel / deselect
+      if (e.key === "Escape") {
+        if (yamlOpen) {
+          setYamlOpen(false);
+        } else if (selectedNodeId) {
+          setSelectedNodeId(null);
+        }
+        return;
+      }
+      // Cmd/Ctrl+O: open pipeline file
+      if ((e.metaKey || e.ctrlKey) && e.key === "o") {
+        e.preventDefault();
+        handleOpenFile();
+        return;
+      }
+      // Cmd/Ctrl+S: export YAML
+      if ((e.metaKey || e.ctrlKey) && e.key === "s") {
+        e.preventDefault();
+        setYamlOpen(true);
+        return;
+      }
+    }
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [selectedNodeId, yamlOpen, handleOpenFile]);
+
   const selectedNode = nodes.find((n) => n.id === selectedNodeId);
 
+  // Compute connected ports for the detail panel
+  const connectedInputs = useMemo(() => {
+    if (!selectedNodeId) return [];
+    return edges
+      .filter((e) => e.target === selectedNodeId)
+      .map((e) => {
+        const srcNode = nodes.find((n) => n.id === e.source);
+        const srcData = srcNode?.data as ZyraNodeData | undefined;
+        // For control nodes, extract the actual value (or placeholder/default) to show alongside the label
+        let peerValue: string | undefined;
+        if (srcData?.stageDef.stage === "control") {
+          const val = srcData.argValues?.value;
+          if (val !== undefined && val !== "") {
+            peerValue = String(val);
+          } else {
+            const valueDef = srcData.stageDef.args.find((a) => a.key === "value");
+            const fallback = valueDef?.default ?? valueDef?.placeholder;
+            if (fallback != null && fallback !== "") peerValue = String(fallback);
+          }
+        }
+        return {
+          portId: e.targetHandle ?? "",
+          peerNodeId: e.source,
+          peerLabel: srcData?.nodeLabel || srcData?.stageDef.label || e.source,
+          peerValue,
+          peerStatus: exec.runState.get(e.source)?.status as NodeRunStatus | undefined,
+        };
+      });
+  }, [selectedNodeId, edges, nodes, exec.runState]);
+
+  const connectedOutputs = useMemo(() => {
+    if (!selectedNodeId) return [];
+    return edges
+      .filter((e) => e.source === selectedNodeId)
+      .map((e) => {
+        const tgtNode = nodes.find((n) => n.id === e.target);
+        const tgtData = tgtNode?.data as ZyraNodeData | undefined;
+        return {
+          portId: e.sourceHandle ?? "",
+          peerNodeId: e.target,
+          peerLabel: tgtData?.nodeLabel || tgtData?.stageDef.label || e.target,
+          peerStatus: exec.runState.get(e.target)?.status as NodeRunStatus | undefined,
+        };
+      });
+  }, [selectedNodeId, edges, nodes, exec.runState]);
+
   return (
-    <div
-      style={{
-        width: "100vw",
-        height: "100vh",
-        background: "#0d1117",
-        display: "flex",
-        flexDirection: "column",
-      }}
-    >
+    <div className="zyra-editor">
       <Toolbar
+        onOpen={handleOpenFile}
         onDryRun={handleDryRun}
         onRun={handleRun}
         onCancel={exec.cancelAll}
         onReset={exec.reset}
         running={exec.running}
-        nodeCount={nodes.length}
+        nodeCount={nodes.filter((n) => n.type !== "group").length}
         runState={exec.runState}
         yamlOpen={yamlOpen}
         onToggleYaml={() => setYamlOpen((v) => !v)}
+        theme={theme}
+        onToggleTheme={toggleTheme}
       />
 
-      <div style={{ display: "flex", flex: 1, minHeight: 0 }}>
-        <NodePalette onAddNode={handleAddNode} />
+      <NodePalette
+        onAddNode={handleAddNode}
+        onAddGroup={handleAddGroup}
+        collapsed={paletteCollapsed}
+        onToggleCollapse={() => setPaletteCollapsed((v) => !v)}
+      />
 
-        <div ref={reactFlowWrapper} style={{ flex: 1, position: "relative" }}>
-          <ReactFlow
-            nodes={nodesWithStatus}
-            edges={edges}
-            onNodesChange={onNodesChange}
-            onEdgesChange={onEdgesChange}
-            onConnect={onConnect}
-            onNodeClick={handleNodeClick}
-            onPaneClick={() => setSelectedNodeId(null)}
-            onDragOver={onDragOver}
-            onDrop={onDrop}
-            isValidConnection={isValidConnection}
-            nodeTypes={nodeTypes}
-            fitView
-            proOptions={{ hideAttribution: true }}
-            style={{ background: "#0d1117" }}
-          >
-            <Background variant={BackgroundVariant.Dots} color="#333" gap={20} size={1} />
-            <Controls style={{ background: "#1a1a2e", borderColor: "#444" }} />
-          </ReactFlow>
-        </div>
-
-        {selectedNode && (
-          <ArgPanel
-            nodeId={selectedNode.id}
-            data={selectedNode.data as ZyraNodeData}
-            onArgChange={handleArgChange}
-            onClose={() => setSelectedNodeId(null)}
-          />
-        )}
-
-        {yamlOpen && (
-          <YamlPanel
-            pipeline={pipeline}
-            onPipelineChange={handlePipelineChange}
-            onClose={() => setYamlOpen(false)}
-          />
-        )}
+      <div className="zyra-canvas" ref={reactFlowWrapper}>
+        <ReactFlow
+          nodes={nodesWithStatus}
+          edges={edges}
+          onNodesChange={onNodesChange}
+          onEdgesChange={onEdgesChange}
+          onConnect={onConnect}
+          onNodeDragStop={onNodeDragStop}
+          onNodeClick={handleNodeClick}
+          onPaneClick={() => setSelectedNodeId(null)}
+          onDragOver={onDragOver}
+          onDrop={onDrop}
+          isValidConnection={isValidConnection}
+          nodeTypes={nodeTypes}
+          fitView
+          panOnDrag
+          selectionOnDrag={false}
+          proOptions={{ hideAttribution: true }}
+          defaultEdgeOptions={{
+            type: "smoothstep",
+            style: { stroke: "var(--accent-blue)", strokeWidth: 2 },
+            animated: exec.running,
+          }}
+          style={{ width: "100%", height: "100%" }}
+        >
+          <Background variant={BackgroundVariant.Dots} color="var(--canvas-dot)" gap={20} size={1} />
+          <Controls />
+        </ReactFlow>
       </div>
 
-      <LogPanel runState={exec.runState} selectedNodeId={selectedNodeId} onClearNode={exec.clearNode} />
+      {selectedNode && (
+        <NodeDetailPanel
+          nodeId={selectedNode.id}
+          data={selectedNode.data as ZyraNodeData}
+          runState={exec.runState.get(selectedNode.id)}
+          connectedInputs={connectedInputs}
+          connectedOutputs={connectedOutputs}
+          onArgChange={handleArgChange}
+          onSelectNode={handleSelectNode}
+          onClose={() => setSelectedNodeId(null)}
+        />
+      )}
 
-      {/* Pulse animation for running status indicator */}
-      <style>{`
-        @keyframes zyra-pulse {
-          0%, 100% { opacity: 1; }
-          50% { opacity: 0.4; }
-        }
-      `}</style>
+      <LogPanel
+        runState={exec.runState}
+        selectedNodeId={selectedNodeId}
+        onClearNode={exec.clearNode}
+        onSelectNode={handleSelectNode}
+      />
+
+      {/* YAML Drawer Overlay */}
+      {yamlOpen && (
+        <>
+          <div
+            className="zyra-drawer-backdrop"
+            onClick={() => setYamlOpen(false)}
+          />
+          <div className="zyra-drawer">
+            <YamlPanel
+              pipeline={pipeline}
+              onPipelineChange={handlePipelineChange}
+              onClose={() => setYamlOpen(false)}
+            />
+          </div>
+        </>
+      )}
     </div>
   );
 }
