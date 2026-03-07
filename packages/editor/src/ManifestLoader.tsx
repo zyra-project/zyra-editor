@@ -2,19 +2,19 @@ import { createContext, useContext, useEffect, useState, type ReactNode } from "
 import type { Manifest } from "@zyra/core";
 import { MOCK_MANIFEST } from "./mock-manifest";
 
-/** Control nodes defined in the mock manifest that should always be available. */
-const BUILTIN_CONTROL_STAGES = MOCK_MANIFEST.stages.filter((s) => s.stage === "control");
+/** Editor-only stages (controls + planned) that should always appear in the palette. */
+const BUILTIN_STAGES = MOCK_MANIFEST.stages.filter(
+  (s) => s.stage === "control" || s.stage === "verify",
+);
 
-/** Merge built-in control nodes into a server-provided manifest (avoids duplicates). */
-function withBuiltinControls(manifest: Manifest): Manifest {
+/** Merge editor-only stages into a server-provided manifest (avoids duplicates). */
+function withBuiltinStages(manifest: Manifest): Manifest {
   const existing = new Set(
-    manifest.stages
-      .filter((s) => s.stage === "control")
-      .map((s) => s.command),
+    manifest.stages.map((s) => `${s.stage}/${s.command}`),
   );
-  const toAdd = BUILTIN_CONTROL_STAGES.filter((s) => !existing.has(s.command));
+  const toAdd = BUILTIN_STAGES.filter((s) => !existing.has(`${s.stage}/${s.command}`));
   if (toAdd.length === 0) return manifest;
-  return { ...manifest, stages: [...toAdd, ...manifest.stages] };
+  return { ...manifest, stages: [...manifest.stages, ...toAdd] };
 }
 
 const ManifestCtx = createContext<Manifest | null>(null);
@@ -35,7 +35,7 @@ export function ManifestProvider({ children }: { children: ReactNode }) {
         if (!r.ok) throw new Error(`HTTP ${r.status}`);
         return r.json();
       })
-      .then((m) => setManifest(withBuiltinControls(m)))
+      .then((m) => setManifest(withBuiltinStages(m)))
       .catch(() => {
         // Fall back to mock manifest in dev mode
         console.warn("Could not fetch /v1/manifest — using mock manifest");
