@@ -6,7 +6,24 @@ Usage:
 """
 
 import os
+import re
 from pathlib import Path
+
+# Load .env file from the server directory (or project root) so that
+# secret values can be configured without polluting the system env.
+_env_file = Path(__file__).parent / ".env"
+if not _env_file.exists():
+    _env_file = Path(__file__).parent.parent / ".env"
+if _env_file.exists():
+    for line in _env_file.read_text().splitlines():
+        line = line.strip()
+        if not line or line.startswith("#"):
+            continue
+        key, _, val = line.partition("=")
+        key = key.strip()
+        val = val.strip().strip("'\"")
+        if key:
+            os.environ.setdefault(key, val)
 
 # Ensure a sane default logging verbosity for CLI jobs so the editor can
 # still stream useful log messages through the WebSocket log panel, while
@@ -34,11 +51,33 @@ _zyra_cli = None
 _orig_cli_main = None
 
 
+_ENV_VAR_RE = re.compile(r"\$\{([A-Za-z_][A-Za-z0-9_]*)\}")
+
+
+def _resolve_env_vars(value: str) -> str:
+    """Replace ${VAR_NAME} references with values from os.environ.
+
+    Unresolved references are left as-is (the CLI will see the literal
+    string, which is preferable to silently dropping the value).
+    """
+    def _replace(m: re.Match) -> str:
+        return os.environ.get(m.group(1), m.group(0))
+    return _ENV_VAR_RE.sub(_replace, value)
+
+
+def _resolve_argv_env_vars(argv: list[str]) -> list[str]:
+    """Resolve ${VAR} env-var references in all argv entries."""
+    return [_resolve_env_vars(a) for a in argv]
+
+
 def _cli_main_with_logging_reset(argv):
     """
     Wrapper around zyra.cli.main that clears and restores logging handlers
     so that handlers created by the CLI write to the swapped stderr tee.
+    Also resolves ${VAR_NAME} env-var references in argv so that secret
+    variable nodes work without embedding plaintext in the pipeline YAML.
     """
+    argv = _resolve_argv_env_vars(argv)
     root = logging.getLogger()
     # Save existing handlers so we can restore them after the CLI run
     prev_handlers = list(root.handlers)
