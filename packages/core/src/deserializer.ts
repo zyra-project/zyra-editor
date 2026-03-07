@@ -97,11 +97,19 @@ export function pipelineToGraph(
   // Reconstruct control nodes from _controls metadata
   if (pipeline._controls) {
     for (const ctrl of pipeline._controls) {
+      const ctrlArgs = { ...ctrl.argValues };
+
+      // Secret variable nodes have their value stripped during serialization.
+      // Set an empty value so the user is prompted to re-enter the secret.
+      if (ctrl.stageCommand === "control/variable" && ctrlArgs.var_type === "secret" && !("value" in ctrlArgs)) {
+        ctrlArgs.value = "";
+      }
+
       const node: GraphNode = {
         id: ctrl.id,
         label: ctrl.label,
         stageCommand: ctrl.stageCommand,
-        argValues: { ...ctrl.argValues },
+        argValues: ctrlArgs,
         position: ctrl._layout ? { x: ctrl._layout.x, y: ctrl._layout.y } : undefined,
         size:
           ctrl._layout && ctrl._layout.w != null && ctrl._layout.h != null

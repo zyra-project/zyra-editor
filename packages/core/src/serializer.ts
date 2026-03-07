@@ -117,6 +117,11 @@ export function graphToPipeline(
     }
     const srcNode = nodeMap.get(e.sourceNode);
     if (!srcNode) continue;
+
+    // Secret variables emit an env-var reference instead of the plaintext value
+    const isSecretVar = srcNode.stageCommand === "control/variable"
+      && srcNode.argValues.var_type === "secret";
+
     let val = srcNode.argValues.value;
     // Fall back to the ArgDef default so wired control nodes with
     // defaults (e.g., boolean false) still serialize correctly.
@@ -130,6 +135,20 @@ export function graphToPipeline(
         continue;
       }
     }
+
+    if (isSecretVar) {
+      const varName = srcNode.argValues.name;
+      if (typeof varName === "string" && varName.length > 0) {
+        val = `\${${varName}}`;
+      } else {
+        diagnostics?.push({
+          level: "warn",
+          message: `Secret variable node "${e.sourceNode}" has no name — the secret value will be omitted.`,
+        });
+        continue;
+      }
+    }
+
     const argKey = e.targetPort.slice(4); // strip "arg:" prefix
     if (!inlinedArgs.has(e.targetNode)) inlinedArgs.set(e.targetNode, new Map());
     inlinedArgs.get(e.targetNode)!.set(argKey, val);
@@ -219,10 +238,16 @@ export function graphToPipeline(
     const ctrlEdges = graph.edges
       .filter((e) => e.sourceNode === n.id && e.targetPort.startsWith("arg:"))
       .map((e) => ({ targetNode: e.targetNode, targetPort: e.targetPort }));
+    // Strip plaintext secret values from the YAML — only keep the variable name and type
+    const ctrlArgs = { ...n.argValues };
+    if (n.stageCommand === "control/variable" && ctrlArgs.var_type === "secret") {
+      delete ctrlArgs.value;
+    }
+
     const ctrl: PipelineControl = {
       id: n.id,
       stageCommand: n.stageCommand,
-      argValues: { ...n.argValues },
+      argValues: ctrlArgs,
       edges: ctrlEdges,
     };
     if (n.label) ctrl.label = n.label;

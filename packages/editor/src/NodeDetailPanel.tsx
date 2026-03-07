@@ -209,6 +209,10 @@ function SettingsTab({
       )}
       {stageDef.args.map((arg) => {
         const linkedFrom = linkedArgs.get(arg.key);
+        // Mask the value field when the Variable node type is "secret"
+        const isSecretVariable = stageDef.command === "variable"
+          && arg.key === "value"
+          && argValues.var_type === "secret";
         return (
           <ArgField
             key={arg.key}
@@ -216,6 +220,7 @@ function SettingsTab({
             value={argValues[arg.key]}
             linkedFrom={linkedFrom}
             onChange={(v) => onArgChange(nodeId, arg.key, v)}
+            forceSecret={isSecretVariable}
           />
         );
       })}
@@ -581,12 +586,15 @@ function ArgField({
   value,
   linkedFrom,
   onChange,
+  forceSecret,
 }: {
   arg: ArgDef;
   value: string | number | boolean | undefined;
   /** If this arg is wired from another node, the peer node's label and optional value. */
   linkedFrom?: { label: string; value?: string };
   onChange: (v: string | number | boolean) => void;
+  /** Override: treat this field as a secret (password input) regardless of name/label. */
+  forceSecret?: boolean;
 }) {
   const id = `arg-${arg.key}`;
 
@@ -594,6 +602,7 @@ function ArgField({
   const needsDurationValidation = arg.key === "custom_period";
   const strValue = typeof value === "string" ? value : "";
   const durationInvalid = needsDurationValidation && strValue.length > 0 && !isValidISO8601Duration(strValue);
+  const treatAsSensitive = forceSecret || isSensitive(arg);
 
   return (
     <div style={{ marginBottom: 14 }}>
@@ -700,7 +709,7 @@ function ArgField({
             <input
               id={id}
               className="zyra-input"
-              type={isSensitive(arg) ? "password" : arg.type === "number" ? "number" : "text"}
+              type={treatAsSensitive ? "password" : arg.type === "number" ? "number" : "text"}
               value={(value as string) ?? ""}
               placeholder={arg.placeholder ?? ""}
               onChange={(e) => {
