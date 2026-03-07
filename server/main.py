@@ -316,7 +316,7 @@ async def generate_plan(body: PlanRequest):
         )
 
 
-@app.get("/v1/ready")
+@app.get("/health/ready")
 async def readiness_check():
     """Check backend readiness: server up, zyra CLI available, LLM configured."""
     checks: dict = {"server": True, "zyra_cli": False, "llm_configured": False}

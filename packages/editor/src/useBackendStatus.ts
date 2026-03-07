@@ -25,7 +25,7 @@ export function useBackendStatus(): BackendStatus & { refresh: () => void } {
 
   const check = useCallback(async () => {
     try {
-      const resp = await fetch("/v1/ready", { signal: AbortSignal.timeout(8000) });
+      const resp = await fetch("/health/ready", { signal: AbortSignal.timeout(8000) });
       if (!resp.ok) {
         setState({
           status: "offline",
