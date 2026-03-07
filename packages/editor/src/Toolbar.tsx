@@ -1,3 +1,4 @@
+import { useState, useEffect, useCallback } from "react";
 import type { RunStateMap } from "./useExecution";
 import { STATUS_COLORS } from "@zyra/core";
 import type { Theme } from "./useTheme";
@@ -31,6 +32,7 @@ export function Toolbar({
   theme,
   onToggleTheme,
 }: ToolbarProps) {
+  const [helpOpen, setHelpOpen] = useState(false);
   const counts = { succeeded: 0, failed: 0, running: 0, total: 0 };
   for (const [, state] of runState) {
     counts.total++;
@@ -163,6 +165,29 @@ export function Toolbar({
         Export
       </button>
 
+      {/* Help */}
+      <button
+        onClick={() => setHelpOpen(true)}
+        title="Help — learn how to use Zyra Editor"
+        aria-label="Help"
+        style={{
+          background: "none",
+          border: "1px solid var(--border-default)",
+          borderRadius: "var(--radius-md)",
+          color: "var(--text-secondary)",
+          cursor: "pointer",
+          padding: "4px 8px",
+          fontSize: 15,
+          lineHeight: 1,
+          display: "flex",
+          alignItems: "center",
+          fontWeight: 700,
+        }}
+      >
+        ?
+      </button>
+      {helpOpen && <HelpModal onClose={() => setHelpOpen(false)} />}
+
       {/* Theme toggle */}
       <button
         onClick={onToggleTheme}
@@ -184,6 +209,213 @@ export function Toolbar({
       >
         {theme === "dark" ? "\u2600\ufe0f" : "\u{1f319}"}
       </button>
+    </div>
+  );
+}
+
+/* ── Help Modal ───────────────────────────────────────────── */
+
+const HELP_SECTIONS: { title: string; items: string[] }[] = [
+  {
+    title: "Getting Started",
+    items: [
+      "Zyra Editor lets you visually build data processing pipelines by connecting nodes on a canvas.",
+      "Each node represents a CLI command (stage) that processes data \u2014 drag them from the palette on the left.",
+      "Connect nodes by dragging from an output port (right side) to an input port (left side) to define data flow.",
+    ],
+  },
+  {
+    title: "Adding Nodes",
+    items: [
+      "The left sidebar (Node Palette) lists available stages grouped by category.",
+      "Click a stage to add it to the canvas. You can collapse the palette with the toggle arrow.",
+      "Control nodes (string, number, boolean) let you wire constant values into other nodes\u2019 arguments.",
+    ],
+  },
+  {
+    title: "Configuring Nodes",
+    items: [
+      "Click a node to select it \u2014 the detail panel appears on the right with tabs for Args, Inputs, and Outputs.",
+      "Fill in required arguments (marked with *) in the Args tab. Arguments can also be linked from control nodes.",
+      "Double-click a node\u2019s header to rename it for clarity.",
+    ],
+  },
+  {
+    title: "Connections & Ports",
+    items: [
+      "Solid ports are explicit data inputs/outputs. Dashed ports are argument ports that accept wired values.",
+      "Click \u201c+ N more ports\u201d on a node to reveal hidden optional argument ports.",
+      "Connections are validated \u2014 only type-compatible ports can be linked.",
+    ],
+  },
+  {
+    title: "Groups",
+    items: [
+      "Use the \u201cAdd Group\u201d button in the palette to create a visual group box.",
+      "Drag nodes into a group to organize them. Lock a group to prevent accidental edits.",
+      "Groups are saved in the pipeline file and restored when you reopen it.",
+    ],
+  },
+  {
+    title: "Running Pipelines",
+    items: [
+      "\u201cDry Run\u201d validates the pipeline and shows the resolved CLI commands without executing.",
+      "\u201cRun\u201d executes the full pipeline \u2014 progress and logs appear in the bottom log panel.",
+      "\u201cCancel\u201d stops running jobs. \u201cClear\u201d resets execution status indicators.",
+    ],
+  },
+  {
+    title: "Import & Export",
+    items: [
+      "\u201cOpen\u201d loads a pipeline YAML file. \u201cExport\u201d (or Ctrl+S) opens the YAML panel to view, edit, copy, or download the pipeline.",
+      "You can also paste YAML directly into the export panel to import a pipeline.",
+    ],
+  },
+  {
+    title: "Keyboard Shortcuts",
+    items: [
+      "Ctrl+S \u2014 Toggle YAML export panel",
+      "Ctrl+O \u2014 Open pipeline file",
+      "Delete / Backspace \u2014 Remove selected nodes or edges",
+    ],
+  },
+];
+
+function HelpModal({ onClose }: { onClose: () => void }) {
+  // Close on Escape
+  const handleKey = useCallback((e: KeyboardEvent) => {
+    if (e.key === "Escape") onClose();
+  }, [onClose]);
+
+  useEffect(() => {
+    document.addEventListener("keydown", handleKey);
+    return () => document.removeEventListener("keydown", handleKey);
+  }, [handleKey]);
+
+  return (
+    <div
+      role="dialog"
+      aria-modal="true"
+      aria-label="Zyra Editor Help"
+      onClick={onClose}
+      style={{
+        position: "fixed",
+        inset: 0,
+        zIndex: 9999,
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        background: "rgba(0,0,0,0.6)",
+        fontFamily: "var(--font-sans)",
+      }}
+    >
+      <div
+        onClick={(e) => e.stopPropagation()}
+        style={{
+          background: "var(--bg-secondary)",
+          border: "1px solid var(--border-default)",
+          borderRadius: "var(--radius-lg)",
+          boxShadow: "0 8px 32px var(--node-shadow)",
+          width: "min(640px, 90vw)",
+          maxHeight: "80vh",
+          display: "flex",
+          flexDirection: "column",
+          overflow: "hidden",
+        }}
+      >
+        {/* Header */}
+        <div style={{
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "space-between",
+          padding: "16px 20px",
+          borderBottom: "1px solid var(--border-default)",
+          flexShrink: 0,
+        }}>
+          <h2 style={{ margin: 0, fontSize: 18, fontWeight: 700, color: "var(--text-bright)" }}>
+            Zyra Editor Help
+          </h2>
+          <button
+            onClick={onClose}
+            aria-label="Close help"
+            style={{
+              background: "none",
+              border: "none",
+              color: "var(--text-muted)",
+              fontSize: 20,
+              cursor: "pointer",
+              padding: "2px 6px",
+              lineHeight: 1,
+            }}
+          >
+            &times;
+          </button>
+        </div>
+
+        {/* Content */}
+        <div style={{
+          flex: 1,
+          overflowY: "auto",
+          padding: "16px 20px 24px",
+        }}>
+          <p style={{
+            color: "var(--text-secondary)",
+            fontSize: 13,
+            lineHeight: 1.5,
+            margin: "0 0 20px",
+          }}>
+            Zyra Editor is a visual node editor for orchestrating data processing pipelines.
+            Connect nodes representing CLI commands into a graph, configure their arguments,
+            then run or export your pipeline.
+          </p>
+
+          {HELP_SECTIONS.map((section) => (
+            <div key={section.title} style={{ marginBottom: 18 }}>
+              <h3 style={{
+                fontSize: 14,
+                fontWeight: 700,
+                color: "var(--text-primary)",
+                margin: "0 0 8px",
+              }}>
+                {section.title}
+              </h3>
+              <ul style={{
+                margin: 0,
+                paddingLeft: 18,
+                listStyle: "disc",
+              }}>
+                {section.items.map((item, i) => (
+                  <li key={i} style={{
+                    fontSize: 12,
+                    color: "var(--text-secondary)",
+                    lineHeight: 1.6,
+                    marginBottom: 2,
+                  }}>
+                    {item}
+                  </li>
+                ))}
+              </ul>
+            </div>
+          ))}
+        </div>
+
+        {/* Footer */}
+        <div style={{
+          padding: "12px 20px",
+          borderTop: "1px solid var(--border-default)",
+          display: "flex",
+          justifyContent: "flex-end",
+          flexShrink: 0,
+        }}>
+          <button
+            className="zyra-btn zyra-btn--primary"
+            onClick={onClose}
+            autoFocus
+          >
+            Got it
+          </button>
+        </div>
+      </div>
     </div>
   );
 }
