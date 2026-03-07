@@ -102,7 +102,13 @@ export function graphToPipeline(
   const inlinedArgs = new Map<string, Map<string, string | number | boolean>>();
   for (const e of graph.edges) {
     if (!controlNodeIds.has(e.sourceNode)) continue;
-    if (!e.targetPort.startsWith("arg:")) continue;
+    if (!e.targetPort.startsWith("arg:")) {
+      console.warn(
+        `Control node "${e.sourceNode}" has an unsupported edge to ` +
+        `"${e.targetNode}:${e.targetPort}" — this connection will be dropped from the pipeline.`,
+      );
+      continue;
+    }
     const srcNode = nodeMap.get(e.sourceNode);
     if (!srcNode) continue;
     const val = srcNode.argValues.value;

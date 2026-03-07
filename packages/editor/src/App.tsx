@@ -539,6 +539,10 @@ function Editor() {
       const tgtPort = tgtPorts.inputs.find((p) => p.id === connection.targetHandle);
       if (!srcPort || !tgtPort) return false;
 
+      // Only control nodes can wire into arg-ports (serialization can't
+      // round-trip non-control → arg-port edges yet)
+      if (tgtPort.argKey && srcDef.stage !== "control") return false;
+
       return portsCompatible(srcPort, tgtPort);
     },
     [nodes],

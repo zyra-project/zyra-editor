@@ -631,9 +631,9 @@ function ArgField({
                 flexShrink: 1,
                 minWidth: 0,
               }}
-              title={linkedFrom.value}
+              title={isSensitive(arg) ? "Linked value hidden (sensitive)" : linkedFrom.value}
             >
-              {linkedFrom.value}
+              {isSensitive(arg) ? "••••••••" : linkedFrom.value}
             </span>
           )}
         </div>

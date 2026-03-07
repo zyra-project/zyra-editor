@@ -437,8 +437,8 @@ function InputPortRow({ port, isConnected, linkedValue, argDef, argValue }: {
           maxWidth: "55%",
           flexShrink: 1,
           textAlign: "right",
-        }} title={linkedValue}>
-          {linkedValue}
+        }} title={sensitive ? "Linked (sensitive)" : linkedValue}>
+          {sensitive ? "••••••••" : linkedValue}
         </span>
       )}
       {isArgPort && isConnected && !linkedValue && (

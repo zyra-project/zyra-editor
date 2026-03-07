@@ -1,6 +1,6 @@
 import { useState, useCallback, useEffect, useRef } from "react";
 import yaml from "js-yaml";
-import type { Pipeline, PipelineStep, PipelineGroup } from "@zyra/core";
+import type { Pipeline, PipelineStep, PipelineGroup, PipelineControl } from "@zyra/core";
 
 /** Zyra native YAML format: stages array with stage/command fields. */
 interface NativeStage {
@@ -81,11 +81,51 @@ function normalizePipeline(raw: unknown): Pipeline | null {
 
     if (steps.length === 0) return null;
 
-    // Pass through _groups if present
+    // Pass through _controls if present
     const pipeline: Pipeline = { version: "1", steps };
+    const controls: PipelineControl[] = [];
+    if (Array.isArray(obj._controls)) {
+      for (const c of obj._controls as unknown[]) {
+        if (!c || typeof c !== "object") continue;
+        const co = c as Record<string, unknown>;
+        if (typeof co.id !== "string" || typeof co.stageCommand !== "string") continue;
+        let argValues: Record<string, string | number | boolean> = {};
+        if (co.argValues && typeof co.argValues === "object" && !Array.isArray(co.argValues)) {
+          for (const [k, v] of Object.entries(co.argValues as Record<string, unknown>)) {
+            if (typeof v === "string" || typeof v === "number" || typeof v === "boolean") argValues[k] = v;
+          }
+        }
+        const edges: PipelineControl["edges"] = [];
+        if (Array.isArray(co.edges)) {
+          for (const e of co.edges as unknown[]) {
+            if (!e || typeof e !== "object") continue;
+            const eo = e as Record<string, unknown>;
+            if (typeof eo.targetNode === "string" && typeof eo.targetPort === "string") {
+              edges.push({ targetNode: eo.targetNode, targetPort: eo.targetPort });
+            }
+          }
+        }
+        const ctrl: PipelineControl = { id: co.id, stageCommand: co.stageCommand, argValues, edges };
+        if (typeof co.label === "string" && co.label) ctrl.label = co.label;
+        if (co._layout && typeof co._layout === "object" && !Array.isArray(co._layout)) {
+          const lo = co._layout as Record<string, unknown>;
+          if (typeof lo.x === "number" && typeof lo.y === "number") {
+            const layout: PipelineControl["_layout"] = { x: lo.x, y: lo.y };
+            if (typeof lo.w === "number") layout.w = lo.w;
+            if (typeof lo.h === "number") layout.h = lo.h;
+            ctrl._layout = layout;
+          }
+        }
+        controls.push(ctrl);
+      }
+      if (controls.length > 0) pipeline._controls = controls;
+    }
+
+    // Pass through _groups if present
     if (Array.isArray(obj._groups)) {
       const groups: PipelineGroup[] = [];
       const stepNames = new Set(steps.map((s) => s.name));
+      for (const c of controls) stepNames.add(c.id);
       for (const g of obj._groups as unknown[]) {
         if (!g || typeof g !== "object") continue;
         const go = g as Record<string, unknown>;
