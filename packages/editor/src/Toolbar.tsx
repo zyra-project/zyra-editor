@@ -14,6 +14,8 @@ interface ToolbarProps {
   runState: RunStateMap;
   yamlOpen: boolean;
   onToggleYaml: () => void;
+  plannerOpen: boolean;
+  onTogglePlanner: () => void;
   theme: Theme;
   onToggleTheme: () => void;
 }
@@ -29,6 +31,8 @@ export function Toolbar({
   runState,
   yamlOpen,
   onToggleYaml,
+  plannerOpen,
+  onTogglePlanner,
   theme,
   onToggleTheme,
 }: ToolbarProps) {
@@ -115,6 +119,31 @@ export function Toolbar({
           </button>
         )}
       </div>
+
+      {/* AI Planner toggle */}
+      <button
+        onClick={onTogglePlanner}
+        title="AI Planner — generate a pipeline from a natural language description"
+        aria-expanded={plannerOpen}
+        style={{
+          background: plannerOpen ? "var(--accent-blue)" : "none",
+          border: "1px solid var(--border-default)",
+          borderRadius: "var(--radius-md)",
+          color: plannerOpen ? "#fff" : "var(--text-secondary)",
+          cursor: "pointer",
+          padding: "4px 10px",
+          fontSize: 12,
+          lineHeight: 1,
+          display: "flex",
+          alignItems: "center",
+          gap: 5,
+          fontFamily: "var(--font-sans)",
+          fontWeight: 500,
+        }}
+      >
+        <span style={{ fontSize: 14 }}>{"\u2728"}</span>
+        Plan
+      </button>
 
       {/* Spacer */}
       <div style={{ flex: 1 }} />

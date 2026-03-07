@@ -5,7 +5,9 @@ Usage:
     uvicorn main:app --port 8765
 """
 
+import json
 import os
+import subprocess
 from pathlib import Path
 
 # Ensure a sane default logging verbosity for CLI jobs so the editor can
@@ -15,8 +17,9 @@ os.environ.setdefault("ZYRA_VERBOSITY", "info")
 
 import logging
 import requests as http_requests
-from fastapi import Request
+from fastapi import HTTPException, Request
 from fastapi.staticfiles import StaticFiles
+from pydantic import BaseModel
 from starlette.middleware.cors import CORSMiddleware
 from zyra.api.server import create_app
 from zyra.api.workers import jobs as _jobs_mod
@@ -277,6 +280,40 @@ def _commands_to_manifest(commands: dict) -> dict:
     })
 
     return {"version": "1.0", "stages": stages}
+
+
+# ── AI Planner endpoint ──────────────────────────────────────────
+
+
+class PlanRequest(BaseModel):
+    intent: str
+    guardrails: str = ""
+
+
+@app.post("/v1/plan")
+async def generate_plan(body: PlanRequest):
+    """Run ``zyra plan`` as a subprocess and return the structured plan JSON."""
+    cmd = ["zyra", "plan", "--intent", body.intent, "--no-clarify"]
+    if body.guardrails:
+        cmd += ["--guardrails", body.guardrails]
+    try:
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=120)
+    except FileNotFoundError:
+        raise HTTPException(
+            status_code=503,
+            detail="zyra CLI is not installed in the server environment",
+        )
+    except subprocess.TimeoutExpired:
+        raise HTTPException(status_code=504, detail="zyra plan timed out")
+    if result.returncode != 0:
+        raise HTTPException(status_code=400, detail=result.stderr.strip())
+    try:
+        return json.loads(result.stdout)
+    except json.JSONDecodeError:
+        raise HTTPException(
+            status_code=502,
+            detail="zyra plan returned invalid JSON",
+        )
 
 
 @app.get("/v1/manifest")

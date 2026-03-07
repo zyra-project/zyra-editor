@@ -26,6 +26,7 @@ import { Toolbar } from "./Toolbar";
 import { LogPanel } from "./LogPanel";
 import { useExecution } from "./useExecution";
 import { YamlPanel, normalizePipeline } from "./YamlPanel";
+import { PlannerPanel } from "./PlannerPanel";
 import yaml from "js-yaml";
 import { useTheme } from "./useTheme";
 
@@ -183,6 +184,7 @@ function Editor() {
   const [edges, setEdges, onEdgesChange] = useEdgesState<Edge>([]);
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
   const [yamlOpen, setYamlOpen] = useState(false);
+  const [plannerOpen, setPlannerOpen] = useState(false);
   const [paletteCollapsed, setPaletteCollapsed] = useState(false);
   const exec = useExecution();
   const reactFlowWrapper = useRef<HTMLDivElement>(null);
@@ -726,6 +728,34 @@ function Editor() {
     input.click();
   }, [handlePipelineChange]);
 
+  // Apply AI-generated plan to the canvas
+  const handlePlanApply = useCallback(
+    (newNodes: Node[], newEdges: Edge[]) => {
+      // Offset so new nodes don't overlap existing ones
+      const maxX = nodes.reduce((mx, n) => {
+        if (n.type === "group") return mx;
+        const w = n.measured?.width ?? 260;
+        return Math.max(mx, n.position.x + w);
+      }, 0);
+      const offsetX = nodes.length > 0 ? maxX + 120 : 0;
+      const offsetNodes = newNodes.map((n) => ({
+        ...n,
+        position: { x: n.position.x + offsetX, y: n.position.y },
+      }));
+
+      // Update ID counter
+      const maxNum = offsetNodes.reduce((max, n) => {
+        const m = n.id.match(/^node-(\d+)$/);
+        return m ? Math.max(max, Number(m[1])) : max;
+      }, nodeIdCounter);
+      nodeIdCounter = maxNum;
+
+      setNodes((prev) => [...prev, ...offsetNodes]);
+      setEdges((prev) => [...prev, ...newEdges]);
+    },
+    [nodes, setNodes, setEdges],
+  );
+
   // Keyboard shortcuts
   useEffect(() => {
     function handleKeyDown(e: KeyboardEvent) {
@@ -816,6 +846,8 @@ function Editor() {
         runState={exec.runState}
         yamlOpen={yamlOpen}
         onToggleYaml={() => setYamlOpen((v) => !v)}
+        plannerOpen={plannerOpen}
+        onTogglePlanner={() => setPlannerOpen((v) => !v)}
         theme={theme}
         onToggleTheme={toggleTheme}
       />
@@ -876,6 +908,15 @@ function Editor() {
         onClearNode={exec.clearNode}
         onSelectNode={handleSelectNode}
       />
+
+      {/* AI Planner Panel */}
+      {plannerOpen && (
+        <PlannerPanel
+          manifest={manifest}
+          onApply={handlePlanApply}
+          onClose={() => setPlannerOpen(false)}
+        />
+      )}
 
       {/* YAML Drawer Overlay */}
       {yamlOpen && (
