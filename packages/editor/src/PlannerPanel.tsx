@@ -8,6 +8,7 @@ import {
   type PlanResponse,
 } from "./planToGraph";
 import type { BackendStatus } from "./useBackendStatus";
+import { usePlanSession, type ChatEntry } from "./usePlanSession";
 
 /** Stage header colours — mirrors server/main.py STAGE_COLORS. */
 const STAGE_COLORS: Record<string, string> = {
@@ -81,6 +82,8 @@ export function PlannerPanel({
   const [historyOpen, setHistoryOpen] = useState(false);
   const [feedback, setFeedback] = useState("");
   const [lastFeedback, setLastFeedback] = useState("");
+  const [answerText, setAnswerText] = useState("");
+  const [wsMode, setWsMode] = useState(true); // true = try WebSocket, false = sync fallback
 
   // Track accepted / dismissed suggestion indices
   const [acceptedIdxs, setAcceptedIdxs] = useState<Set<number>>(new Set());
@@ -88,6 +91,39 @@ export function PlannerPanel({
 
   const abortRef = useRef<AbortController | null>(null);
   const timerRef = useRef<ReturnType<typeof setInterval>>();
+  const chatEndRef = useRef<HTMLDivElement>(null);
+
+  // Interactive WebSocket planning session
+  const session = usePlanSession();
+
+  // When WebSocket session produces a plan, sync it into local state
+  useEffect(() => {
+    if (session.plan) {
+      setPlan(session.plan);
+      setLoading(false);
+      onHistoryAdd({ intent: intent.trim(), plan: session.plan, timestamp: Date.now() });
+    }
+  }, [session.plan]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // When WebSocket errors, fall back to sync mode
+  useEffect(() => {
+    if (session.phase === "error" && session.error) {
+      // If WS failed on connection (not during Q&A), fall back to sync
+      if (session.chat.length <= 1) {
+        setWsMode(false);
+        // Automatically retry with sync
+        handleSyncGenerate();
+      } else {
+        setError({ message: session.error });
+        setLoading(false);
+      }
+    }
+  }, [session.phase, session.error]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Auto-scroll chat
+  useEffect(() => {
+    chatEndRef.current?.scrollIntoView({ behavior: "smooth" });
+  }, [session.chat]);
 
   // Elapsed timer during loading
   useEffect(() => {
@@ -107,7 +143,8 @@ export function PlannerPanel({
     }
   }, [plan]);
 
-  const handleGenerate = useCallback(async () => {
+  /** Sync fallback: POST /v1/plan with --no-clarify (original behavior). */
+  const handleSyncGenerate = useCallback(async () => {
     if (!intent.trim()) return;
     abortRef.current?.abort();
     const controller = new AbortController();
@@ -150,6 +187,26 @@ export function PlannerPanel({
       abortRef.current = null;
     }
   }, [intent, onHistoryAdd]);
+
+  /** Primary generate: try WebSocket (interactive) first, sync fallback. */
+  const handleGenerate = useCallback(() => {
+    if (!intent.trim()) return;
+    setError(null);
+    setPlan(null);
+    setEditableAgents([]);
+    setAcceptedIdxs(new Set());
+    setDismissedIdxs(new Set());
+    setFeedback("");
+    setAnswerText("");
+    setLoading(true);
+
+    if (wsMode) {
+      session.reset();
+      session.start(intent.trim());
+    } else {
+      handleSyncGenerate();
+    }
+  }, [intent, wsMode, session, handleSyncGenerate]);
 
   const handleRefine = useCallback(async () => {
     if (!feedback.trim() || !plan) return;
@@ -207,11 +264,13 @@ export function PlannerPanel({
 
   const handleCancel = useCallback(() => {
     abortRef.current?.abort();
+    session.cancel();
     setLoading(false);
-  }, []);
+  }, [session]);
 
   const handleStartOver = useCallback(() => {
     abortRef.current?.abort();
+    session.reset();
     setPlan(null);
     setEditableAgents([]);
     setAcceptedIdxs(new Set());
@@ -219,8 +278,9 @@ export function PlannerPanel({
     setFeedback("");
     setLastFeedback("");
     setError(null);
+    setAnswerText("");
     onIntentChange("");
-  }, [onIntentChange]);
+  }, [onIntentChange, session]);
 
   const handleAccept = useCallback((idx: number) => {
     if (!plan) return;
@@ -585,8 +645,82 @@ export function PlannerPanel({
           </div>
         )}
 
+        {/* Chat thread (WebSocket interactive session) */}
+        {session.chat.length > 0 && !plan && (
+          <div style={{
+            marginTop: 8,
+            maxHeight: 200,
+            overflowY: "auto",
+            padding: "8px 10px",
+            background: "var(--bg-tertiary)",
+            border: "1px solid var(--border-default)",
+            borderRadius: "var(--radius-md)",
+          }}>
+            {session.chat.map((entry, i) => (
+              <ChatBubble key={i} entry={entry} />
+            ))}
+            <div ref={chatEndRef} />
+          </div>
+        )}
+
+        {/* Answer input — visible during Q&A phase */}
+        {session.phase === "asking" && (
+          <div style={{
+            display: "flex",
+            gap: 6,
+            marginTop: 8,
+          }}>
+            <input
+              type="text"
+              value={answerText}
+              onChange={(e) => setAnswerText(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter" && answerText.trim()) {
+                  e.preventDefault();
+                  session.answer(answerText.trim());
+                  setAnswerText("");
+                }
+              }}
+              placeholder="Type your answer..."
+              autoFocus
+              style={{
+                flex: 1,
+                background: "var(--bg-tertiary)",
+                border: "1px solid var(--border-default)",
+                borderRadius: "var(--radius-md)",
+                color: "var(--text-primary)",
+                padding: "6px 10px",
+                fontSize: 12,
+                fontFamily: "var(--font-sans)",
+                outline: "none",
+                boxSizing: "border-box",
+              }}
+            />
+            <button
+              className="zyra-btn zyra-btn--primary"
+              onClick={() => {
+                if (answerText.trim()) {
+                  session.answer(answerText.trim());
+                  setAnswerText("");
+                }
+              }}
+              disabled={!answerText.trim()}
+              style={{ padding: "6px 12px", fontSize: 12 }}
+            >
+              Send
+            </button>
+          </div>
+        )}
+
+        {/* Sync fallback indicator */}
+        {!wsMode && !plan && !loading && (
+          <div style={{ fontSize: 10, color: "var(--text-muted)", marginTop: 4, fontStyle: "italic" }}>
+            Quick mode (no clarification)
+          </div>
+        )}
+
         {/* Generate button — only when no plan */}
-        {!loading && !plan && (
+        {!loading && !plan && session.phase !== "asking" && (
           <>
             <button
               className="zyra-btn zyra-btn--primary"
@@ -961,6 +1095,42 @@ function AgentCard({
           depends on: {agent.depends_on.join(", ")}
         </div>
       )}
+    </div>
+  );
+}
+
+function ChatBubble({ entry }: { entry: ChatEntry }) {
+  if (entry.role === "status") {
+    return (
+      <div style={{
+        fontSize: 10,
+        color: "var(--text-muted)",
+        padding: "2px 0",
+        fontStyle: "italic",
+      }}>
+        {entry.text}
+      </div>
+    );
+  }
+  const isUser = entry.role === "user";
+  return (
+    <div style={{
+      display: "flex",
+      justifyContent: isUser ? "flex-end" : "flex-start",
+      marginBottom: 6,
+    }}>
+      <div style={{
+        maxWidth: "85%",
+        padding: "6px 10px",
+        borderRadius: "var(--radius-md)",
+        fontSize: 12,
+        lineHeight: 1.5,
+        background: isUser ? "var(--accent-blue)" : "var(--bg-secondary)",
+        color: isUser ? "#fff" : "var(--text-primary)",
+        border: isUser ? "none" : "1px solid var(--border-default)",
+      }}>
+        {entry.text}
+      </div>
     </div>
   );
 }

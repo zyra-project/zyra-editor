@@ -5,6 +5,7 @@ Usage:
     uvicorn main:app --port 8765
 """
 
+import asyncio
 import json
 import os
 import subprocess
@@ -17,7 +18,7 @@ os.environ.setdefault("ZYRA_VERBOSITY", "info")
 
 import logging
 import requests as http_requests
-from fastapi import HTTPException, Request
+from fastapi import HTTPException, Request, WebSocket, WebSocketDisconnect
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 from starlette.middleware.cors import CORSMiddleware
@@ -427,6 +428,218 @@ async def refine_plan(body: PlanRefineRequest):
 
     return _run_zyra_plan(refined_intent, guardrails)
 
+
+
+# ── Interactive planner via WebSocket ─────────────────────────────
+
+WS_PLAN_TIMEOUT = 120  # seconds
+WS_KEEPALIVE_INTERVAL = 15  # seconds
+
+# Heuristic: lines that look like a question from the CLI
+_QUESTION_SUFFIXES = ("?", "> ", "[y/n]", "[Y/n]", "[y/N]")
+
+
+def _classify_stdout_line(line: str) -> tuple[str, str]:
+    """Classify a stdout line as 'plan', 'question', or 'log'."""
+    stripped = line.strip()
+    if not stripped:
+        return ("log", stripped)
+    # Try to detect the final JSON plan
+    if stripped.startswith("{"):
+        try:
+            data = json.loads(stripped)
+            if "agents" in data:
+                return ("plan", stripped)
+        except json.JSONDecodeError:
+            pass
+    # Detect clarification questions
+    if any(stripped.endswith(s) for s in _QUESTION_SUFFIXES):
+        return ("question", stripped)
+    return ("log", stripped)
+
+
+@app.websocket("/ws/plan")
+async def ws_plan(websocket: WebSocket):
+    """Interactive planning session over WebSocket.
+
+    Protocol:
+      Client sends: {"type": "start", "intent": "...", "guardrails": "..."}
+      Server sends: {"type": "question"|"log"|"status"|"plan"|"error", ...}
+      Client sends: {"type": "answer", "text": "..."} or {"type": "cancel"}
+    """
+    await websocket.accept()
+    proc: asyncio.subprocess.Process | None = None
+
+    async def _keepalive():
+        """Send periodic keepalive pings."""
+        try:
+            while True:
+                await asyncio.sleep(WS_KEEPALIVE_INTERVAL)
+                await websocket.send_json({"keepalive": True})
+        except Exception:
+            pass
+
+    async def _read_stderr(proc: asyncio.subprocess.Process):
+        """Forward stderr lines as log messages."""
+        assert proc.stderr is not None
+        try:
+            async for raw in proc.stderr:
+                line = raw.decode("utf-8", errors="replace").rstrip("\n")
+                if line:
+                    await websocket.send_json({"type": "log", "text": line})
+        except Exception:
+            pass
+
+    async def _read_stdout(proc: asyncio.subprocess.Process):
+        """Read stdout, classify lines, and send appropriate messages.
+
+        Buffers partial JSON across multiple lines so multi-line plan
+        output is still detected.
+        """
+        assert proc.stdout is not None
+        json_buffer = ""
+        try:
+            async for raw in proc.stdout:
+                line = raw.decode("utf-8", errors="replace").rstrip("\n")
+                stripped = line.strip()
+                if not stripped:
+                    continue
+
+                # If we're buffering a multi-line JSON blob, keep accumulating
+                if json_buffer:
+                    json_buffer += "\n" + line
+                    try:
+                        data = json.loads(json_buffer)
+                        if "agents" in data:
+                            await websocket.send_json({"type": "plan", "data": data})
+                            json_buffer = ""
+                            continue
+                    except json.JSONDecodeError:
+                        # Still incomplete — keep buffering
+                        continue
+
+                kind, text = _classify_stdout_line(line)
+                if kind == "plan":
+                    data = json.loads(text)
+                    await websocket.send_json({"type": "plan", "data": data})
+                elif kind == "question":
+                    await websocket.send_json({"type": "question", "text": text})
+                else:
+                    # Check if this starts a multi-line JSON blob
+                    if stripped.startswith("{"):
+                        json_buffer = line
+                    else:
+                        await websocket.send_json({"type": "log", "text": text})
+        except Exception:
+            pass
+
+    keepalive_task: asyncio.Task | None = None
+    stderr_task: asyncio.Task | None = None
+    stdout_task: asyncio.Task | None = None
+
+    try:
+        # Wait for the start message
+        start_msg = await asyncio.wait_for(websocket.receive_json(), timeout=30)
+        if start_msg.get("type") != "start" or not start_msg.get("intent"):
+            await websocket.send_json({"type": "error", "text": "Expected {type: 'start', intent: '...'}"})
+            await websocket.close()
+            return
+
+        intent = start_msg["intent"]
+        guardrails = start_msg.get("guardrails", "")
+
+        cmd = ["zyra", "plan", "--intent", intent]
+        if guardrails:
+            cmd += ["--guardrails", guardrails]
+
+        logger.info("ws/plan: starting interactive session — intent=%.200s", intent)
+
+        try:
+            proc = await asyncio.create_subprocess_exec(
+                *cmd,
+                stdin=asyncio.subprocess.PIPE,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+            )
+        except FileNotFoundError:
+            await websocket.send_json({"type": "error", "text": "zyra CLI is not installed"})
+            await websocket.close()
+            return
+
+        await websocket.send_json({"type": "status", "text": "Planning started..."})
+
+        # Launch background readers
+        keepalive_task = asyncio.create_task(_keepalive())
+        stderr_task = asyncio.create_task(_read_stderr(proc))
+        stdout_task = asyncio.create_task(_read_stdout(proc))
+
+        # Listen for client messages while the process runs
+        async def _listen_client():
+            try:
+                while True:
+                    msg = await websocket.receive_json()
+                    msg_type = msg.get("type")
+                    if msg_type == "answer" and proc.stdin:
+                        text = msg.get("text", "")
+                        proc.stdin.write((text + "\n").encode("utf-8"))
+                        await proc.stdin.drain()
+                    elif msg_type == "cancel":
+                        proc.kill()
+                        return
+            except (WebSocketDisconnect, Exception):
+                proc.kill()
+
+        client_task = asyncio.create_task(_listen_client())
+
+        # Wait for process to finish (with timeout)
+        try:
+            await asyncio.wait_for(proc.wait(), timeout=WS_PLAN_TIMEOUT)
+        except asyncio.TimeoutError:
+            proc.kill()
+            await websocket.send_json({"type": "error", "text": "Planning timed out"})
+
+        # Let stdout/stderr finish draining
+        if stdout_task:
+            await asyncio.wait_for(stdout_task, timeout=5)
+        if stderr_task:
+            await asyncio.wait_for(stderr_task, timeout=5)
+
+        # Cancel client listener
+        client_task.cancel()
+
+        exit_code = proc.returncode
+        if exit_code and exit_code != 0:
+            await websocket.send_json({
+                "type": "error",
+                "text": f"zyra plan exited with code {exit_code}",
+            })
+
+        await websocket.close()
+
+    except WebSocketDisconnect:
+        logger.info("ws/plan: client disconnected")
+    except asyncio.TimeoutError:
+        try:
+            await websocket.send_json({"type": "error", "text": "Timed out waiting for start message"})
+            await websocket.close()
+        except Exception:
+            pass
+    except Exception as exc:
+        logger.exception("ws/plan: unexpected error")
+        try:
+            await websocket.send_json({"type": "error", "text": str(exc)})
+            await websocket.close()
+        except Exception:
+            pass
+    finally:
+        if keepalive_task:
+            keepalive_task.cancel()
+        if stderr_task:
+            stderr_task.cancel()
+        if stdout_task:
+            stdout_task.cancel()
+        if proc and proc.returncode is None:
+            proc.kill()
 
 
 @app.get("/v1/manifest")
