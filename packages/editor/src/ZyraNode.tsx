@@ -278,8 +278,10 @@ export function ZyraNode({ id, data, selected }: NodeProps) {
           const parts: string[] = [];
           if (hasStart) parts.push(String(start));
           if (end !== undefined && end !== "") parts.push(String(end));
+          const customPeriod = argValues.custom_period;
+          const effectivePeriod = period === "custom" && customPeriod ? String(customPeriod) : period;
           const display = parts.length > 0
-            ? parts.join(" \u2192 ") + (period ? ` (${period})` : "")
+            ? parts.join(" \u2192 ") + (effectivePeriod ? ` (${effectivePeriod})` : "")
             : null;
           if (!display) return null;
           return (

@@ -566,6 +566,14 @@ function OutputTab({
   );
 }
 
+/* ── ISO 8601 Duration Validation ──────────────────────── */
+
+const ISO8601_DURATION = /^P(?!$)(?:\d+Y)?(?:\d+M)?(?:\d+W)?(?:\d+D)?(?:T(?!$)(?:\d+H)?(?:\d+M)?(?:\d+S)?)?$/;
+
+function isValidISO8601Duration(v: string): boolean {
+  return ISO8601_DURATION.test(v);
+}
+
 /* ── Arg Field ──────────────────────────────────────────── */
 
 function ArgField({
@@ -581,6 +589,11 @@ function ArgField({
   onChange: (v: string | number | boolean) => void;
 }) {
   const id = `arg-${arg.key}`;
+
+  // ISO 8601 duration validation for the custom_period field
+  const needsDurationValidation = arg.key === "custom_period";
+  const strValue = typeof value === "string" ? value : "";
+  const durationInvalid = needsDurationValidation && strValue.length > 0 && !isValidISO8601Duration(strValue);
 
   return (
     <div style={{ marginBottom: 14 }}>
@@ -683,20 +696,28 @@ function ArgField({
             );
           })()
         ) : (
-          <input
-            id={id}
-            className="zyra-input"
-            type={isSensitive(arg) ? "password" : arg.type === "number" ? "number" : "text"}
-            value={(value as string) ?? ""}
-            placeholder={arg.placeholder ?? ""}
-            onChange={(e) => {
-              if (arg.type === "number") {
-                onChange(e.target.value === "" ? "" : Number(e.target.value));
-              } else {
-                onChange(e.target.value);
-              }
-            }}
-          />
+          <>
+            <input
+              id={id}
+              className="zyra-input"
+              type={isSensitive(arg) ? "password" : arg.type === "number" ? "number" : "text"}
+              value={(value as string) ?? ""}
+              placeholder={arg.placeholder ?? ""}
+              onChange={(e) => {
+                if (arg.type === "number") {
+                  onChange(e.target.value === "" ? "" : Number(e.target.value));
+                } else {
+                  onChange(e.target.value);
+                }
+              }}
+              style={durationInvalid ? { borderColor: "var(--accent-red)" } : undefined}
+            />
+            {durationInvalid && (
+              <div style={{ fontSize: 11, color: "var(--accent-red)", marginTop: 4 }}>
+                Invalid ISO 8601 duration. Use format like P1D, P2W, P1M, P1Y6M, PT12H.
+              </div>
+            )}
+          </>
         )
       )}
     </div>
