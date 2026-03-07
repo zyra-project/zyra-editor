@@ -718,8 +718,9 @@ function Editor() {
         const raw = yaml.load(text, { schema: yaml.JSON_SCHEMA });
         const p = normalizePipeline(raw);
         if (p) handlePipelineChange(p);
-      } catch {
-        // ignore parse errors — user can fix in the Export panel
+      } catch (err) {
+        console.error("Failed to load YAML file", err);
+        alert(`Failed to load pipeline file: ${err instanceof Error ? err.message : "Unknown error"}`);
       }
     };
     input.click();

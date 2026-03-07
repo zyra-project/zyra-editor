@@ -179,17 +179,22 @@ export function NodePalette({ onAddNode, onAddGroup, collapsed, onToggleCollapse
               onMouseLeave={() => {
                 hoverTimeoutRef.current = setTimeout(() => setHoveredStage(null), 150);
               }}
+              onFocusCapture={() => {
+                if (hoverTimeoutRef.current) clearTimeout(hoverTimeoutRef.current);
+                setHoveredStage(stage);
+              }}
+              onBlurCapture={(e) => {
+                const container = e.currentTarget;
+                requestAnimationFrame(() => {
+                  if (!container.contains(document.activeElement)) {
+                    hoverTimeoutRef.current = setTimeout(() => setHoveredStage(null), 150);
+                  }
+                });
+              }}
             >
               <button
                 title={stage}
                 aria-label={`${stage} stages`}
-                onFocus={() => {
-                  if (hoverTimeoutRef.current) clearTimeout(hoverTimeoutRef.current);
-                  setHoveredStage(stage);
-                }}
-                onBlur={() => {
-                  hoverTimeoutRef.current = setTimeout(() => setHoveredStage(null), 150);
-                }}
                 style={{
                   display: "flex",
                   alignItems: "center",

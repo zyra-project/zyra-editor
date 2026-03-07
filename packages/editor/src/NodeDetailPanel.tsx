@@ -655,18 +655,23 @@ function ArgField({
             ))}
           </select>
         ) : arg.type === "boolean" ? (
-          <label style={{ display: "flex", alignItems: "center", gap: 8, cursor: "pointer" }}>
-            <input
-              id={id}
-              type="checkbox"
-              checked={value !== undefined ? !!value : !!arg.default}
-              onChange={(e) => onChange(e.target.checked)}
-              style={{ accentColor: "var(--accent-blue)" }}
-            />
-            <span style={{ fontSize: 12, color: "var(--text-secondary)" }}>
-              {value ? "Enabled" : "Disabled"}
-            </span>
-          </label>
+          (() => {
+            const effectiveValue = value !== undefined ? !!value : !!arg.default;
+            return (
+              <label style={{ display: "flex", alignItems: "center", gap: 8, cursor: "pointer" }}>
+                <input
+                  id={id}
+                  type="checkbox"
+                  checked={effectiveValue}
+                  onChange={(e) => onChange(e.target.checked)}
+                  style={{ accentColor: "var(--accent-blue)" }}
+                />
+                <span style={{ fontSize: 12, color: "var(--text-secondary)" }}>
+                  {effectiveValue ? "Enabled" : "Disabled"}
+                </span>
+              </label>
+            );
+          })()
         ) : (
           <input
             id={id}

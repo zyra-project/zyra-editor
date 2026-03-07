@@ -75,7 +75,8 @@ export function GroupBoxNode({ id, data, selected }: NodeProps) {
       >
         {/* Color dot / picker toggle */}
         <div style={{ position: "relative" }}>
-          <span
+          <button
+            type="button"
             onClick={() => setShowColors((v) => !v)}
             style={{
               display: "inline-block",
@@ -86,8 +87,10 @@ export function GroupBoxNode({ id, data, selected }: NodeProps) {
               cursor: "pointer",
               flexShrink: 0,
               border: "2px solid var(--border-default)",
+              padding: 0,
             }}
             title="Change color"
+            aria-label="Change group color"
           />
           {showColors && (
             <div
@@ -106,7 +109,8 @@ export function GroupBoxNode({ id, data, selected }: NodeProps) {
               }}
             >
               {PRESET_COLORS.map((c) => (
-                <span
+                <button
+                  type="button"
                   key={c}
                   onClick={() => {
                     updateNodeData(id, { color: c });
@@ -120,7 +124,9 @@ export function GroupBoxNode({ id, data, selected }: NodeProps) {
                     background: c,
                     cursor: "pointer",
                     border: c === color ? "2px solid #fff" : "2px solid transparent",
+                    padding: 0,
                   }}
+                  aria-label={`Set color to ${c}`}
                 />
               ))}
             </div>
