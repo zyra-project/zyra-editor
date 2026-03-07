@@ -142,6 +142,7 @@ export function Toolbar({
       <button
         onClick={onToggleYaml}
         title="View & export pipeline config (Ctrl+S)"
+        aria-expanded={yamlOpen}
         style={{
           background: yamlOpen ? "var(--accent-blue)" : "none",
           border: "1px solid var(--border-default)",
@@ -179,6 +180,7 @@ export function Toolbar({
           alignItems: "center",
         }}
         aria-label={`Switch to ${theme === "dark" ? "light" : "dark"} mode`}
+        aria-pressed={theme === "dark"}
       >
         {theme === "dark" ? "\u2600\ufe0f" : "\u{1f319}"}
       </button>

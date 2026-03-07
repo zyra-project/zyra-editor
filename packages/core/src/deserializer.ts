@@ -114,6 +114,9 @@ export function pipelineToGraph(
       const stage = findStage(ctrl.stageCommand) ?? byKey.get(ctrl.stageCommand);
       const sourcePort = stage?.outputs[0]?.id ?? "value";
       for (const ce of ctrl.edges) {
+        // Only reconstruct edges targeting valid arg-ports on existing nodes
+        if (!ce.targetPort.startsWith("arg:")) continue;
+        if (!nodeMap.has(ce.targetNode)) continue;
         edges.push({
           sourceNode: ctrl.id,
           sourcePort,

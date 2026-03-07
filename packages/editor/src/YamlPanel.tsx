@@ -141,7 +141,7 @@ export function normalizePipeline(raw: unknown): Pipeline | null {
           id: go.id,
           label: go.label,
           description: typeof go.description === "string" ? go.description : undefined,
-          color: typeof go.color === "string" ? go.color : "#3b82f6",
+          color: typeof go.color === "string" && /^#[0-9a-fA-F]{6}$/.test(go.color) ? go.color : "#3b82f6",
           locked: typeof go.locked === "boolean" ? go.locked : undefined,
           position: { x: pos.x, y: pos.y },
           size: { w: sz.w, h: sz.h },

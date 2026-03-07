@@ -11,9 +11,10 @@ export interface GroupBoxData {
 
 /** Convert a 6-digit hex color to rgba with the given alpha (0-1). */
 function hexToRgba(hex: string, alpha: number): string {
-  const r = parseInt(hex.slice(1, 3), 16);
-  const g = parseInt(hex.slice(3, 5), 16);
-  const b = parseInt(hex.slice(5, 7), 16);
+  const safeHex = /^#[0-9a-fA-F]{6}$/.test(hex) ? hex : "#6b7280";
+  const r = parseInt(safeHex.slice(1, 3), 16);
+  const g = parseInt(safeHex.slice(3, 5), 16);
+  const b = parseInt(safeHex.slice(5, 7), 16);
   return `rgba(${r},${g},${b},${alpha})`;
 }
 
