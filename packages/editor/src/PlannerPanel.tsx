@@ -223,30 +223,101 @@ export function PlannerPanel({
   }, [onIntentChange]);
 
   const handleAccept = useCallback((idx: number) => {
+    if (!plan) return;
+    const suggestion = plan.suggestions[idx];
+    if (!suggestion) return;
+
+    // Build an agent from the template if available, otherwise synthesize one
+    // by matching the suggestion's stage to the first manifest command for that stage.
+    let agent: PlanAgent;
+    if (suggestion.agent_template) {
+      agent = { ...suggestion.agent_template };
+    } else {
+      const matchingStage = manifest.stages.find(
+        (s) => s.stage === suggestion.stage,
+      );
+      const stage = matchingStage?.stage ?? suggestion.stage;
+      const command = matchingStage?.command ?? suggestion.stage;
+      agent = {
+        id: `${stage}_${command}_${Date.now()}`.replace(/[^a-zA-Z0-9_]/g, "_"),
+        stage,
+        command,
+        depends_on: [],
+        args: {},
+      };
+    }
+
+    // Add to editable agents and mark as accepted
+    setEditableAgents((prev) => [...prev, agent]);
     setAcceptedIdxs((prev) => new Set(prev).add(idx));
     setDismissedIdxs((prev) => {
       const next = new Set(prev);
       next.delete(idx);
       return next;
     });
-  }, []);
+  }, [plan, manifest]);
 
   const handleDismiss = useCallback((idx: number) => {
-    setDismissedIdxs((prev) => new Set(prev).add(idx));
+    // If this was previously accepted, remove the agent that was added
     setAcceptedIdxs((prev) => {
+      if (prev.has(idx) && plan) {
+        const suggestion = plan.suggestions[idx];
+        if (suggestion) {
+          const stage = suggestion.agent_template?.stage ?? suggestion.stage;
+          const command = suggestion.agent_template?.command ?? suggestion.stage;
+          setEditableAgents((agents) => {
+            let lastMatchIdx = -1;
+            for (let i = agents.length - 1; i >= 0; i--) {
+              if (agents[i].stage === stage && agents[i].command === command) {
+                lastMatchIdx = i;
+                break;
+              }
+            }
+            if (lastMatchIdx >= 0) {
+              const next = [...agents];
+              next.splice(lastMatchIdx, 1);
+              return next;
+            }
+            return agents;
+          });
+        }
+      }
       const next = new Set(prev);
       next.delete(idx);
       return next;
     });
-  }, []);
+    setDismissedIdxs((prev) => new Set(prev).add(idx));
+  }, [plan]);
 
   const handleUndoAccept = useCallback((idx: number) => {
+    if (!plan) return;
+    const suggestion = plan.suggestions[idx];
+    // Remove the agent that was added for this suggestion
+    if (suggestion) {
+      const stage = suggestion.agent_template?.stage ?? suggestion.stage;
+      const command = suggestion.agent_template?.command ?? suggestion.stage;
+      setEditableAgents((prev) => {
+        let lastMatchIdx = -1;
+        for (let i = prev.length - 1; i >= 0; i--) {
+          if (prev[i].stage === stage && prev[i].command === command) {
+            lastMatchIdx = i;
+            break;
+          }
+        }
+        if (lastMatchIdx >= 0) {
+          const next = [...prev];
+          next.splice(lastMatchIdx, 1);
+          return next;
+        }
+        return prev;
+      });
+    }
     setAcceptedIdxs((prev) => {
       const next = new Set(prev);
       next.delete(idx);
       return next;
     });
-  }, []);
+  }, [plan]);
 
   // Editable agents: remove
   const handleRemoveAgent = useCallback((agentId: string) => {
@@ -272,21 +343,13 @@ export function PlannerPanel({
   }, []);
 
   const handleApply = useCallback(() => {
-    if (editableAgents.length === 0 && acceptedIdxs.size === 0) return;
-    // Merge accepted suggestions into agents
+    if (editableAgents.length === 0) return;
+    // Accepted suggestions are already in editableAgents (added by handleAccept)
     const agents = [...editableAgents];
-    if (plan) {
-      for (const idx of acceptedIdxs) {
-        const suggestion = plan.suggestions[idx];
-        if (suggestion?.agent_template) {
-          agents.push(suggestion.agent_template);
-        }
-      }
-    }
     const { nodes, edges } = planToGraph(agents, manifest);
     onApply(nodes, edges);
     onClose();
-  }, [editableAgents, plan, acceptedIdxs, manifest, onApply, onClose]);
+  }, [editableAgents, manifest, onApply, onClose]);
 
   // Restore a history entry
   const handleRestoreHistory = useCallback((entry: PlanHistoryEntry) => {
@@ -838,7 +901,7 @@ export function PlannerPanel({
       </div>
 
       {/* Footer: Apply button */}
-      {plan && (editableAgents.length > 0 || acceptedIdxs.size > 0) && (
+      {plan && editableAgents.length > 0 && (
         <div style={{
           padding: "10px 16px",
           borderTop: "1px solid var(--border-default)",
@@ -849,7 +912,7 @@ export function PlannerPanel({
             onClick={handleApply}
             style={{ width: "100%" }}
           >
-            Apply to Canvas ({editableAgents.length + acceptedIdxs.size} nodes)
+            Apply to Canvas ({editableAgents.length} nodes)
           </button>
         </div>
       )}
@@ -1033,8 +1096,7 @@ function SuggestionCard({
       <div style={{ display: "flex", gap: 6 }}>
         <button
           onClick={onAccept}
-          disabled={!suggestion.agent_template}
-          title={suggestion.agent_template ? "Add this step to the plan" : "No agent template available"}
+          title="Add this step to the plan"
           style={{
             flex: 1,
             padding: "4px 0",
@@ -1044,8 +1106,7 @@ function SuggestionCard({
             color: "#3fb950",
             fontSize: 11,
             fontWeight: 600,
-            cursor: suggestion.agent_template ? "pointer" : "default",
-            opacity: suggestion.agent_template ? 1 : 0.4,
+            cursor: "pointer",
             fontFamily: "var(--font-sans)",
           }}
         >
