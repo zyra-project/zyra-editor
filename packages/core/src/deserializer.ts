@@ -94,6 +94,61 @@ export function pipelineToGraph(
     }
   }
 
+  // Reconstruct a cron control node from pipeline.schedule if there
+  // is no matching control node already in _controls (i.e., imported YAML).
+  const hasCronControl = pipeline._controls?.some(
+    (c) => c.stageCommand === "control/cron",
+  );
+  if (pipeline.schedule && !hasCronControl) {
+    const cronId = `_cron_${Date.now().toString(36)}`;
+    const cronArgs: Record<string, string | number | boolean> = {
+      expression: pipeline.schedule.cron,
+    };
+    if (pipeline.schedule.timezone) cronArgs.timezone = pipeline.schedule.timezone;
+    if (pipeline.schedule.enabled !== undefined) cronArgs.enabled = pipeline.schedule.enabled;
+    nodes.push({
+      id: cronId,
+      stageCommand: "control/cron",
+      argValues: cronArgs,
+    });
+  }
+
+  // Reconstruct delay control nodes from steps with delay_seconds
+  // when there is no matching delay control already in _controls.
+  const hasDelayControls = pipeline._controls?.some(
+    (c) => c.stageCommand === "control/delay",
+  );
+  if (!hasDelayControls) {
+    for (const step of pipeline.steps) {
+      if (step.delay_seconds == null || step.delay_seconds <= 0) continue;
+      let duration = step.delay_seconds;
+      let unit: string = "seconds";
+      if (duration >= 3600 && duration % 3600 === 0) {
+        duration = duration / 3600;
+        unit = "hours";
+      } else if (duration >= 60 && duration % 60 === 0) {
+        duration = duration / 60;
+        unit = "minutes";
+      }
+      const delayId = `_delay_${step.name}`;
+      nodes.push({
+        id: delayId,
+        stageCommand: "control/delay",
+        argValues: { duration, unit },
+      });
+      // Wire the delay node to the target step's first arg port
+      const targetInfo = nodeMap.get(step.name);
+      if (targetInfo?.stage && targetInfo.stage.args.length > 0) {
+        edges.push({
+          sourceNode: delayId,
+          sourcePort: "delay",
+          targetNode: step.name,
+          targetPort: `arg:${targetInfo.stage.args[0].key}`,
+        });
+      }
+    }
+  }
+
   // Reconstruct control nodes from _controls metadata
   if (pipeline._controls) {
     for (const ctrl of pipeline._controls) {

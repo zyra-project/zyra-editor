@@ -67,10 +67,14 @@ export function useExecution(): ExecutionControls {
         // don't support --dry-run, only the pipeline runner does)
         const result = new Map<string, NodeRunState>();
         for (const step of pipeline.steps) {
+          let preview = stepToCliPreview(step);
+          if (step.delay_seconds) {
+            preview = `[delay ${step.delay_seconds}s] ${preview}`;
+          }
           result.set(step.name, {
             ...emptyRunState(),
             status: "dry-run",
-            dryRunArgv: stepToCliPreview(step),
+            dryRunArgv: preview,
           });
         }
         setRunState(result);
@@ -338,12 +342,24 @@ export function useExecution(): ExecutionControls {
         async function runStep(
           nodeId: string,
           req: RunStepRequest,
+          delaySecs?: number,
         ): Promise<void> {
           const depsOk = await waitForDeps(nodeId);
           if (!depsOk || cancelledRef.current || runGenRef.current !== gen) {
             updateNode(nodeId, { status: "canceled" });
             resolved.set(nodeId, "canceled");
             return;
+          }
+
+          // Respect delay/throttle before executing
+          if (delaySecs && delaySecs > 0) {
+            updateNode(nodeId, { status: "queued", submittedRequest: req });
+            await new Promise((r) => setTimeout(r, delaySecs * 1000));
+            if (cancelledRef.current || runGenRef.current !== gen) {
+              updateNode(nodeId, { status: "canceled" });
+              resolved.set(nodeId, "canceled");
+              return;
+            }
           }
 
           updateNode(nodeId, { status: "running", submittedRequest: req });
@@ -487,7 +503,7 @@ export function useExecution(): ExecutionControls {
 
         // Launch all steps — they each wait for their deps internally
         const promises = pipeline.steps.map((step, i) =>
-          runStep(step.name, requests[i]),
+          runStep(step.name, requests[i], step.delay_seconds),
         );
         await Promise.all(promises);
       } finally {

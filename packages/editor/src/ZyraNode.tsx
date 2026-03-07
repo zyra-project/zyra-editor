@@ -336,6 +336,65 @@ export function ZyraNode({ id, data, selected }: NodeProps) {
           );
         }
 
+        // Cron schedule node: show cron expression and timezone
+        if (stageDef.command === "cron") {
+          const expr = argValues.expression;
+          const tz = argValues.timezone;
+          const enabled = argValues.enabled;
+          const hasExpr = expr !== undefined && expr !== "";
+          if (!hasExpr) return null;
+          const display = `${expr}${tz ? ` (${tz})` : ""}`;
+          return (
+            <div
+              style={{
+                padding: "4px 12px",
+                fontSize: 11,
+                fontFamily: "var(--font-mono)",
+                color: enabled === false ? "var(--text-muted)" : "var(--accent-blue)",
+                textDecoration: enabled === false ? "line-through" : undefined,
+                background: "var(--bg-tertiary)",
+                overflow: "hidden",
+                textOverflow: "ellipsis",
+                whiteSpace: "nowrap",
+                borderBottom: "1px solid var(--border-default)",
+                flexShrink: 0,
+              }}
+              title={enabled === false ? `(disabled) ${display}` : display}
+            >
+              {display}
+            </div>
+          );
+        }
+
+        // Delay/throttle node: show duration and unit
+        if (stageDef.command === "delay") {
+          const dur = argValues.duration;
+          const unit = argValues.unit ?? "seconds";
+          const jitter = argValues.jitter;
+          const hasDur = dur !== undefined && dur !== "";
+          if (!hasDur) return null;
+          const display = `${dur} ${unit}${jitter && jitter !== "" && jitter !== 0 ? ` \u00b1${jitter}s` : ""}`;
+          return (
+            <div
+              style={{
+                padding: "4px 12px",
+                fontSize: 11,
+                fontFamily: "var(--font-mono)",
+                color: "var(--accent-yellow, #e3b341)",
+                background: "var(--bg-tertiary)",
+                overflow: "hidden",
+                textOverflow: "ellipsis",
+                whiteSpace: "nowrap",
+                borderBottom: "1px solid var(--border-default)",
+                flexShrink: 0,
+              }}
+              title={display}
+            >
+              {display}
+            </div>
+          );
+        }
+
         // Conditional node: show field operator value
         if (stageDef.command === "conditional") {
           const field = argValues.field;

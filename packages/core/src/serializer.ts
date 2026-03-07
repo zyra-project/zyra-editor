@@ -38,6 +38,8 @@ export interface PipelineStep {
   command: string;
   args: Record<string, string | number | boolean>;
   depends_on?: string[];
+  /** Delay in seconds to wait before executing this step. */
+  delay_seconds?: number;
   /** Editor layout metadata — not used by the Zyra CLI. */
   _layout?: { x: number; y: number; w?: number; h?: number };
 }
@@ -66,8 +68,17 @@ export interface PipelineControl {
   _layout?: { x: number; y: number; w?: number; h?: number };
 }
 
+/** Recurring schedule definition for the pipeline. */
+export interface PipelineSchedule {
+  cron: string;
+  timezone?: string;
+  enabled?: boolean;
+}
+
 export interface Pipeline {
   version: string;
+  /** Recurring execution schedule (from a control/cron node). */
+  schedule?: PipelineSchedule;
   steps: PipelineStep[];
   /** Editor-only group box layout — not used by the Zyra CLI. */
   _groups?: PipelineGroup[];
@@ -103,11 +114,47 @@ export function graphToPipeline(
   );
   const nodeMap = new Map(graph.nodes.map((n) => [n.id, n]));
 
+  // ── Extract schedule from cron nodes ─────────────────────────────
+  let schedule: PipelineSchedule | undefined;
+  for (const n of graph.nodes) {
+    if (n.stageCommand !== "control/cron") continue;
+    const expr = n.argValues.expression;
+    if (typeof expr === "string" && expr.trim().length > 0) {
+      schedule = { cron: expr.trim() };
+      const tz = n.argValues.timezone;
+      if (typeof tz === "string" && tz.trim().length > 0) schedule.timezone = tz.trim();
+      if (n.argValues.enabled === false) schedule.enabled = false;
+    } else {
+      diagnostics?.push({
+        level: "warn",
+        message: `Cron schedule node "${n.id}" has no expression — schedule will be omitted.`,
+      });
+    }
+  }
+
+  // ── Extract delay targets from delay nodes ──────────────────────
+  // Map from target step node ID → delay in seconds
+  const delayMap = new Map<string, number>();
+  for (const e of graph.edges) {
+    const srcNode = nodeMap.get(e.sourceNode);
+    if (!srcNode || srcNode.stageCommand !== "control/delay") continue;
+    if (!e.targetPort.startsWith("arg:")) continue;
+    const dur = Number(srcNode.argValues.duration);
+    if (isNaN(dur) || dur <= 0) continue;
+    const unit = srcNode.argValues.unit ?? "seconds";
+    const multiplier = unit === "hours" ? 3600 : unit === "minutes" ? 60 : 1;
+    delayMap.set(e.targetNode, dur * multiplier);
+  }
+
   // Build a map of inlined arg values from control-node edges.
   // Key: targetNodeId, Value: Map<argKey, inlined value>
   const inlinedArgs = new Map<string, Map<string, string | number | boolean>>();
   for (const e of graph.edges) {
     if (!controlNodeIds.has(e.sourceNode)) continue;
+    // Skip delay and cron nodes from the standard inlining path —
+    // they are handled separately above.
+    const srcCmd = nodeMap.get(e.sourceNode)?.stageCommand;
+    if (srcCmd === "control/delay" || srcCmd === "control/cron") continue;
     if (!e.targetPort.startsWith("arg:")) {
       diagnostics?.push({
         level: "warn",
@@ -219,6 +266,8 @@ export function graphToPipeline(
     if (node.label && node.label !== id) step.label = node.label;
     const uniqueDeps = [...new Set(deps)];
     if (uniqueDeps.length > 0) step.depends_on = uniqueDeps;
+    const delay = delayMap.get(id);
+    if (delay !== undefined) step.delay_seconds = delay;
     if (node.position || node.size) {
       const layout: PipelineStep["_layout"] = {
         x: Math.round(node.position?.x ?? 0),
@@ -268,6 +317,7 @@ export function graphToPipeline(
   }
 
   const result: Pipeline = { version: "1", steps };
+  if (schedule) result.schedule = schedule;
   if (controls.length > 0) result._controls = controls;
   return result;
 }

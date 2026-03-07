@@ -11,6 +11,7 @@ export type {
   GraphNode,
   GraphEdge,
   Pipeline,
+  PipelineSchedule,
   PipelineStep,
   PipelineGroup,
   PipelineControl,
