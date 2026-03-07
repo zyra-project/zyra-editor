@@ -3,6 +3,7 @@ import { STATUS_COLORS } from "@zyra/core";
 import type { Theme } from "./useTheme";
 
 interface ToolbarProps {
+  onOpen: () => void;
   onDryRun: () => void;
   onRun: () => void;
   onCancel: () => void;
@@ -17,6 +18,7 @@ interface ToolbarProps {
 }
 
 export function Toolbar({
+  onOpen,
   onDryRun,
   onRun,
   onCancel,
@@ -73,6 +75,14 @@ export function Toolbar({
 
       {/* Pipeline actions */}
       <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
+        <button
+          className="zyra-btn zyra-btn--neutral"
+          onClick={onOpen}
+          title="Open a pipeline file (Ctrl+O)"
+        >
+          Open
+        </button>
+
         <button
           className="zyra-btn zyra-btn--info"
           onClick={onDryRun}

@@ -25,7 +25,8 @@ import { NodeDetailPanel } from "./NodeDetailPanel";
 import { Toolbar } from "./Toolbar";
 import { LogPanel } from "./LogPanel";
 import { useExecution } from "./useExecution";
-import { YamlPanel } from "./YamlPanel";
+import { YamlPanel, normalizePipeline } from "./YamlPanel";
+import yaml from "js-yaml";
 import { useTheme } from "./useTheme";
 
 let nodeIdCounter = 0;
@@ -696,6 +697,26 @@ function Editor() {
   );
   runNodeRef.current = handleRunNode;
 
+  // Open pipeline file from disk
+  const handleOpenFile = useCallback(() => {
+    const input = document.createElement("input");
+    input.type = "file";
+    input.accept = ".yaml,.yml";
+    input.onchange = async () => {
+      const file = input.files?.[0];
+      if (!file) return;
+      const text = await file.text();
+      try {
+        const raw = yaml.load(text, { schema: yaml.JSON_SCHEMA });
+        const p = normalizePipeline(raw);
+        if (p) handlePipelineChange(p);
+      } catch {
+        // ignore parse errors — user can fix in the Export panel
+      }
+    };
+    input.click();
+  }, [handlePipelineChange]);
+
   // Keyboard shortcuts
   useEffect(() => {
     function handleKeyDown(e: KeyboardEvent) {
@@ -708,6 +729,12 @@ function Editor() {
         }
         return;
       }
+      // Cmd/Ctrl+O: open pipeline file
+      if ((e.metaKey || e.ctrlKey) && e.key === "o") {
+        e.preventDefault();
+        handleOpenFile();
+        return;
+      }
       // Cmd/Ctrl+S: export YAML
       if ((e.metaKey || e.ctrlKey) && e.key === "s") {
         e.preventDefault();
@@ -717,7 +744,7 @@ function Editor() {
     }
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [selectedNodeId, yamlOpen]);
+  }, [selectedNodeId, yamlOpen, handleOpenFile]);
 
   const selectedNode = nodes.find((n) => n.id === selectedNodeId);
 
@@ -770,6 +797,7 @@ function Editor() {
   return (
     <div className="zyra-editor">
       <Toolbar
+        onOpen={handleOpenFile}
         onDryRun={handleDryRun}
         onRun={handleRun}
         onCancel={exec.cancelAll}

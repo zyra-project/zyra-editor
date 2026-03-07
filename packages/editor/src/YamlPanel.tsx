@@ -20,7 +20,7 @@ interface NativeYaml {
  * - Editor format: { version, steps: [{ name, command, args }] }
  * - Zyra native format: { name?, stages: [{ stage, command, args }] }
  */
-function normalizePipeline(raw: unknown): Pipeline | null {
+export function normalizePipeline(raw: unknown): Pipeline | null {
   if (!raw || typeof raw !== "object") return null;
   const obj = raw as Record<string, unknown>;
 
