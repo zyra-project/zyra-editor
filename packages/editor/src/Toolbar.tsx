@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback } from "react";
 import type { RunStateMap } from "./useExecution";
 import { STATUS_COLORS } from "@zyra/core";
 import type { Theme } from "./useTheme";
+import type { BackendStatus } from "./useBackendStatus";
 
 interface ToolbarProps {
   onOpen: () => void;
@@ -18,6 +19,7 @@ interface ToolbarProps {
   onTogglePlanner: () => void;
   theme: Theme;
   onToggleTheme: () => void;
+  backendStatus: BackendStatus & { refresh: () => void };
 }
 
 export function Toolbar({
@@ -35,8 +37,10 @@ export function Toolbar({
   onTogglePlanner,
   theme,
   onToggleTheme,
+  backendStatus,
 }: ToolbarProps) {
   const [helpOpen, setHelpOpen] = useState(false);
+  const [statusPopoverOpen, setStatusPopoverOpen] = useState(false);
   const counts = { succeeded: 0, failed: 0, running: 0, total: 0 };
   for (const [, state] of runState) {
     counts.total++;
@@ -123,7 +127,7 @@ export function Toolbar({
       {/* AI Planner toggle */}
       <button
         onClick={onTogglePlanner}
-        title="AI Planner — generate a pipeline from a natural language description"
+        title="AI Planner — generate a pipeline from a natural language description (Ctrl+P)"
         aria-expanded={plannerOpen}
         style={{
           background: plannerOpen ? "var(--accent-blue)" : "none",
@@ -144,6 +148,51 @@ export function Toolbar({
         <span style={{ fontSize: 14 }}>{"\u2728"}</span>
         Plan
       </button>
+
+      {/* AI Status indicator */}
+      <div style={{ position: "relative" }}>
+        <button
+          onClick={() => setStatusPopoverOpen((v) => !v)}
+          title={`AI Status: ${backendStatus.status}`}
+          style={{
+            background: "none",
+            border: "1px solid var(--border-default)",
+            borderRadius: "var(--radius-md)",
+            color: "var(--text-secondary)",
+            cursor: "pointer",
+            padding: "4px 8px",
+            fontSize: 11,
+            lineHeight: 1,
+            display: "flex",
+            alignItems: "center",
+            gap: 5,
+            fontFamily: "var(--font-sans)",
+            fontWeight: 500,
+          }}
+        >
+          <span style={{
+            display: "inline-block",
+            width: 8,
+            height: 8,
+            borderRadius: "50%",
+            background:
+              backendStatus.status === "ready" ? "var(--accent-green)"
+              : backendStatus.status === "degraded" ? "var(--accent-yellow)"
+              : backendStatus.status === "checking" ? "var(--text-muted)"
+              : "var(--accent-red)",
+          }} />
+          {backendStatus.status === "ready" ? "AI Ready"
+            : backendStatus.status === "degraded" ? "Degraded"
+            : backendStatus.status === "checking" ? "Checking..."
+            : "Offline"}
+        </button>
+        {statusPopoverOpen && (
+          <StatusPopover
+            status={backendStatus}
+            onClose={() => setStatusPopoverOpen(false)}
+          />
+        )}
+      </div>
 
       {/* Spacer */}
       <div style={{ flex: 1 }} />
@@ -303,12 +352,126 @@ const HELP_SECTIONS: { title: string; items: string[] }[] = [
   {
     title: "Keyboard Shortcuts",
     items: [
+      "Ctrl+P \u2014 Toggle AI Planner",
       "Ctrl+S \u2014 Toggle YAML export panel",
       "Ctrl+O \u2014 Open pipeline file",
+      "Escape \u2014 Close panels / deselect nodes",
       "Delete / Backspace \u2014 Remove selected nodes or edges",
     ],
   },
 ];
+
+function StatusPopover({
+  status,
+  onClose,
+}: {
+  status: BackendStatus & { refresh: () => void };
+  onClose: () => void;
+}) {
+  const checkIcon = (ok: boolean) => (
+    <span style={{
+      display: "inline-block",
+      width: 8,
+      height: 8,
+      borderRadius: "50%",
+      background: ok ? "var(--accent-green)" : "var(--accent-red)",
+      marginRight: 6,
+      flexShrink: 0,
+    }} />
+  );
+
+  const ago = status.lastChecked
+    ? `${Math.round((Date.now() - status.lastChecked) / 1000)}s ago`
+    : "never";
+
+  // Close on outside click
+  useEffect(() => {
+    const handler = (e: MouseEvent) => {
+      const target = e.target as HTMLElement;
+      if (!target.closest("[data-status-popover]")) onClose();
+    };
+    document.addEventListener("mousedown", handler);
+    return () => document.removeEventListener("mousedown", handler);
+  }, [onClose]);
+
+  return (
+    <div
+      data-status-popover
+      style={{
+        position: "absolute",
+        top: "calc(100% + 6px)",
+        right: 0,
+        width: 260,
+        background: "var(--bg-secondary)",
+        border: "1px solid var(--border-default)",
+        borderRadius: "var(--radius-md)",
+        boxShadow: "0 4px 16px var(--node-shadow)",
+        padding: "12px 14px",
+        zIndex: 200,
+        fontFamily: "var(--font-sans)",
+        fontSize: 12,
+        animation: "zyra-fade-in 0.15s ease-out",
+      }}
+    >
+      <div style={{ fontWeight: 700, fontSize: 13, color: "var(--text-bright)", marginBottom: 10 }}>
+        Backend Status
+      </div>
+      <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+        <div style={{ display: "flex", alignItems: "center", color: "var(--text-secondary)" }}>
+          {checkIcon(status.server)}
+          <span style={{ flex: 1 }}>Server</span>
+          <span style={{ color: "var(--text-muted)", fontSize: 11 }}>
+            {status.server ? "Connected" : "Unreachable"}
+          </span>
+        </div>
+        <div style={{ display: "flex", alignItems: "center", color: "var(--text-secondary)" }}>
+          {checkIcon(status.zyra_cli)}
+          <span style={{ flex: 1 }}>Zyra CLI</span>
+          <span style={{ color: "var(--text-muted)", fontSize: 11 }}>
+            {status.zyra_cli
+              ? status.zyra_version || "Installed"
+              : "Not found"}
+          </span>
+        </div>
+        <div style={{ display: "flex", alignItems: "center", color: "var(--text-secondary)" }}>
+          {checkIcon(status.llm_configured)}
+          <span style={{ flex: 1 }}>LLM Backend</span>
+          <span style={{ color: "var(--text-muted)", fontSize: 11 }}>
+            {status.llm_configured ? "Configured" : "Not configured"}
+          </span>
+        </div>
+      </div>
+      <div style={{
+        marginTop: 10,
+        paddingTop: 8,
+        borderTop: "1px solid var(--border-default)",
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "space-between",
+      }}>
+        <span style={{ fontSize: 10, color: "var(--text-muted)" }}>
+          Last checked: {ago}
+        </span>
+        <button
+          onClick={status.refresh}
+          style={{
+            background: "none",
+            border: "1px solid var(--border-default)",
+            borderRadius: "var(--radius-sm)",
+            color: "var(--text-secondary)",
+            fontSize: 10,
+            cursor: "pointer",
+            padding: "2px 8px",
+            fontFamily: "var(--font-sans)",
+            fontWeight: 600,
+          }}
+        >
+          Refresh
+        </button>
+      </div>
+    </div>
+  );
+}
 
 function HelpModal({ onClose }: { onClose: () => void }) {
   // Close on Escape — stop propagation so App-level Escape handler doesn't also fire

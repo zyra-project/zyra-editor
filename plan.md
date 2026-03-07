@@ -1,271 +1,257 @@
-# Plan: AI Workflow Assistant for Zyra Editor
+# Plan: AI Planner UX Improvements
 
-## Summary
+## Overview
 
-Add an AI-powered workflow assistant to the Zyra Editor that lets users describe a data pipeline in natural language, then generates and places the corresponding node graph on the canvas. This leverages `zyra plan` — a planner already built into the Zyra CLI.
-
----
-
-## API Availability: Can We Use `zyra plan` from the Editor?
-
-### Current State
-
-**`zyra plan` exists** in the CLI (`src/zyra/swarm/planner.py`) but is **NOT exposed** through the existing API. The `/v1/cli/run` endpoint uses a hard-coded stage matrix (`_compute_cli_matrix()`) that imports specific modules:
-
-- acquire, process, visualize, decimate, simulate, decide, narrate, verify, swarm, run
-
-`plan` is **not in this list**. The endpoint validates stage/command pairs against this matrix and returns HTTP 400 for unrecognized stages.
-
-### Solution: Add a Proxy Endpoint on the Editor Server
-
-Since we control the editor's FastAPI server (`server/main.py`), we add a thin endpoint that shells out to `zyra plan` directly (the `zyra` CLI is installed in the server container via `zyra[api]`). This avoids needing changes to upstream zyra's API router.
+Seven improvements to the AI Planner feature addressing loading feedback, error recovery, agent editing, history, keyboard accessibility, canvas clutter management, and backend status monitoring.
 
 ---
 
-## Architecture
+## 1. Loading Feedback with Progress Indicator & Cancel
 
-```
-┌──────────────────────────────────────────────────────┐
-│  Editor (React)                                      │
-│                                                      │
-│  ┌────────────────────┐                              │
-│  │ PlannerPanel.tsx    │──POST /v1/plan──┐            │
-│  │ (text input + btn) │                 │            │
-│  └────────────────────┘                 │            │
-│           │                             │            │
-│           ▼                             ▼            │
-│  ┌────────────────────┐    ┌─────────────────────┐   │
-│  │ Canvas: App.tsx    │    │  Editor Server       │   │
-│  │ (places nodes +    │    │  server/main.py      │   │
-│  │  edges from plan)  │    │                      │   │
-│  └────────────────────┘    │  POST /v1/plan       │   │
-│                            │  → subprocess:       │   │
-│                            │    zyra plan          │   │
-│                            │    --intent "..."     │   │
-│                            │    --no-clarify       │   │
-│                            │  → returns JSON       │   │
-│                            └─────────────────────┘   │
-└──────────────────────────────────────────────────────┘
-```
+**Problem:** Users see only "Generating..." on a disabled button during 30-120s LLM calls. No spinner, no progress, no cancel.
+
+**Files:** `PlannerPanel.tsx`
+
+**Changes:**
+- Add an `AbortController` ref to enable cancellation of the fetch request
+- Replace the "Generating..." button text with a multi-element loading state:
+  - CSS-animated spinner (rotating ring, defined in `theme.css`)
+  - Elapsed time counter (updates every second via `setInterval`)
+  - "Cancel" link/button that aborts the fetch and resets state
+- Add `@keyframes zyra-spin` to `theme.css` for the spinner animation
+- The loading UI replaces the Generate button area during generation:
+  ```
+  ┌─────────────────────────────────┐
+  │  ◌ Generating...  12s  Cancel   │
+  └─────────────────────────────────┘
+  ```
 
 ---
 
-## Design Details
+## 2. Error Recovery with Actionable Guidance
 
-### A. Server: `POST /v1/plan` Endpoint (`server/main.py`)
+**Problem:** Errors show a red box with the raw message but no guidance on how to fix it.
 
-A new endpoint that runs `zyra plan` as a subprocess:
+**Files:** `PlannerPanel.tsx`
 
-```python
-@app.post("/v1/plan")
-async def generate_plan(request: PlanRequest):
-    """Run zyra plan and return the structured manifest."""
-    cmd = ["zyra", "plan", "--intent", request.intent, "--no-clarify"]
-    if request.guardrails:
-        cmd += ["--guardrails", request.guardrails]
-    result = subprocess.run(cmd, capture_output=True, text=True, timeout=60)
-    if result.returncode != 0:
-        raise HTTPException(400, detail=result.stderr)
-    return json.loads(result.stdout)
-```
+**Changes:**
+- Create an `ERROR_GUIDANCE` map keyed by HTTP status code or error pattern:
+  - `503` → "The zyra CLI is not installed in the server container. Check that `zyra[api]` is in requirements.txt and the container has been rebuilt."
+  - `504` → "The planner timed out (120s limit). Try a simpler intent or check that the LLM backend (OPENAI_API_KEY / OLLAMA_HOST) is configured and responsive."
+  - `400` → "The planner returned an error. Review your intent description and try rephrasing."
+  - `502` → "The planner produced invalid output. This may be a transient LLM issue — try again."
+  - Network/fetch errors → "Could not reach the server. Check that the backend is running at localhost:8765."
+- Update the error display to show:
+  - The raw error message (as today)
+  - A guidance paragraph below in muted text
+  - A "Retry" button that re-runs `handleGenerate()` with the same intent
 
-**Request model:**
-```python
-class PlanRequest(BaseModel):
-    intent: str           # e.g. "Download SST data and convert to GeoTIFF"
-    guardrails: str = ""  # optional validation schema path
-```
+**Implementation detail:** Parse the HTTP status from the fetch response before constructing the Error object. Store it alongside the error message in a `{ message: string; status?: number }` state shape instead of just `string | null`.
 
-**Response shape** (from `zyra plan` output):
-```json
-{
-  "intent": "Download SST data and convert to GeoTIFF",
-  "agents": [
-    {
-      "id": "acquire_1",
-      "stage": "acquire",
-      "command": "http",
-      "depends_on": [],
-      "args": { "url": "...", "output": "/data/raw/sst.nc" }
-    },
-    {
-      "id": "process_1",
-      "stage": "process",
-      "command": "convert",
-      "depends_on": ["acquire_1"],
-      "args": { "input": "/data/raw/sst.nc", "format": "geotiff" }
-    }
-  ],
-  "plan_summary": "...",
-  "suggestions": [
-    {
-      "stage": "verify",
-      "description": "Add a verification step to validate the GeoTIFF output",
-      "confidence": 0.85,
-      "origin": "heuristic",
-      "intent_text": "Verify the converted GeoTIFF is valid and contains expected bands",
-      "agent_template": {
-        "id": "verify_1",
-        "stage": "verify",
-        "command": "check",
-        "depends_on": ["process_1"],
-        "args": { "input": "/data/raw/sst.tif" }
+---
+
+## 3. Editable Agent List (Remove/Reorder Core Agents)
+
+**Problem:** Users can accept/dismiss suggestions but cannot remove or reorder the planner's core agents before applying.
+
+**Files:** `PlannerPanel.tsx`, `planToGraph.ts`
+
+**Changes to PlannerPanel.tsx:**
+- Change `plan.agents` from being used directly to being copied into a mutable `editableAgents` state (`useState<PlanAgent[]>`) that is initialized from `plan.agents` whenever a new plan arrives
+- Add a "Remove" button (small `×`) to each `AgentCard`
+  - Clicking removes that agent from `editableAgents`
+  - Also removes it from any other agent's `depends_on` to prevent dangling references
+- Add drag-to-reorder: **not implementing full DnD** (too complex, no new deps). Instead:
+  - Add small up/down arrow buttons on each AgentCard to shift position in the list
+  - This changes visual order and the order passed to `planToGraph()` but does not alter `depends_on` (topological layout handles positioning regardless of array order)
+- Update the "Apply to Canvas" button count to reflect `editableAgents.length + acceptedIdxs.size`
+- Update `handleApply` to use `editableAgents` instead of `plan.agents`
+
+**No changes to planToGraph.ts** — it already handles any agents array.
+
+---
+
+## 4. Plan History (Persist Intent & Results Across Panel Opens)
+
+**Problem:** Closing the panel loses the current plan and intent text. Re-opening starts fresh.
+
+**Files:** `PlannerPanel.tsx`, `App.tsx`
+
+**Changes to App.tsx:**
+- Lift the planner state up: add a `plannerHistory` state that holds an array of `{ intent: string; plan: PlanResponse | null; timestamp: number }` entries (max 10)
+- Pass `plannerHistory` and an `onHistoryAdd` callback down to `PlannerPanel`
+- The `intent` text field value is also lifted to App.tsx so it persists across open/close cycles
+
+**Changes to PlannerPanel.tsx:**
+- Accept `history`, `onHistoryAdd`, `intent`/`setIntent` props
+- After a successful generate, call `onHistoryAdd({ intent, plan, timestamp: Date.now() })`
+- Add a small "History" section at the top of the panel (collapsible):
+  - Shows past intents as clickable items (truncated to ~60 chars)
+  - Clicking an item restores that intent text in the textarea and loads its plan result for preview
+  - A small "×" on each history item removes it
+- The current intent persists when closing/reopening the panel (no state reset on close)
+- History is stored in component state only (not localStorage) — it's session-scoped
+
+---
+
+## 5. Keyboard Shortcut for Planner Panel
+
+**Problem:** No keyboard shortcut to open/close the AI planner panel.
+
+**Files:** `App.tsx`, `Toolbar.tsx` (help text update)
+
+**Changes to App.tsx:**
+- Add `Ctrl+P` (or `Cmd+P` on macOS) to the keyboard shortcut handler:
+  ```ts
+  if ((e.metaKey || e.ctrlKey) && e.key === "p") {
+    e.preventDefault();
+    setPlannerOpen((v) => !v);
+    return;
+  }
+  ```
+- Also close planner panel on `Escape` (add to the existing Escape chain: yaml → planner → detail → deselect)
+
+**Changes to Toolbar.tsx:**
+- Update the Plan button `title` to include the shortcut: `"AI Planner (Ctrl+P)"`
+- Add "Ctrl+P — Toggle AI Planner" to the `HELP_SECTIONS` keyboard shortcuts list
+
+---
+
+## 6. Batch Undo for AI-Generated Nodes
+
+**Problem:** Repeated Generate → Apply cycles stack nodes rightward with no way to clear a specific AI batch.
+
+**Files:** `App.tsx`, `PlannerPanel.tsx`
+
+**Changes to App.tsx:**
+- Maintain a `planBatches` state: `useState<{ nodeIds: string[]; edgeIds: string[]; intent: string; timestamp: number }[]>([])`
+- In `handlePlanApply`, after adding nodes/edges, record the batch:
+  ```ts
+  const batchNodeIds = offsetNodes.map(n => n.id);
+  const batchEdgeIds = newEdges.map(e => e.id);
+  setPlanBatches(prev => [...prev, {
+    nodeIds: batchNodeIds,
+    edgeIds: batchEdgeIds,
+    intent: currentIntent,
+    timestamp: Date.now(),
+  }]);
+  ```
+- Add an `onUndoLastBatch` callback that removes the most recent batch's nodes and edges from the canvas:
+  ```ts
+  const handleUndoLastBatch = useCallback(() => {
+    const last = planBatches[planBatches.length - 1];
+    if (!last) return;
+    const nodeSet = new Set(last.nodeIds);
+    const edgeSet = new Set(last.edgeIds);
+    setNodes(prev => prev.filter(n => !nodeSet.has(n.id)));
+    setEdges(prev => prev.filter(e => !edgeSet.has(e.id)));
+    setPlanBatches(prev => prev.slice(0, -1));
+  }, [planBatches, setNodes, setEdges]);
+  ```
+
+**Changes to PlannerPanel.tsx:**
+- Accept `batches` and `onUndoBatch` props
+- After the plan preview / apply area, show a small "Recent AI Batches" section if batches exist:
+  - Each batch shows: truncated intent, node count, timestamp
+  - "Undo" button on the most recent batch removes those nodes/edges
+  - Only the most recent batch can be undone (to keep it simple and avoid orphaned edge issues)
+
+---
+
+## 7. AI Status Indicator (Backend Readiness Check)
+
+**Problem:** No visibility into whether the backend is reachable and the planner CLI is available.
+
+**Files:** `Toolbar.tsx`, new hook `packages/editor/src/useBackendStatus.ts`, `server/main.py`
+
+### Server Changes (`server/main.py`):
+- Add a `GET /v1/ready` endpoint (if `/ready` or `/health` doesn't already cover this):
+  ```python
+  @app.get("/v1/ready")
+  async def readiness_check():
+      """Check backend readiness: server up, zyra CLI available, LLM configured."""
+      checks = {
+          "server": True,
+          "zyra_cli": False,
+          "llm_configured": False,
       }
-    }
-  ],
-  "accepted_suggestions": []
+      # Check zyra CLI
+      try:
+          result = subprocess.run(["zyra", "--version"], capture_output=True, text=True, timeout=5)
+          checks["zyra_cli"] = result.returncode == 0
+          checks["zyra_version"] = result.stdout.strip() if result.returncode == 0 else None
+      except (FileNotFoundError, subprocess.TimeoutExpired):
+          pass
+      # Check LLM configuration
+      checks["llm_configured"] = bool(
+          os.environ.get("OPENAI_API_KEY") or os.environ.get("OLLAMA_HOST")
+      )
+      checks["ready"] = all([checks["server"], checks["zyra_cli"], checks["llm_configured"]])
+      return checks
+  ```
+  The endpoint proxies through Vite automatically (the existing `/v1` proxy rule covers it).
+
+### New Hook (`useBackendStatus.ts`):
+```ts
+interface BackendStatus {
+  status: "checking" | "ready" | "degraded" | "offline";
+  server: boolean;
+  zyra_cli: boolean;
+  llm_configured: boolean;
+  zyra_version?: string;
+  lastChecked: number;
 }
 ```
+- On mount, fetch `GET /v1/ready`
+- Poll every 30 seconds
+- On fetch failure, set status to `"offline"`
+- If server responds but `zyra_cli` or `llm_configured` is false, set `"degraded"`
+- If all checks pass, set `"ready"`
+- Expose a `refresh()` function for manual re-check
 
-The `suggestions` array is populated by zyra's **value engine** (`swarm/value_engine.py`), which proposes workflow improvements through three channels:
+### Toolbar Changes (`Toolbar.tsx`):
+- Import and use `useBackendStatus()` (or receive status as prop from App.tsx — prop approach preferred to keep hook usage centralized)
+- Add an AI Status indicator button next to the Plan button:
+  - **Ready** (all green): small green dot + "AI Ready" text
+  - **Degraded** (partial): yellow dot + "AI Degraded" — click opens a tooltip/popover showing which checks failed
+  - **Offline**: red dot + "Offline" — click shows connection details
+- The indicator button is clickable and opens a small dropdown/popover showing:
+  ```
+  ┌──────────────────────────────────┐
+  │  Backend Status                  │
+  │  ──────────────────────────────  │
+  │  ● Server        Connected      │
+  │  ● Zyra CLI      v0.1.47        │
+  │  ● LLM Backend   Configured     │
+  │                                  │
+  │  Last checked: 12s ago  Refresh  │
+  └──────────────────────────────────┘
+  ```
+- Style: consistent with existing toolbar buttons, uses the existing `--accent-green`, `--accent-yellow`, `--accent-red` CSS variables
 
-1. **Heuristic rules** — Pattern detection (e.g. "visualize without narrate → suggest narration")
-2. **Bundle templates** — Intent classifier detects domain tags (e.g. `drought_risk`, `map_viz`) and proposes pre-configured stages with sensible defaults
-3. **LLM augmentation** — Reviews the manifest and proposes analytical enhancements
-
-Each suggestion includes a `confidence` score (0–1), an `origin` (heuristic/bundle/llm), human-readable `description`, and an optional `agent_template` with a ready-to-use agent definition.
-
-**Vite proxy:** Add `/v1/plan` to the existing proxy config in `vite.config.ts` (already covered by the `/v1` prefix proxy rule).
-
-### B. Editor: Planner Panel (`packages/editor/src/PlannerPanel.tsx`)
-
-A collapsible panel in the toolbar area with:
-
-1. **Text input** — multi-line textarea for describing the desired pipeline
-2. **"Generate" button** — calls `POST /v1/plan` with the intent text
-3. **Loading state** — spinner while waiting for the planner
-4. **Error display** — shows planner errors inline
-5. **Plan preview** — shows the plan summary and agent list before placing on canvas
-6. **Suggestions panel** — displays value engine recommendations (see Section F)
-7. **"Apply to Canvas" button** — converts the plan (with any accepted suggestions) into nodes + edges
-
-### C. Plan-to-Graph Conversion (`packages/editor/src/planToGraph.ts`)
-
-Converts the planner's `agents` array into React Flow nodes and edges:
-
-```ts
-interface PlanAgent {
-  id: string;
-  stage: string;
-  command: string;
-  depends_on: string[];
-  args: Record<string, string>;
-}
-
-function planToGraph(
-  agents: PlanAgent[],
-  manifest: Manifest
-): { nodes: Node[]; edges: Edge[] }
-```
-
-**Logic:**
-1. For each agent, find the matching `StageDef` in the manifest by `stage` + `command`
-2. Create a React Flow node with:
-   - `type: "zyra"` (our custom node type)
-   - `data.stageId` matching the manifest stage
-   - `data.argValues` populated from the agent's `args`
-   - `position` auto-laid out (simple grid or topological layout)
-3. For each `depends_on` entry, create an edge from the dependency's output port to this node's input port
-4. Return the nodes and edges arrays
-
-**Auto-layout:** Simple left-to-right topological layout:
-- Assign each node a column based on its topological depth (max depth of dependencies + 1)
-- Space nodes vertically within each column
-- Column width: ~300px, row height: ~150px
-
-### D. Integration in `App.tsx`
-
-Add a callback that receives the plan output and merges it onto the canvas:
-
-```ts
-const handlePlanApply = (agents: PlanAgent[]) => {
-  const { nodes: newNodes, edges: newEdges } = planToGraph(agents, manifest);
-  // Offset positions so new nodes don't overlap existing ones
-  const offsetX = /* rightmost existing node X + 400 */ ;
-  const offsetNodes = newNodes.map(n => ({
-    ...n,
-    position: { x: n.position.x + offsetX, y: n.position.y }
-  }));
-  setNodes(prev => [...prev, ...offsetNodes]);
-  setEdges(prev => [...prev, ...newEdges]);
-};
-```
-
-### E. Toolbar Button
-
-Add a toolbar button (e.g. sparkle/wand icon) that toggles the PlannerPanel visibility. Place it near the existing run/export buttons.
-
-### F. Value Engine Suggestions UI
-
-The planner's `suggestions` array from the value engine is surfaced as interactive recommendation cards below the plan preview.
-
-#### Suggestion Card Layout
-
-Each suggestion renders as a card with:
-- **Stage badge** — colored pill matching the stage color from `STAGE_COLORS` (e.g. verify = `#555555`)
-- **Description** — the human-readable explanation of what would be added
-- **Confidence indicator** — visual bar or percentage (e.g. "85% confidence")
-- **Origin tag** — small label showing source: "heuristic", "bundle", or "llm"
-- **Accept / Dismiss buttons** — accept adds the suggestion's `agent_template` to the agents list; dismiss hides it
-
-#### Behavior
-
-1. **On generate:** After the plan JSON arrives, render agents in the preview and suggestions below as cards
-2. **Accept a suggestion:** Move the suggestion's `agent_template` into the `agents` array, re-run the auto-layout to position it, and move the suggestion to an "Accepted" section with an undo option
-3. **Dismiss a suggestion:** Fade out the card (can be undone before applying)
-4. **Apply to canvas:** All agents (original + accepted suggestions) are converted to nodes via `planToGraph()` and placed on the canvas
-5. **No suggestions:** If the `suggestions` array is empty, show a subtle "No additional suggestions" message
-
-#### Data Flow
-
-```
-POST /v1/plan → { agents: [...], suggestions: [...] }
-                        │                    │
-                        ▼                    ▼
-                Plan Preview           Suggestion Cards
-                        │                    │
-                        │    ◄── accept ─────┘
-                        │
-                        ▼
-              handlePlanApply(mergedAgents)
-                        │
-                        ▼
-                Canvas: nodes + edges
-```
-
-### G. Plan-to-Graph: Handling Accepted Suggestions
-
-The `planToGraph()` function in Section C already handles any agent in the array — accepted suggestions with an `agent_template` are structurally identical to planner-generated agents (same `id`, `stage`, `command`, `depends_on`, `args` fields). No special conversion logic needed.
-
-The only addition: when a suggestion's `agent_template` includes `depends_on` referencing an existing agent, the auto-layout positions it downstream. If `depends_on` is empty, it's placed as a new leaf node at the end of the graph.
+### App.tsx Changes:
+- Call `useBackendStatus()` in the Editor component
+- Pass the status object down to `Toolbar` as a prop
+- Also pass it to `PlannerPanel` so the Generate button can be disabled with a helpful message when status is not "ready"
 
 ---
 
 ## Implementation Order
 
-1. **Server endpoint** — Add `POST /v1/plan` to `server/main.py` that shells out to `zyra plan --intent "..." --no-clarify` and returns the JSON result (including `suggestions` from the value engine).
-
-2. **Plan-to-graph converter** — Create `packages/editor/src/planToGraph.ts` with the conversion logic and auto-layout.
-
-3. **PlannerPanel component** — Create `packages/editor/src/PlannerPanel.tsx` with the text input, generate button, plan preview, and apply button.
-
-4. **Suggestion cards** — Add the value engine suggestions UI within PlannerPanel: render cards with accept/dismiss, merge accepted `agent_template` entries into the agents array.
-
-5. **App.tsx integration** — Add the toolbar button, PlannerPanel rendering, and `handlePlanApply` callback.
-
-6. **Styling** — Dark theme consistent with the existing editor UI; stage-colored badges on suggestion cards.
+1. **Spinner animation** — Add `@keyframes zyra-spin` to `theme.css`
+2. **`useBackendStatus` hook** — Create the new hook file
+3. **Server `/v1/ready` endpoint** — Add to `server/main.py`
+4. **PlannerPanel overhaul** — Loading feedback, error recovery, editable agents, history, batch display (items 1-4, 6 partial)
+5. **App.tsx integration** — Lifted state for history/batches, keyboard shortcut (Ctrl+P), planner Escape handling, backend status hook, pass props down
+6. **Toolbar updates** — AI status indicator, updated help text, shortcut label
+7. **Type-check & verify** — Run `pnpm typecheck` across the monorepo
 
 ---
 
 ## What This Does NOT Change
 
-- No changes to `@zyra/core` — plan-to-graph conversion is editor-only
-- No changes to the upstream zyra API (`_compute_cli_matrix`) — we bypass it with a direct subprocess call
-- Existing manual node creation workflow is unchanged
-- Execution flow unchanged — planned nodes execute the same as manually-created ones
-- No new npm dependencies required (uses existing React Flow APIs)
-
-## Dependencies
-
-- `zyra` CLI must be installed in the server container (already is via `zyra[api]>=0.1.45`)
-- `zyra plan` requires LLM access — the server container needs appropriate env vars (e.g. `OPENAI_API_KEY` or `OLLAMA_HOST`) for the planner's LLM backend
+- No changes to `@zyra/core`
+- No changes to `planToGraph.ts` (the converter already handles any agents array)
+- No new npm dependencies
+- Existing node creation, execution, and export workflows unchanged
+- The server `/v1/plan` endpoint logic unchanged (only adding `/v1/ready`)

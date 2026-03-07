@@ -1,4 +1,4 @@
-import { useState, useCallback } from "react";
+import { useState, useCallback, useRef, useEffect } from "react";
 import type { Node, Edge } from "@xyflow/react";
 import type { Manifest } from "@zyra/core";
 import {
@@ -7,6 +7,7 @@ import {
   type PlanSuggestion,
   type PlanResponse,
 } from "./planToGraph";
+import type { BackendStatus } from "./useBackendStatus";
 
 /** Stage header colours — mirrors server/main.py STAGE_COLORS. */
 const STAGE_COLORS: Record<string, string> = {
@@ -22,27 +23,97 @@ const STAGE_COLORS: Record<string, string> = {
   simulate: "#C04000",
 };
 
+/** Error guidance keyed by HTTP status code. */
+const ERROR_GUIDANCE: Record<number | string, string> = {
+  503: "The zyra CLI is not installed in the server container. Rebuild with zyra[api] in requirements.txt.",
+  504: "The planner timed out (120s limit). Try a simpler intent or check that the LLM backend (OPENAI_API_KEY / OLLAMA_HOST) is configured.",
+  400: "The planner returned an error. Try rephrasing your intent description.",
+  502: "The planner produced invalid output. This may be a transient LLM issue — try again.",
+  network: "Could not reach the server. Check that the backend is running at localhost:8765.",
+};
+
+export interface PlanHistoryEntry {
+  intent: string;
+  plan: PlanResponse;
+  timestamp: number;
+}
+
+export interface PlanBatch {
+  nodeIds: string[];
+  edgeIds: string[];
+  intent: string;
+  timestamp: number;
+}
+
 interface PlannerPanelProps {
   manifest: Manifest;
   onApply: (nodes: Node[], edges: Edge[]) => void;
   onClose: () => void;
+  // Lifted state from App.tsx
+  intent: string;
+  onIntentChange: (v: string) => void;
+  history: PlanHistoryEntry[];
+  onHistoryAdd: (entry: PlanHistoryEntry) => void;
+  onHistoryRemove: (idx: number) => void;
+  batches: PlanBatch[];
+  onUndoBatch: () => void;
+  backendStatus: BackendStatus;
 }
 
-export function PlannerPanel({ manifest, onApply, onClose }: PlannerPanelProps) {
-  const [intent, setIntent] = useState("");
+export function PlannerPanel({
+  manifest,
+  onApply,
+  onClose,
+  intent,
+  onIntentChange,
+  history,
+  onHistoryAdd,
+  onHistoryRemove,
+  batches,
+  onUndoBatch,
+  backendStatus,
+}: PlannerPanelProps) {
   const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const [elapsed, setElapsed] = useState(0);
+  const [error, setError] = useState<{ message: string; status?: number } | null>(null);
   const [plan, setPlan] = useState<PlanResponse | null>(null);
+  const [editableAgents, setEditableAgents] = useState<PlanAgent[]>([]);
+  const [historyOpen, setHistoryOpen] = useState(false);
 
   // Track accepted / dismissed suggestion indices
   const [acceptedIdxs, setAcceptedIdxs] = useState<Set<number>>(new Set());
   const [dismissedIdxs, setDismissedIdxs] = useState<Set<number>>(new Set());
 
+  const abortRef = useRef<AbortController | null>(null);
+  const timerRef = useRef<ReturnType<typeof setInterval>>();
+
+  // Elapsed timer during loading
+  useEffect(() => {
+    if (loading) {
+      setElapsed(0);
+      timerRef.current = setInterval(() => setElapsed((s) => s + 1), 1000);
+    } else {
+      clearInterval(timerRef.current);
+    }
+    return () => clearInterval(timerRef.current);
+  }, [loading]);
+
+  // Sync editableAgents when plan changes
+  useEffect(() => {
+    if (plan) {
+      setEditableAgents([...plan.agents]);
+    }
+  }, [plan]);
+
   const handleGenerate = useCallback(async () => {
     if (!intent.trim()) return;
+    abortRef.current?.abort();
+    const controller = new AbortController();
+    abortRef.current = controller;
     setLoading(true);
     setError(null);
     setPlan(null);
+    setEditableAgents([]);
     setAcceptedIdxs(new Set());
     setDismissedIdxs(new Set());
     try {
@@ -50,19 +121,33 @@ export function PlannerPanel({ manifest, onApply, onClose }: PlannerPanelProps) 
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ intent: intent.trim() }),
+        signal: controller.signal,
       });
       if (!resp.ok) {
         const body = await resp.json().catch(() => ({ detail: resp.statusText }));
-        throw new Error(body.detail || `HTTP ${resp.status}`);
+        const err = { message: body.detail || `HTTP ${resp.status}`, status: resp.status };
+        setError(err);
+        return;
       }
       const data: PlanResponse = await resp.json();
       setPlan(data);
+      onHistoryAdd({ intent: intent.trim(), plan: data, timestamp: Date.now() });
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Unknown error");
+      if (err instanceof DOMException && err.name === "AbortError") return;
+      setError({
+        message: err instanceof Error ? err.message : "Unknown error",
+        status: undefined,
+      });
     } finally {
       setLoading(false);
+      abortRef.current = null;
     }
-  }, [intent]);
+  }, [intent, onHistoryAdd]);
+
+  const handleCancel = useCallback(() => {
+    abortRef.current?.abort();
+    setLoading(false);
+  }, []);
 
   const handleAccept = useCallback((idx: number) => {
     setAcceptedIdxs((prev) => new Set(prev).add(idx));
@@ -90,20 +175,56 @@ export function PlannerPanel({ manifest, onApply, onClose }: PlannerPanelProps) 
     });
   }, []);
 
+  // Editable agents: remove
+  const handleRemoveAgent = useCallback((agentId: string) => {
+    setEditableAgents((prev) => {
+      const filtered = prev.filter((a) => a.id !== agentId);
+      // Clean up dangling depends_on references
+      return filtered.map((a) => ({
+        ...a,
+        depends_on: a.depends_on.filter((dep) => dep !== agentId),
+      }));
+    });
+  }, []);
+
+  // Editable agents: move up/down
+  const handleMoveAgent = useCallback((idx: number, dir: -1 | 1) => {
+    setEditableAgents((prev) => {
+      const targetIdx = idx + dir;
+      if (targetIdx < 0 || targetIdx >= prev.length) return prev;
+      const next = [...prev];
+      [next[idx], next[targetIdx]] = [next[targetIdx], next[idx]];
+      return next;
+    });
+  }, []);
+
   const handleApply = useCallback(() => {
-    if (!plan) return;
+    if (editableAgents.length === 0 && acceptedIdxs.size === 0) return;
     // Merge accepted suggestions into agents
-    const agents = [...plan.agents];
-    for (const idx of acceptedIdxs) {
-      const suggestion = plan.suggestions[idx];
-      if (suggestion?.agent_template) {
-        agents.push(suggestion.agent_template);
+    const agents = [...editableAgents];
+    if (plan) {
+      for (const idx of acceptedIdxs) {
+        const suggestion = plan.suggestions[idx];
+        if (suggestion?.agent_template) {
+          agents.push(suggestion.agent_template);
+        }
       }
     }
     const { nodes, edges } = planToGraph(agents, manifest);
     onApply(nodes, edges);
     onClose();
-  }, [plan, acceptedIdxs, manifest, onApply, onClose]);
+  }, [editableAgents, plan, acceptedIdxs, manifest, onApply, onClose]);
+
+  // Restore a history entry
+  const handleRestoreHistory = useCallback((entry: PlanHistoryEntry) => {
+    onIntentChange(entry.intent);
+    setPlan(entry.plan);
+    setEditableAgents([...entry.plan.agents]);
+    setAcceptedIdxs(new Set());
+    setDismissedIdxs(new Set());
+    setError(null);
+    setHistoryOpen(false);
+  }, [onIntentChange]);
 
   const suggestions = plan?.suggestions ?? [];
   const pendingSuggestions = suggestions
@@ -112,6 +233,9 @@ export function PlannerPanel({ manifest, onApply, onClose }: PlannerPanelProps) 
   const acceptedSuggestions = suggestions
     .map((s, i) => ({ suggestion: s, idx: i }))
     .filter(({ idx }) => acceptedIdxs.has(idx));
+
+  const canGenerate = !loading && intent.trim().length > 0 && backendStatus.status === "ready";
+  const statusNotReady = backendStatus.status !== "ready" && backendStatus.status !== "checking";
 
   return (
     <div style={{
@@ -143,37 +267,115 @@ export function PlannerPanel({ manifest, onApply, onClose }: PlannerPanelProps) 
         <span style={{ fontWeight: 700, fontSize: 14, color: "var(--text-bright)" }}>
           AI Planner
         </span>
-        <button
-          onClick={onClose}
-          aria-label="Close planner"
-          style={{
-            background: "none",
-            border: "none",
-            color: "var(--text-muted)",
-            fontSize: 18,
-            cursor: "pointer",
-            padding: "2px 6px",
-            lineHeight: 1,
-          }}
-        >
-          &times;
-        </button>
+        <div style={{ display: "flex", gap: 4, alignItems: "center" }}>
+          {history.length > 0 && (
+            <button
+              onClick={() => setHistoryOpen((v) => !v)}
+              title="Plan history"
+              style={{
+                background: historyOpen ? "var(--bg-tertiary)" : "none",
+                border: "1px solid var(--border-default)",
+                borderRadius: "var(--radius-sm)",
+                color: "var(--text-muted)",
+                fontSize: 11,
+                cursor: "pointer",
+                padding: "2px 6px",
+                fontFamily: "var(--font-sans)",
+              }}
+            >
+              History ({history.length})
+            </button>
+          )}
+          <button
+            onClick={onClose}
+            aria-label="Close planner"
+            style={{
+              background: "none",
+              border: "none",
+              color: "var(--text-muted)",
+              fontSize: 18,
+              cursor: "pointer",
+              padding: "2px 6px",
+              lineHeight: 1,
+            }}
+          >
+            &times;
+          </button>
+        </div>
       </div>
 
       {/* Content */}
       <div style={{ flex: 1, overflowY: "auto", padding: "12px 16px" }}>
+
+        {/* History dropdown */}
+        {historyOpen && history.length > 0 && (
+          <div style={{
+            marginBottom: 10,
+            padding: "8px 10px",
+            background: "var(--bg-tertiary)",
+            border: "1px solid var(--border-default)",
+            borderRadius: "var(--radius-md)",
+            maxHeight: 180,
+            overflowY: "auto",
+          }}>
+            <div style={{ fontSize: 10, color: "var(--text-muted)", marginBottom: 6, textTransform: "uppercase", letterSpacing: "0.06em" }}>
+              Previous Plans
+            </div>
+            {history.map((entry, i) => (
+              <div key={i} style={{
+                display: "flex",
+                alignItems: "center",
+                gap: 6,
+                padding: "4px 6px",
+                marginBottom: 2,
+                borderRadius: "var(--radius-sm)",
+                cursor: "pointer",
+                fontSize: 11,
+                color: "var(--text-secondary)",
+              }}
+                onClick={() => handleRestoreHistory(entry)}
+                onMouseEnter={(e) => { (e.currentTarget as HTMLDivElement).style.background = "var(--bg-secondary)"; }}
+                onMouseLeave={(e) => { (e.currentTarget as HTMLDivElement).style.background = "none"; }}
+              >
+                <span style={{ flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                  {entry.intent.length > 60 ? entry.intent.slice(0, 57) + "..." : entry.intent}
+                </span>
+                <span style={{ fontSize: 9, color: "var(--text-muted)", flexShrink: 0 }}>
+                  {new Date(entry.timestamp).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
+                </span>
+                <button
+                  onClick={(e) => { e.stopPropagation(); onHistoryRemove(i); }}
+                  style={{
+                    background: "none",
+                    border: "none",
+                    color: "var(--text-muted)",
+                    fontSize: 12,
+                    cursor: "pointer",
+                    padding: "0 2px",
+                    lineHeight: 1,
+                  }}
+                  title="Remove from history"
+                >
+                  &times;
+                </button>
+              </div>
+            ))}
+          </div>
+        )}
+
         {/* Intent input */}
         <textarea
           placeholder="Describe your pipeline... e.g. &quot;Download SST data and convert to GeoTIFF&quot;"
           value={intent}
-          onChange={(e) => setIntent(e.target.value)}
+          onChange={(e) => onIntentChange(e.target.value)}
           onKeyDown={(e) => {
             if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
               e.preventDefault();
-              handleGenerate();
+              if (canGenerate) handleGenerate();
             }
           }}
           rows={3}
+          disabled={loading}
           style={{
             width: "100%",
             background: "var(--bg-tertiary)",
@@ -186,19 +388,78 @@ export function PlannerPanel({ manifest, onApply, onClose }: PlannerPanelProps) 
             resize: "vertical",
             outline: "none",
             boxSizing: "border-box",
+            opacity: loading ? 0.6 : 1,
           }}
         />
 
-        <button
-          className="zyra-btn zyra-btn--primary"
-          onClick={handleGenerate}
-          disabled={loading || !intent.trim()}
-          style={{ width: "100%", marginTop: 8 }}
-        >
-          {loading ? "Generating..." : "Generate Plan"}
-        </button>
+        {/* Generate / Loading UI */}
+        {loading ? (
+          <div style={{
+            display: "flex",
+            alignItems: "center",
+            gap: 8,
+            marginTop: 8,
+            padding: "8px 12px",
+            background: "var(--bg-tertiary)",
+            border: "1px solid var(--border-default)",
+            borderRadius: "var(--radius-md)",
+            fontSize: 12,
+          }}>
+            <span style={{
+              display: "inline-block",
+              width: 14,
+              height: 14,
+              border: "2px solid var(--border-strong)",
+              borderTopColor: "var(--accent-blue)",
+              borderRadius: "50%",
+              animation: "zyra-spin 0.8s linear infinite",
+              flexShrink: 0,
+            }} />
+            <span style={{ color: "var(--text-secondary)", flex: 1 }}>
+              Generating... {elapsed}s
+            </span>
+            <button
+              onClick={handleCancel}
+              style={{
+                background: "none",
+                border: "none",
+                color: "var(--accent-red)",
+                fontSize: 11,
+                cursor: "pointer",
+                fontWeight: 600,
+                fontFamily: "var(--font-sans)",
+                padding: "2px 4px",
+              }}
+            >
+              Cancel
+            </button>
+          </div>
+        ) : (
+          <>
+            <button
+              className="zyra-btn zyra-btn--primary"
+              onClick={handleGenerate}
+              disabled={!canGenerate}
+              style={{ width: "100%", marginTop: 8 }}
+              title={
+                statusNotReady
+                  ? "Backend not ready — check AI status"
+                  : !intent.trim()
+                    ? "Enter a pipeline description"
+                    : "Generate Plan (Ctrl+Enter)"
+              }
+            >
+              Generate Plan
+            </button>
+            {statusNotReady && (
+              <div style={{ fontSize: 10, color: "var(--accent-yellow)", marginTop: 4 }}>
+                Backend not ready — check the AI status indicator in the toolbar.
+              </div>
+            )}
+          </>
+        )}
 
-        {/* Error */}
+        {/* Error with guidance */}
         {error && (
           <div style={{
             marginTop: 10,
@@ -206,10 +467,32 @@ export function PlannerPanel({ manifest, onApply, onClose }: PlannerPanelProps) 
             background: "rgba(248,81,73,0.15)",
             border: "1px solid rgba(248,81,73,0.4)",
             borderRadius: "var(--radius-md)",
-            color: "#f85149",
             fontSize: 12,
           }}>
-            {error}
+            <div style={{ color: "#f85149", marginBottom: 4 }}>{error.message}</div>
+            <div style={{ color: "var(--text-muted)", fontSize: 11, lineHeight: 1.5 }}>
+              {error.status
+                ? ERROR_GUIDANCE[error.status] ?? "An unexpected error occurred."
+                : ERROR_GUIDANCE.network}
+            </div>
+            <button
+              onClick={handleGenerate}
+              disabled={!intent.trim()}
+              style={{
+                marginTop: 6,
+                background: "none",
+                border: "1px solid rgba(248,81,73,0.4)",
+                borderRadius: "var(--radius-sm)",
+                color: "#f85149",
+                fontSize: 11,
+                cursor: "pointer",
+                padding: "3px 10px",
+                fontFamily: "var(--font-sans)",
+                fontWeight: 600,
+              }}
+            >
+              Retry
+            </button>
           </div>
         )}
 
@@ -228,13 +511,26 @@ export function PlannerPanel({ manifest, onApply, onClose }: PlannerPanelProps) 
               </div>
             )}
 
-            {/* Agents list */}
+            {/* Editable agents list */}
             <div style={{ fontSize: 11, color: "var(--text-muted)", marginBottom: 6, textTransform: "uppercase", letterSpacing: "0.06em" }}>
-              Steps ({plan.agents.length})
+              Steps ({editableAgents.length})
             </div>
-            {plan.agents.map((agent) => (
-              <AgentCard key={agent.id} agent={agent} />
+            {editableAgents.map((agent, idx) => (
+              <AgentCard
+                key={agent.id}
+                agent={agent}
+                index={idx}
+                total={editableAgents.length}
+                onRemove={() => handleRemoveAgent(agent.id)}
+                onMoveUp={() => handleMoveAgent(idx, -1)}
+                onMoveDown={() => handleMoveAgent(idx, 1)}
+              />
             ))}
+            {editableAgents.length === 0 && (
+              <div style={{ fontSize: 11, color: "var(--text-muted)", fontStyle: "italic", padding: "4px 0" }}>
+                All steps removed
+              </div>
+            )}
 
             {/* Suggestions */}
             {suggestions.length > 0 && (
@@ -310,10 +606,60 @@ export function PlannerPanel({ manifest, onApply, onClose }: PlannerPanelProps) 
             )}
           </div>
         )}
+
+        {/* Recent AI Batches */}
+        {batches.length > 0 && (
+          <div style={{ marginTop: 14 }}>
+            <div style={{ fontSize: 11, color: "var(--text-muted)", marginBottom: 6, textTransform: "uppercase", letterSpacing: "0.06em" }}>
+              Recent AI Batches
+            </div>
+            {batches.map((batch, i) => (
+              <div key={i} style={{
+                display: "flex",
+                alignItems: "center",
+                gap: 6,
+                padding: "6px 10px",
+                marginBottom: 4,
+                background: "var(--bg-tertiary)",
+                border: "1px solid var(--border-default)",
+                borderRadius: "var(--radius-md)",
+                fontSize: 11,
+                color: "var(--text-secondary)",
+              }}>
+                <span style={{ flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                  {batch.intent.length > 40 ? batch.intent.slice(0, 37) + "..." : batch.intent}
+                </span>
+                <span style={{ fontSize: 10, color: "var(--text-muted)", flexShrink: 0 }}>
+                  {batch.nodeIds.length} nodes
+                </span>
+                {i === batches.length - 1 && (
+                  <button
+                    onClick={onUndoBatch}
+                    style={{
+                      background: "none",
+                      border: "1px solid rgba(248,81,73,0.4)",
+                      borderRadius: "var(--radius-sm)",
+                      color: "#f85149",
+                      fontSize: 10,
+                      cursor: "pointer",
+                      padding: "1px 6px",
+                      fontFamily: "var(--font-sans)",
+                      fontWeight: 600,
+                      flexShrink: 0,
+                    }}
+                    title="Remove this batch from the canvas"
+                  >
+                    Undo
+                  </button>
+                )}
+              </div>
+            ))}
+          </div>
+        )}
       </div>
 
       {/* Footer: Apply button */}
-      {plan && (
+      {plan && (editableAgents.length > 0 || acceptedIdxs.size > 0) && (
         <div style={{
           padding: "10px 16px",
           borderTop: "1px solid var(--border-default)",
@@ -324,7 +670,7 @@ export function PlannerPanel({ manifest, onApply, onClose }: PlannerPanelProps) 
             onClick={handleApply}
             style={{ width: "100%" }}
           >
-            Apply to Canvas ({plan.agents.length + acceptedIdxs.size} nodes)
+            Apply to Canvas ({editableAgents.length + acceptedIdxs.size} nodes)
           </button>
         </div>
       )}
@@ -353,17 +699,36 @@ function StageBadge({ stage }: { stage: string }) {
   );
 }
 
-function AgentCard({ agent }: { agent: PlanAgent }) {
+function AgentCard({
+  agent,
+  index,
+  total,
+  onRemove,
+  onMoveUp,
+  onMoveDown,
+}: {
+  agent: PlanAgent;
+  index: number;
+  total: number;
+  onRemove: () => void;
+  onMoveUp: () => void;
+  onMoveDown: () => void;
+}) {
+  const [hovered, setHovered] = useState(false);
   return (
-    <div style={{
-      padding: "6px 10px",
-      marginBottom: 4,
-      background: "var(--bg-tertiary)",
-      border: "1px solid var(--border-default)",
-      borderRadius: "var(--radius-md)",
-      fontSize: 11,
-      color: "var(--text-secondary)",
-    }}>
+    <div
+      style={{
+        padding: "6px 10px",
+        marginBottom: 4,
+        background: "var(--bg-tertiary)",
+        border: "1px solid var(--border-default)",
+        borderRadius: "var(--radius-md)",
+        fontSize: 11,
+        color: "var(--text-secondary)",
+      }}
+      onMouseEnter={() => setHovered(true)}
+      onMouseLeave={() => setHovered(false)}
+    >
       <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
         <StageBadge stage={agent.stage} />
         <span style={{ fontWeight: 600, color: "var(--text-primary)" }}>
@@ -372,6 +737,57 @@ function AgentCard({ agent }: { agent: PlanAgent }) {
         <span style={{ color: "var(--text-muted)", fontSize: 10, marginLeft: "auto" }}>
           {agent.id}
         </span>
+        {hovered && (
+          <div style={{ display: "flex", gap: 2, flexShrink: 0 }}>
+            <button
+              onClick={onMoveUp}
+              disabled={index === 0}
+              title="Move up"
+              style={{
+                background: "none",
+                border: "none",
+                color: index === 0 ? "var(--border-default)" : "var(--text-muted)",
+                fontSize: 12,
+                cursor: index === 0 ? "default" : "pointer",
+                padding: "0 2px",
+                lineHeight: 1,
+              }}
+            >
+              {"\u25B2"}
+            </button>
+            <button
+              onClick={onMoveDown}
+              disabled={index === total - 1}
+              title="Move down"
+              style={{
+                background: "none",
+                border: "none",
+                color: index === total - 1 ? "var(--border-default)" : "var(--text-muted)",
+                fontSize: 12,
+                cursor: index === total - 1 ? "default" : "pointer",
+                padding: "0 2px",
+                lineHeight: 1,
+              }}
+            >
+              {"\u25BC"}
+            </button>
+            <button
+              onClick={onRemove}
+              title="Remove this step"
+              style={{
+                background: "none",
+                border: "none",
+                color: "var(--accent-red)",
+                fontSize: 13,
+                cursor: "pointer",
+                padding: "0 2px",
+                lineHeight: 1,
+              }}
+            >
+              &times;
+            </button>
+          </div>
+        )}
       </div>
       {agent.depends_on.length > 0 && (
         <div style={{ fontSize: 10, color: "var(--text-muted)", marginTop: 3 }}>

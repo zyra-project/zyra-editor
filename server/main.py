@@ -316,6 +316,29 @@ async def generate_plan(body: PlanRequest):
         )
 
 
+@app.get("/v1/ready")
+async def readiness_check():
+    """Check backend readiness: server up, zyra CLI available, LLM configured."""
+    checks: dict = {"server": True, "zyra_cli": False, "llm_configured": False}
+    try:
+        result = subprocess.run(
+            ["zyra", "--version"], capture_output=True, text=True, timeout=5
+        )
+        checks["zyra_cli"] = result.returncode == 0
+        checks["zyra_version"] = (
+            result.stdout.strip() if result.returncode == 0 else None
+        )
+    except (FileNotFoundError, subprocess.TimeoutExpired):
+        pass
+    checks["llm_configured"] = bool(
+        os.environ.get("OPENAI_API_KEY") or os.environ.get("OLLAMA_HOST")
+    )
+    checks["ready"] = all(
+        [checks["server"], checks["zyra_cli"], checks["llm_configured"]]
+    )
+    return checks
+
+
 @app.get("/v1/manifest")
 def get_manifest(request: Request):
     """Adapt /v1/commands into the Manifest shape the editor expects."""
