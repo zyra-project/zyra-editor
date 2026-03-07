@@ -31,6 +31,36 @@ export interface Graph {
 
 // ── pipeline.yaml serialization ───────────────────────────────────
 
+/** Condition gate — step only runs when this evaluates to true. */
+export interface StepCondition {
+  /** The field or property to evaluate from the upstream output. */
+  field: string;
+  /** Comparison operator. */
+  operator: "==" | "!=" | ">" | "<" | ">=" | "<=" | "contains" | "matches";
+  /** Value to compare against. */
+  value: string;
+  /** Which branch of the conditional this step is on. */
+  branch: "true" | "false";
+}
+
+/** Loop wrapper — step executes once per iteration. */
+export interface StepLoop {
+  /** Iteration mode. */
+  mode: "each" | "batch" | "range";
+  /** Step name whose output provides the items (for "each" and "batch" modes). */
+  over?: string;
+  /** Number of items per batch (batch mode only). */
+  batch_size?: number;
+  /** Numeric range start (range mode only). */
+  range_start?: number;
+  /** Numeric range end (range mode only). */
+  range_end?: number;
+  /** Numeric range step size (range mode only). */
+  range_step?: number;
+  /** Maximum concurrent iterations. */
+  max_parallel?: number;
+}
+
 export interface PipelineStep {
   name: string;
   /** User-facing label for YAML display (defaults to name if unset). */
@@ -40,6 +70,10 @@ export interface PipelineStep {
   depends_on?: string[];
   /** Delay in seconds to wait before executing this step. */
   delay_seconds?: number;
+  /** Condition gate — step is skipped unless the condition matches. */
+  condition?: StepCondition;
+  /** Loop wrapper — step runs once per iteration. */
+  loop?: StepLoop;
   /** Editor layout metadata — not used by the Zyra CLI. */
   _layout?: { x: number; y: number; w?: number; h?: number };
 }
@@ -63,8 +97,8 @@ export interface PipelineControl {
   stageCommand: string;
   label?: string;
   argValues: Record<string, string | number | boolean>;
-  /** Edges from this control node to downstream arg-ports. */
-  edges: { targetNode: string; targetPort: string }[];
+  /** Edges from this control node to downstream nodes. */
+  edges: { sourcePort?: string; targetNode: string; targetPort: string }[];
   _layout?: { x: number; y: number; w?: number; h?: number };
 }
 
@@ -146,15 +180,88 @@ export function graphToPipeline(
     delayMap.set(e.targetNode, dur * multiplier);
   }
 
+  // ── Extract conditions from conditional nodes ───────────────────
+  // Map from target step node ID → StepCondition
+  const conditionMap = new Map<string, StepCondition>();
+  for (const e of graph.edges) {
+    const srcNode = nodeMap.get(e.sourceNode);
+    if (!srcNode || srcNode.stageCommand !== "control/conditional") continue;
+    // Only process data-flow edges from "true" or "false" output ports
+    if (e.sourcePort !== "true" && e.sourcePort !== "false") continue;
+
+    const field = srcNode.argValues.field;
+    const operator = srcNode.argValues.operator;
+    const compareValue = srcNode.argValues.compare_value;
+    if (typeof field !== "string" || !field) {
+      diagnostics?.push({
+        level: "warn",
+        message: `Conditional node "${e.sourceNode}" has no field — condition will be omitted.`,
+      });
+      continue;
+    }
+    conditionMap.set(e.targetNode, {
+      field,
+      operator: (operator as StepCondition["operator"]) ?? "==",
+      value: String(compareValue ?? ""),
+      branch: e.sourcePort as "true" | "false",
+    });
+  }
+
+  // ── Extract loops from loop nodes ─────────────────────────────
+  // Map from target step node ID → StepLoop
+  const loopMap = new Map<string, StepLoop>();
+  for (const e of graph.edges) {
+    const srcNode = nodeMap.get(e.sourceNode);
+    if (!srcNode || srcNode.stageCommand !== "control/loop") continue;
+    // Only process data-flow edges from "item", "index", or "done" output ports
+    if (e.sourcePort !== "item" && e.sourcePort !== "index" && e.sourcePort !== "done") continue;
+
+    // Only build the loop definition once per target, from the first edge
+    if (loopMap.has(e.targetNode)) continue;
+
+    const mode = srcNode.argValues.mode;
+    if (!mode) continue;
+
+    // Find what provides items to the loop node (edge into the loop's "items" input)
+    let over: string | undefined;
+    for (const itemEdge of graph.edges) {
+      if (itemEdge.targetNode === srcNode.id && itemEdge.targetPort === "items") {
+        over = itemEdge.sourceNode;
+        break;
+      }
+    }
+
+    const loop: StepLoop = {
+      mode: mode as StepLoop["mode"],
+    };
+    if (over) loop.over = over;
+    if (mode === "batch") {
+      const bs = Number(srcNode.argValues.batch_size);
+      if (!isNaN(bs) && bs > 0) loop.batch_size = bs;
+    } else if (mode === "range") {
+      const rs = Number(srcNode.argValues.range_start);
+      const re = Number(srcNode.argValues.range_end);
+      const rst = Number(srcNode.argValues.range_step);
+      if (!isNaN(rs)) loop.range_start = rs;
+      if (!isNaN(re)) loop.range_end = re;
+      if (!isNaN(rst) && rst > 0) loop.range_step = rst;
+    }
+    const mp = Number(srcNode.argValues.max_parallel);
+    if (!isNaN(mp) && mp > 1) loop.max_parallel = mp;
+
+    loopMap.set(e.targetNode, loop);
+  }
+
   // Build a map of inlined arg values from control-node edges.
   // Key: targetNodeId, Value: Map<argKey, inlined value>
   const inlinedArgs = new Map<string, Map<string, string | number | boolean>>();
   for (const e of graph.edges) {
     if (!controlNodeIds.has(e.sourceNode)) continue;
-    // Skip delay and cron nodes from the standard inlining path —
+    // Skip delay, cron, conditional, and loop nodes from the standard inlining path —
     // they are handled separately above.
     const srcCmd = nodeMap.get(e.sourceNode)?.stageCommand;
-    if (srcCmd === "control/delay" || srcCmd === "control/cron") continue;
+    if (srcCmd === "control/delay" || srcCmd === "control/cron"
+      || srcCmd === "control/conditional" || srcCmd === "control/loop") continue;
     if (!e.targetPort.startsWith("arg:")) {
       diagnostics?.push({
         level: "warn",
@@ -268,6 +375,10 @@ export function graphToPipeline(
     if (uniqueDeps.length > 0) step.depends_on = uniqueDeps;
     const delay = delayMap.get(id);
     if (delay !== undefined) step.delay_seconds = delay;
+    const condition = conditionMap.get(id);
+    if (condition) step.condition = condition;
+    const loop = loopMap.get(id);
+    if (loop) step.loop = loop;
     if (node.position || node.size) {
       const layout: PipelineStep["_layout"] = {
         x: Math.round(node.position?.x ?? 0),
@@ -287,8 +398,8 @@ export function graphToPipeline(
   for (const n of graph.nodes) {
     if (!controlNodeIds.has(n.id)) continue;
     const ctrlEdges = graph.edges
-      .filter((e) => e.sourceNode === n.id && e.targetPort.startsWith("arg:"))
-      .map((e) => ({ targetNode: e.targetNode, targetPort: e.targetPort }));
+      .filter((e) => e.sourceNode === n.id)
+      .map((e) => ({ sourcePort: e.sourcePort, targetNode: e.targetNode, targetPort: e.targetPort }));
     // Strip plaintext secret values from the YAML — only keep the variable name and type
     const ctrlArgs = { ...n.argValues };
     if (n.stageCommand === "control/variable" && ctrlArgs.var_type === "secret") {

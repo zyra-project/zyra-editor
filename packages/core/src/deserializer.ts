@@ -149,6 +149,96 @@ export function pipelineToGraph(
     }
   }
 
+  // Reconstruct conditional control nodes from steps with condition
+  // when there is no matching conditional control already in _controls.
+  const hasConditionalControls = pipeline._controls?.some(
+    (c) => c.stageCommand === "control/conditional",
+  );
+  if (!hasConditionalControls) {
+    // Group steps by their condition signature (field+operator+value) to
+    // reconstruct a single conditional node per unique condition.
+    const condGroups = new Map<string, { condition: NonNullable<(typeof pipeline.steps)[0]["condition"]>; steps: string[] }>();
+    for (const step of pipeline.steps) {
+      if (!step.condition) continue;
+      const key = `${step.condition.field}|${step.condition.operator}|${step.condition.value}`;
+      if (!condGroups.has(key)) {
+        condGroups.set(key, { condition: step.condition, steps: [] });
+      }
+      condGroups.get(key)!.steps.push(step.name);
+    }
+    let condIdx = 0;
+    for (const [, group] of condGroups) {
+      const condId = `_cond_${Date.now().toString(36)}_${condIdx++}`;
+      nodes.push({
+        id: condId,
+        stageCommand: "control/conditional",
+        argValues: {
+          field: group.condition.field,
+          operator: group.condition.operator,
+          compare_value: group.condition.value,
+        },
+      });
+      // Wire the conditional's true/false ports to the downstream steps
+      for (const stepName of group.steps) {
+        const stepCond = pipeline.steps.find((s) => s.name === stepName)?.condition;
+        if (!stepCond) continue;
+        const targetInfo = nodeMap.get(stepName);
+        const targetPort = targetInfo?.stage?.inputs[0]?.id ?? "in";
+        edges.push({
+          sourceNode: condId,
+          sourcePort: stepCond.branch,
+          targetNode: stepName,
+          targetPort,
+        });
+      }
+    }
+  }
+
+  // Reconstruct loop control nodes from steps with loop
+  // when there is no matching loop control already in _controls.
+  const hasLoopControls = pipeline._controls?.some(
+    (c) => c.stageCommand === "control/loop",
+  );
+  if (!hasLoopControls) {
+    for (const step of pipeline.steps) {
+      if (!step.loop) continue;
+      const loopId = `_loop_${step.name}`;
+      const loopArgs: Record<string, string | number | boolean> = {
+        mode: step.loop.mode,
+      };
+      if (step.loop.batch_size != null) loopArgs.batch_size = step.loop.batch_size;
+      if (step.loop.range_start != null) loopArgs.range_start = step.loop.range_start;
+      if (step.loop.range_end != null) loopArgs.range_end = step.loop.range_end;
+      if (step.loop.range_step != null) loopArgs.range_step = step.loop.range_step;
+      if (step.loop.max_parallel != null) loopArgs.max_parallel = step.loop.max_parallel;
+      nodes.push({
+        id: loopId,
+        stageCommand: "control/loop",
+        argValues: loopArgs,
+      });
+      // Wire loop's "item" output to the step's first input port
+      const targetInfo = nodeMap.get(step.name);
+      const targetPort = targetInfo?.stage?.inputs[0]?.id ?? "in";
+      edges.push({
+        sourceNode: loopId,
+        sourcePort: "item",
+        targetNode: step.name,
+        targetPort,
+      });
+      // Wire the "over" source step's output to the loop's "items" input
+      if (step.loop.over && nodeMap.has(step.loop.over)) {
+        const overInfo = nodeMap.get(step.loop.over);
+        const overPort = overInfo?.stage?.outputs[0]?.id ?? "out";
+        edges.push({
+          sourceNode: step.loop.over,
+          sourcePort: overPort,
+          targetNode: loopId,
+          targetPort: "items",
+        });
+      }
+    }
+  }
+
   // Reconstruct control nodes from _controls metadata
   if (pipeline._controls) {
     for (const ctrl of pipeline._controls) {
@@ -173,25 +263,25 @@ export function pipelineToGraph(
       };
       nodes.push(node);
 
-      // Reconstruct edges from control node to downstream arg-ports
+      // Reconstruct edges from control node to downstream nodes
       const stage = findStage(ctrl.stageCommand) ?? byKey.get(ctrl.stageCommand);
-      const sourcePort = stage?.outputs[0]?.id ?? "value";
+      const defaultSourcePort = stage?.outputs[0]?.id ?? "value";
       for (const ce of ctrl.edges) {
-        // Only reconstruct edges targeting valid arg-ports on existing nodes
-        if (!ce.targetPort.startsWith("arg:")) continue;
-        if (!nodeMap.has(ce.targetNode)) continue;
+        if (!nodeMap.has(ce.targetNode) && !nodes.some((n) => n.id === ce.targetNode)) continue;
 
-        // Validate that the target node's stage actually has this arg key
-        const targetInfo = nodeMap.get(ce.targetNode);
-        if (targetInfo?.stage) {
-          const argKey = ce.targetPort.slice(4);
-          const hasArg = targetInfo.stage.args.some((a) => a.key === argKey);
-          if (!hasArg) continue; // skip edges to non-existent arg handles
+        if (ce.targetPort.startsWith("arg:")) {
+          // Validate that the target node's stage actually has this arg key
+          const targetInfo = nodeMap.get(ce.targetNode);
+          if (targetInfo?.stage) {
+            const argKey = ce.targetPort.slice(4);
+            const hasArg = targetInfo.stage.args.some((a) => a.key === argKey);
+            if (!hasArg) continue; // skip edges to non-existent arg handles
+          }
         }
 
         edges.push({
           sourceNode: ctrl.id,
-          sourcePort,
+          sourcePort: ce.sourcePort ?? defaultSourcePort,
           targetNode: ce.targetNode,
           targetPort: ce.targetPort,
         });
