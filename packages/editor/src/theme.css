@@ -349,3 +349,8 @@ select.zyra-input {
   height: 8px;
   border-radius: 50%;
 }
+
+/* Logo: invert in dark mode so the black tree becomes white */
+[data-theme="dark"] .zyra-logo {
+  filter: invert(1);
+}

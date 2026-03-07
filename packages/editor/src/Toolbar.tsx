@@ -56,11 +56,20 @@ export function Toolbar({
     }}>
       {/* Logo / Title */}
       <span style={{
+        display: "flex",
+        alignItems: "center",
+        gap: 6,
         fontWeight: 700,
         fontSize: 15,
         marginRight: 16,
         letterSpacing: "-0.02em",
       }}>
+        <img
+          src="/zyra-logo.png"
+          alt="Zyra"
+          className="zyra-logo"
+          style={{ width: 24, height: 24 }}
+        />
         Zyra
       </span>
 
