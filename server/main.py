@@ -290,12 +290,11 @@ class PlanRequest(BaseModel):
     guardrails: str = ""
 
 
-@app.post("/v1/plan")
-async def generate_plan(body: PlanRequest):
-    """Run ``zyra plan`` as a subprocess and return the structured plan JSON."""
-    cmd = ["zyra", "plan", "--intent", body.intent, "--no-clarify"]
-    if body.guardrails:
-        cmd += ["--guardrails", body.guardrails]
+def _run_zyra_plan(intent: str, guardrails: str = "") -> dict:
+    """Run ``zyra plan`` and return parsed JSON."""
+    cmd = ["zyra", "plan", "--intent", intent, "--no-clarify"]
+    if guardrails:
+        cmd += ["--guardrails", guardrails]
     try:
         result = subprocess.run(cmd, capture_output=True, text=True, timeout=120)
     except FileNotFoundError:
@@ -314,6 +313,43 @@ async def generate_plan(body: PlanRequest):
             status_code=502,
             detail="zyra plan returned invalid JSON",
         )
+
+
+@app.post("/v1/plan")
+async def generate_plan(body: PlanRequest):
+    """Run ``zyra plan`` as a subprocess and return the structured plan JSON."""
+    return _run_zyra_plan(body.intent, body.guardrails)
+
+
+class PlanRefineRequest(BaseModel):
+    intent: str
+    feedback: str
+    current_plan: dict = {}
+    guardrails: str = ""
+
+
+@app.post("/v1/plan/refine")
+async def refine_plan(body: PlanRefineRequest):
+    """Re-run ``zyra plan`` with the original intent augmented by user feedback
+    and a summary of the current plan so the LLM can course-correct."""
+    # Build a context-enriched intent that includes what was generated and
+    # what the user wants changed.
+    steps_summary = ""
+    agents = body.current_plan.get("agents", [])
+    if agents:
+        lines = []
+        for a in agents:
+            lines.append(f"  - {a.get('id', '?')}: {a.get('stage', '?')}/{a.get('command', '?')}")
+        steps_summary = "\nCurrent plan steps:\n" + "\n".join(lines)
+
+    refined_intent = (
+        f"{body.intent}\n\n"
+        f"[User feedback on the previous plan: {body.feedback}]"
+        f"{steps_summary}\n\n"
+        f"Please regenerate the plan incorporating the feedback above."
+    )
+
+    return _run_zyra_plan(refined_intent, body.guardrails)
 
 
 

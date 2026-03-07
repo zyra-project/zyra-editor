@@ -79,6 +79,7 @@ export function PlannerPanel({
   const [plan, setPlan] = useState<PlanResponse | null>(null);
   const [editableAgents, setEditableAgents] = useState<PlanAgent[]>([]);
   const [historyOpen, setHistoryOpen] = useState(false);
+  const [feedback, setFeedback] = useState("");
 
   // Track accepted / dismissed suggestion indices
   const [acceptedIdxs, setAcceptedIdxs] = useState<Set<number>>(new Set());
@@ -116,6 +117,7 @@ export function PlannerPanel({
     setEditableAgents([]);
     setAcceptedIdxs(new Set());
     setDismissedIdxs(new Set());
+    setFeedback("");
     try {
       const resp = await fetch("/v1/plan", {
         method: "POST",
@@ -143,6 +145,47 @@ export function PlannerPanel({
       abortRef.current = null;
     }
   }, [intent, onHistoryAdd]);
+
+  const handleRefine = useCallback(async () => {
+    if (!feedback.trim() || !plan) return;
+    abortRef.current?.abort();
+    const controller = new AbortController();
+    abortRef.current = controller;
+    setLoading(true);
+    setError(null);
+    try {
+      const resp = await fetch("/v1/plan/refine", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          intent: intent.trim(),
+          feedback: feedback.trim(),
+          current_plan: plan,
+        }),
+        signal: controller.signal,
+      });
+      if (!resp.ok) {
+        const body = await resp.json().catch(() => ({ detail: resp.statusText }));
+        setError({ message: body.detail || `HTTP ${resp.status}`, status: resp.status });
+        return;
+      }
+      const data: PlanResponse = await resp.json();
+      setPlan(data);
+      setFeedback("");
+      setAcceptedIdxs(new Set());
+      setDismissedIdxs(new Set());
+      onHistoryAdd({ intent: intent.trim(), plan: data, timestamp: Date.now() });
+    } catch (err) {
+      if (err instanceof DOMException && err.name === "AbortError") return;
+      setError({
+        message: err instanceof Error ? err.message : "Unknown error",
+        status: undefined,
+      });
+    } finally {
+      setLoading(false);
+      abortRef.current = null;
+    }
+  }, [feedback, plan, intent, onHistoryAdd]);
 
   const handleCancel = useCallback(() => {
     abortRef.current?.abort();
@@ -510,6 +553,57 @@ export function PlannerPanel({
                 {plan.plan_summary}
               </div>
             )}
+
+            {/* Follow-up refinement */}
+            <div style={{
+              display: "flex",
+              gap: 6,
+              marginBottom: 12,
+            }}>
+              <input
+                type="text"
+                placeholder="Refine: e.g. &quot;use geotiff instead of video&quot;"
+                value={feedback}
+                onChange={(e) => setFeedback(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" && !e.shiftKey && feedback.trim() && !loading) {
+                    e.preventDefault();
+                    handleRefine();
+                  }
+                }}
+                disabled={loading}
+                style={{
+                  flex: 1,
+                  background: "var(--bg-tertiary)",
+                  border: "1px solid var(--border-default)",
+                  borderRadius: "var(--radius-md)",
+                  color: "var(--text-primary)",
+                  padding: "6px 10px",
+                  fontSize: 12,
+                  fontFamily: "var(--font-sans)",
+                  outline: "none",
+                  opacity: loading ? 0.6 : 1,
+                }}
+              />
+              <button
+                onClick={handleRefine}
+                disabled={!feedback.trim() || loading}
+                style={{
+                  padding: "6px 12px",
+                  background: feedback.trim() && !loading ? "var(--accent-blue)" : "var(--bg-tertiary)",
+                  border: "1px solid var(--border-default)",
+                  borderRadius: "var(--radius-md)",
+                  color: feedback.trim() && !loading ? "#fff" : "var(--text-muted)",
+                  fontSize: 11,
+                  fontWeight: 600,
+                  cursor: feedback.trim() && !loading ? "pointer" : "default",
+                  fontFamily: "var(--font-sans)",
+                  flexShrink: 0,
+                }}
+              >
+                Refine
+              </button>
+            </div>
 
             {/* Editable agents list */}
             <div style={{ fontSize: 11, color: "var(--text-muted)", marginBottom: 6, textTransform: "uppercase", letterSpacing: "0.06em" }}>
