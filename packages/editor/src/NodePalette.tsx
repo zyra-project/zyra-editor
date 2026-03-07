@@ -4,6 +4,7 @@ import { useManifest } from "./ManifestLoader";
 
 interface Props {
   onAddNode: (stage: StageDef) => void;
+  onAddGroup: () => void;
   collapsed: boolean;
   onToggleCollapse: () => void;
 }
@@ -49,7 +50,7 @@ const STAGE_ICONS: Record<string, string> = {
   simulate: "\ud83c\udfb2", // dice
 };
 
-export function NodePalette({ onAddNode, collapsed, onToggleCollapse }: Props) {
+export function NodePalette({ onAddNode, onAddGroup, collapsed, onToggleCollapse }: Props) {
   const manifest = useManifest();
   const [searchQuery, setSearchQuery] = useState("");
   const [hoveredStage, setHoveredStage] = useState<string | null>(null);
@@ -350,6 +351,44 @@ export function NodePalette({ onAddNode, collapsed, onToggleCollapse }: Props) {
             </div>
           ))
         )}
+      </div>
+
+      {/* Add Group button */}
+      <div style={{
+        padding: collapsed ? "8px 4px" : "8px 12px",
+        borderTop: "1px solid var(--border-default)",
+      }}>
+        <button
+          onClick={onAddGroup}
+          title="Add a group box to organize nodes"
+          style={{
+            display: "flex",
+            alignItems: "center",
+            justifyContent: collapsed ? "center" : "flex-start",
+            gap: 6,
+            width: "100%",
+            padding: collapsed ? "8px 0" : "7px 10px",
+            background: "var(--bg-node)",
+            border: "1px dashed var(--border-default)",
+            borderRadius: "var(--radius-sm)",
+            color: "var(--text-secondary)",
+            cursor: "pointer",
+            fontSize: 12,
+            fontFamily: "var(--font-sans)",
+            transition: "background 0.1s, color 0.1s",
+          }}
+          onMouseEnter={(e) => {
+            e.currentTarget.style.background = "var(--bg-secondary)";
+            e.currentTarget.style.color = "var(--text-primary)";
+          }}
+          onMouseLeave={(e) => {
+            e.currentTarget.style.background = "var(--bg-node)";
+            e.currentTarget.style.color = "var(--text-secondary)";
+          }}
+        >
+          <span style={{ fontSize: 14 }}>+</span>
+          {!collapsed && <span>Group</span>}
+        </button>
       </div>
     </div>
   );

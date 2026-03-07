@@ -779,13 +779,13 @@ function Editor() {
         runState={exec.runState}
         yamlOpen={yamlOpen}
         onToggleYaml={() => setYamlOpen((v) => !v)}
-        onAddGroup={handleAddGroup}
         theme={theme}
         onToggleTheme={toggleTheme}
       />
 
       <NodePalette
         onAddNode={handleAddNode}
+        onAddGroup={handleAddGroup}
         collapsed={paletteCollapsed}
         onToggleCollapse={() => setPaletteCollapsed((v) => !v)}
       />

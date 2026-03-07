@@ -12,7 +12,6 @@ interface ToolbarProps {
   runState: RunStateMap;
   yamlOpen: boolean;
   onToggleYaml: () => void;
-  onAddGroup: () => void;
   theme: Theme;
   onToggleTheme: () => void;
 }
@@ -27,7 +26,6 @@ export function Toolbar({
   runState,
   yamlOpen,
   onToggleYaml,
-  onAddGroup,
   theme,
   onToggleTheme,
 }: ToolbarProps) {
@@ -106,26 +104,6 @@ export function Toolbar({
         )}
       </div>
 
-      {/* Separator */}
-      <div style={{ width: 1, height: 24, background: "var(--border-default)", margin: "0 8px" }} />
-
-      {/* Tools */}
-      <button
-        className={`zyra-btn ${yamlOpen ? "zyra-btn--info" : "zyra-btn--neutral"}`}
-        onClick={onToggleYaml}
-        title="Toggle YAML editor (Ctrl+S)"
-      >
-        YAML
-      </button>
-
-      <button
-        className="zyra-btn zyra-btn--neutral"
-        onClick={onAddGroup}
-        title="Add a group box to organize nodes"
-      >
-        + Group
-      </button>
-
       {/* Spacer */}
       <div style={{ flex: 1 }} />
 
@@ -149,6 +127,30 @@ export function Toolbar({
           )}
         </div>
       )}
+
+      {/* Export pipeline config */}
+      <button
+        onClick={onToggleYaml}
+        title="View & export pipeline config (Ctrl+S)"
+        style={{
+          background: yamlOpen ? "var(--accent-blue)" : "none",
+          border: "1px solid var(--border-default)",
+          borderRadius: "var(--radius-md)",
+          color: yamlOpen ? "#fff" : "var(--text-secondary)",
+          cursor: "pointer",
+          padding: "4px 10px",
+          fontSize: 12,
+          lineHeight: 1,
+          display: "flex",
+          alignItems: "center",
+          gap: 5,
+          fontFamily: "var(--font-sans)",
+          fontWeight: 500,
+        }}
+      >
+        <span style={{ fontSize: 14 }}>{"\u21A7"}</span>
+        Export
+      </button>
 
       {/* Theme toggle */}
       <button
