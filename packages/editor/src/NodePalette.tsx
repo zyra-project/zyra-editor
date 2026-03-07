@@ -54,7 +54,17 @@ export function NodePalette({ onAddNode, onAddGroup, collapsed, onToggleCollapse
   const manifest = useManifest();
   const [searchQuery, setSearchQuery] = useState("");
   const [hoveredStage, setHoveredStage] = useState<string | null>(null);
+  const [collapsedGroups, setCollapsedGroups] = useState<Set<string>>(new Set());
   const hoverTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const toggleGroup = (stage: string) => {
+    setCollapsedGroups((prev) => {
+      const next = new Set(prev);
+      if (next.has(stage)) next.delete(stage);
+      else next.add(stage);
+      return next;
+    });
+  };
 
   // Clear hover timeout on unmount
   useEffect(() => {
@@ -290,19 +300,52 @@ export function NodePalette({ onAddNode, onAddGroup, collapsed, onToggleCollapse
             </div>
           ))
         ) : (
-          filteredEntries.map(([stage, defs]) => (
+          filteredEntries.map(([stage, defs]) => {
+            const isGroupCollapsed = !searchQuery && collapsedGroups.has(stage);
+            return (
             <div key={stage} style={{ marginBottom: 12 }}>
-              <div style={{
-                fontSize: 10,
-                textTransform: "uppercase",
-                letterSpacing: "0.08em",
-                color: "var(--text-muted)",
-                marginBottom: 6,
-                paddingLeft: 4,
-              }}>
+              <button
+                onClick={() => toggleGroup(stage)}
+                aria-expanded={!isGroupCollapsed}
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  gap: 4,
+                  width: "100%",
+                  background: "none",
+                  border: "none",
+                  cursor: "pointer",
+                  fontSize: 10,
+                  textTransform: "uppercase",
+                  letterSpacing: "0.08em",
+                  color: "var(--text-muted)",
+                  marginBottom: isGroupCollapsed ? 0 : 6,
+                  paddingLeft: 4,
+                  paddingTop: 0,
+                  paddingBottom: 0,
+                  paddingRight: 0,
+                  fontFamily: "var(--font-sans)",
+                }}
+              >
+                <span style={{
+                  display: "inline-block",
+                  fontSize: 8,
+                  transition: "transform 0.15s ease",
+                  transform: isGroupCollapsed ? "rotate(-90deg)" : "rotate(0deg)",
+                }}>
+                  ▼
+                </span>
                 {STAGE_ICONS[stage] ?? ""} {stage}
-              </div>
-              {defs.map((def) => {
+                <span style={{
+                  marginLeft: "auto",
+                  fontSize: 9,
+                  color: "var(--text-muted)",
+                  opacity: 0.7,
+                }}>
+                  {defs.length}
+                </span>
+              </button>
+              {!isGroupCollapsed && defs.map((def) => {
                 const disabled = def.status !== "implemented";
                 return (
                 <button
@@ -368,7 +411,8 @@ export function NodePalette({ onAddNode, onAddGroup, collapsed, onToggleCollapse
                 );
               })}
             </div>
-          ))
+            );
+          })
         )}
       </div>
 
