@@ -69,7 +69,7 @@
 
 [data-theme="light"] {
   /* Backgrounds */
-  --bg-primary: #ffffff;
+  --bg-primary: #eef1f5;
   --bg-secondary: #f6f8fa;
   --bg-tertiary: #f0f3f6;
   --bg-node: #ffffff;
@@ -112,7 +112,7 @@
   --node-shadow: rgba(0, 0, 0, 0.1);
 
   /* Misc */
-  --canvas-dot: #d0d7de;
+  --canvas-dot: #d5dae1;
   --scrollbar-thumb: #afb8c1;
   --scrollbar-track: transparent;
 }
