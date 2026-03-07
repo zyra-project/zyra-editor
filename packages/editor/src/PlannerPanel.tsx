@@ -80,6 +80,7 @@ export function PlannerPanel({
   const [editableAgents, setEditableAgents] = useState<PlanAgent[]>([]);
   const [historyOpen, setHistoryOpen] = useState(false);
   const [feedback, setFeedback] = useState("");
+  const [lastFeedback, setLastFeedback] = useState("");
 
   // Track accepted / dismissed suggestion indices
   const [acceptedIdxs, setAcceptedIdxs] = useState<Set<number>>(new Set());
@@ -136,6 +137,7 @@ export function PlannerPanel({
         setError({ message: data._warning, status: undefined });
       }
       setPlan(data);
+      setLastFeedback("");
       onHistoryAdd({ intent: intent.trim(), plan: data, timestamp: Date.now() });
     } catch (err) {
       if (err instanceof DOMException && err.name === "AbortError") return;
@@ -186,6 +188,7 @@ export function PlannerPanel({
       }
 
       setPlan(data);
+      setLastFeedback(feedback.trim());
       setFeedback("");
       setAcceptedIdxs(new Set());
       setDismissedIdxs(new Set());
@@ -214,6 +217,7 @@ export function PlannerPanel({
     setAcceptedIdxs(new Set());
     setDismissedIdxs(new Set());
     setFeedback("");
+    setLastFeedback("");
     setError(null);
     onIntentChange("");
   }, [onIntentChange]);
@@ -616,17 +620,29 @@ export function PlannerPanel({
         {/* Plan preview */}
         {plan && (
           <div style={{ marginTop: 14 }}>
-            {/* Summary */}
-            {plan.plan_summary && (
-              <div style={{
-                fontSize: 12,
-                color: "var(--text-secondary)",
-                marginBottom: 10,
-                lineHeight: 1.5,
-              }}>
-                {plan.plan_summary}
+            {/* Intent & refinement context */}
+            <div style={{
+              fontSize: 12,
+              color: "var(--text-secondary)",
+              marginBottom: 10,
+              lineHeight: 1.5,
+            }}>
+              <div style={{ marginBottom: lastFeedback ? 6 : 0 }}>
+                <span style={{ color: "var(--text-muted)", fontSize: 11 }}>Intent: </span>
+                {intent.trim() || plan.intent}
               </div>
-            )}
+              {lastFeedback && (
+                <div style={{
+                  borderLeft: "2px solid var(--accent-blue, #58a6ff)",
+                  paddingLeft: 8,
+                  color: "var(--text-muted)",
+                  fontSize: 11,
+                  fontStyle: "italic",
+                }}>
+                  Refined: {lastFeedback}
+                </div>
+              )}
+            </div>
 
             {/* Editable agents list */}
             <div style={{ fontSize: 11, color: "var(--text-muted)", marginBottom: 6, textTransform: "uppercase", letterSpacing: "0.06em" }}>
