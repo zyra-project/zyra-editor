@@ -192,6 +192,17 @@ export function PlannerPanel({
     setLoading(false);
   }, []);
 
+  const handleStartOver = useCallback(() => {
+    abortRef.current?.abort();
+    setPlan(null);
+    setEditableAgents([]);
+    setAcceptedIdxs(new Set());
+    setDismissedIdxs(new Set());
+    setFeedback("");
+    setError(null);
+    onIntentChange("");
+  }, [onIntentChange]);
+
   const handleAccept = useCallback((idx: number) => {
     setAcceptedIdxs((prev) => new Set(prev).add(idx));
     setDismissedIdxs((prev) => {
@@ -406,42 +417,87 @@ export function PlannerPanel({
           </div>
         )}
 
-        {/* Intent input */}
-        <textarea
-          placeholder="Describe your pipeline... e.g. &quot;Download SST data and convert to GeoTIFF&quot;"
-          value={intent}
-          onChange={(e) => onIntentChange(e.target.value)}
-          onKeyDown={(e) => {
-            if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
-              e.preventDefault();
-              if (canGenerate) handleGenerate();
-            }
-          }}
-          rows={3}
-          disabled={loading}
-          style={{
-            width: "100%",
-            background: "var(--bg-tertiary)",
-            border: "1px solid var(--border-default)",
-            borderRadius: "var(--radius-md)",
-            color: "var(--text-primary)",
-            padding: "8px 10px",
-            fontSize: 12,
-            fontFamily: "var(--font-sans)",
-            resize: "vertical",
-            outline: "none",
-            boxSizing: "border-box",
-            opacity: loading ? 0.6 : 1,
-          }}
-        />
+        {/* Intent input — shown when no plan yet */}
+        {!plan && (
+          <>
+            <textarea
+              placeholder="Describe your pipeline... e.g. &quot;Download SST data and convert to GeoTIFF&quot;"
+              value={intent}
+              onChange={(e) => onIntentChange(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
+                  e.preventDefault();
+                  if (canGenerate) handleGenerate();
+                }
+              }}
+              rows={3}
+              disabled={loading}
+              style={{
+                width: "100%",
+                background: "var(--bg-tertiary)",
+                border: "1px solid var(--border-default)",
+                borderRadius: "var(--radius-md)",
+                color: "var(--text-primary)",
+                padding: "8px 10px",
+                fontSize: 12,
+                fontFamily: "var(--font-sans)",
+                resize: "vertical",
+                outline: "none",
+                boxSizing: "border-box",
+                opacity: loading ? 0.6 : 1,
+              }}
+            />
+          </>
+        )}
 
-        {/* Generate / Loading UI */}
-        {loading ? (
+        {/* Frozen intent label — shown when plan exists */}
+        {plan && (
+          <div style={{
+            display: "flex",
+            alignItems: "flex-start",
+            gap: 6,
+            marginBottom: 6,
+          }}>
+            <div style={{
+              flex: 1,
+              padding: "6px 10px",
+              background: "var(--bg-tertiary)",
+              border: "1px solid var(--border-default)",
+              borderRadius: "var(--radius-md)",
+              fontSize: 12,
+              color: "var(--text-secondary)",
+              lineHeight: 1.5,
+            }}>
+              {intent}
+            </div>
+            <button
+              onClick={handleStartOver}
+              title="Clear plan and start over"
+              style={{
+                background: "none",
+                border: "1px solid var(--border-default)",
+                borderRadius: "var(--radius-sm)",
+                color: "var(--text-muted)",
+                fontSize: 10,
+                cursor: "pointer",
+                padding: "4px 8px",
+                fontFamily: "var(--font-sans)",
+                whiteSpace: "nowrap",
+                flexShrink: 0,
+              }}
+            >
+              New Plan
+            </button>
+          </div>
+        )}
+
+        {/* Loading indicator */}
+        {loading && (
           <div style={{
             display: "flex",
             alignItems: "center",
             gap: 8,
-            marginTop: 8,
+            marginTop: plan ? 0 : 8,
             padding: "8px 12px",
             background: "var(--bg-tertiary)",
             border: "1px solid var(--border-default)",
@@ -459,7 +515,7 @@ export function PlannerPanel({
               flexShrink: 0,
             }} />
             <span style={{ color: "var(--text-secondary)", flex: 1 }}>
-              Generating... {elapsed}s
+              {plan ? "Refining..." : "Generating..."} {elapsed}s
             </span>
             <button
               onClick={handleCancel}
@@ -477,7 +533,10 @@ export function PlannerPanel({
               Cancel
             </button>
           </div>
-        ) : (
+        )}
+
+        {/* Generate button — only when no plan */}
+        {!loading && !plan && (
           <>
             <button
               className="zyra-btn zyra-btn--primary"
@@ -553,57 +612,6 @@ export function PlannerPanel({
                 {plan.plan_summary}
               </div>
             )}
-
-            {/* Follow-up refinement */}
-            <div style={{
-              display: "flex",
-              gap: 6,
-              marginBottom: 12,
-            }}>
-              <input
-                type="text"
-                placeholder="Refine: e.g. &quot;use geotiff instead of video&quot;"
-                value={feedback}
-                onChange={(e) => setFeedback(e.target.value)}
-                onKeyDown={(e) => {
-                  if (e.key === "Enter" && !e.shiftKey && feedback.trim() && !loading) {
-                    e.preventDefault();
-                    handleRefine();
-                  }
-                }}
-                disabled={loading}
-                style={{
-                  flex: 1,
-                  background: "var(--bg-tertiary)",
-                  border: "1px solid var(--border-default)",
-                  borderRadius: "var(--radius-md)",
-                  color: "var(--text-primary)",
-                  padding: "6px 10px",
-                  fontSize: 12,
-                  fontFamily: "var(--font-sans)",
-                  outline: "none",
-                  opacity: loading ? 0.6 : 1,
-                }}
-              />
-              <button
-                onClick={handleRefine}
-                disabled={!feedback.trim() || loading}
-                style={{
-                  padding: "6px 12px",
-                  background: feedback.trim() && !loading ? "var(--accent-blue)" : "var(--bg-tertiary)",
-                  border: "1px solid var(--border-default)",
-                  borderRadius: "var(--radius-md)",
-                  color: feedback.trim() && !loading ? "#fff" : "var(--text-muted)",
-                  fontSize: 11,
-                  fontWeight: 600,
-                  cursor: feedback.trim() && !loading ? "pointer" : "default",
-                  fontFamily: "var(--font-sans)",
-                  flexShrink: 0,
-                }}
-              >
-                Refine
-              </button>
-            </div>
 
             {/* Editable agents list */}
             <div style={{ fontSize: 11, color: "var(--text-muted)", marginBottom: 6, textTransform: "uppercase", letterSpacing: "0.06em" }}>
@@ -696,6 +704,52 @@ export function PlannerPanel({
             {suggestions.length === 0 && (
               <div style={{ marginTop: 10, fontSize: 11, color: "var(--text-muted)", fontStyle: "italic" }}>
                 No additional suggestions
+              </div>
+            )}
+
+            {/* Follow-up refinement */}
+            {!loading && (
+              <div style={{ marginTop: 14 }}>
+                <div style={{ fontSize: 11, color: "var(--text-muted)", marginBottom: 6, textTransform: "uppercase", letterSpacing: "0.06em" }}>
+                  Refine this plan
+                </div>
+                <textarea
+                  placeholder="e.g. &quot;I wanted GeoTIFF output, not a video animation&quot;"
+                  value={feedback}
+                  onChange={(e) => setFeedback(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter" && (e.metaKey || e.ctrlKey) && feedback.trim()) {
+                      e.preventDefault();
+                      handleRefine();
+                    }
+                  }}
+                  rows={2}
+                  style={{
+                    width: "100%",
+                    background: "var(--bg-tertiary)",
+                    border: "1px solid var(--border-default)",
+                    borderRadius: "var(--radius-md)",
+                    color: "var(--text-primary)",
+                    padding: "8px 10px",
+                    fontSize: 12,
+                    fontFamily: "var(--font-sans)",
+                    resize: "vertical",
+                    outline: "none",
+                    boxSizing: "border-box",
+                  }}
+                />
+                <button
+                  className="zyra-btn zyra-btn--primary"
+                  onClick={handleRefine}
+                  disabled={!feedback.trim() || !canGenerate}
+                  style={{
+                    width: "100%",
+                    marginTop: 6,
+                    opacity: feedback.trim() ? 1 : 0.5,
+                  }}
+                >
+                  Refine Plan (Ctrl+Enter)
+                </button>
               </div>
             )}
           </div>
