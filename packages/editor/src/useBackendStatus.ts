@@ -6,6 +6,8 @@ export interface BackendStatus {
   zyra_cli: boolean;
   llm_configured: boolean;
   zyra_version?: string;
+  llm_provider?: string;
+  llm_model?: string;
   lastChecked: number;
 }
 
@@ -19,6 +21,21 @@ const INITIAL: BackendStatus = {
   lastChecked: 0,
 };
 
+/**
+ * Polls the zyra library's `/ready` endpoint.
+ *
+ * Example response:
+ * ```json
+ * {
+ *   "status": "ok",
+ *   "version": "0.1.45",
+ *   "checks": {
+ *     "llm": { "provider": "openai", "model": "gpt-4o-mini" },
+ *     ...
+ *   }
+ * }
+ * ```
+ */
 export function useBackendStatus(): BackendStatus & { refresh: () => void } {
   const [state, setState] = useState<BackendStatus>(INITIAL);
   const timerRef = useRef<ReturnType<typeof setInterval>>();
@@ -37,19 +54,17 @@ export function useBackendStatus(): BackendStatus & { refresh: () => void } {
         return;
       }
       const data = await resp.json();
+      const checks = data.checks ?? {};
 
-      // The /ready endpoint is provided by the zyra library.
-      // Adapt to its response shape — look for common field names.
-      const server = true; // If we got a 200, the server is up
-      const zyra_cli = Boolean(
-        data.zyra_cli ?? data.cli ?? data.zyra ?? true,
-      );
-      const llm_configured = Boolean(
-        data.llm_configured ?? data.llm ?? data.planner ?? false,
-      );
-      // Version may be top-level or nested
-      const zyra_version: string | undefined =
-        data.zyra_version ?? data.version ?? data.cli_version ?? undefined;
+      const server = data.status === "ok";
+      const zyra_cli = Boolean(data.version);
+      const zyra_version: string | undefined = data.version ?? undefined;
+
+      // LLM is configured if checks.llm exists with a provider
+      const llmCheck = checks.llm ?? {};
+      const llm_configured = Boolean(llmCheck.provider);
+      const llm_provider: string | undefined = llmCheck.provider ?? undefined;
+      const llm_model: string | undefined = llmCheck.model ?? undefined;
 
       const allGood = server && zyra_cli && llm_configured;
       setState({
@@ -58,6 +73,8 @@ export function useBackendStatus(): BackendStatus & { refresh: () => void } {
         zyra_cli,
         llm_configured,
         zyra_version,
+        llm_provider,
+        llm_model,
         lastChecked: Date.now(),
       });
     } catch {

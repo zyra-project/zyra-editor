@@ -437,7 +437,9 @@ function StatusPopover({
           {checkIcon(status.llm_configured)}
           <span style={{ flex: 1 }}>LLM Backend</span>
           <span style={{ color: "var(--text-muted)", fontSize: 11 }}>
-            {status.llm_configured ? "Configured" : "Not configured"}
+            {status.llm_configured
+              ? [status.llm_provider, status.llm_model].filter(Boolean).join(" / ") || "Configured"
+              : "Not configured"}
           </span>
         </div>
       </div>
