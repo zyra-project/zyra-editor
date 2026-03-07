@@ -316,42 +316,6 @@ async def generate_plan(body: PlanRequest):
         )
 
 
-import re
-
-@app.get("/health/ready")
-async def readiness_check():
-    """Check backend readiness: server up, zyra CLI available, LLM configured."""
-    checks: dict = {"server": True, "zyra_cli": False, "llm_configured": False}
-    try:
-        result = subprocess.run(
-            ["zyra", "--version", "--no-logo"],
-            capture_output=True, text=True, timeout=5,
-        )
-        checks["zyra_cli"] = result.returncode == 0
-        if result.returncode == 0:
-            # Extract version like "Zyra 0.1.45" or bare "0.1.45"
-            ver_match = re.search(r"(\d+\.\d+\.\d+)", result.stdout)
-            checks["zyra_version"] = ver_match.group(1) if ver_match else result.stdout.strip()
-    except (FileNotFoundError, subprocess.TimeoutExpired):
-        pass
-
-    # Check common LLM provider env vars
-    llm_env_vars = [
-        "OPENAI_API_KEY",
-        "OLLAMA_HOST",
-        "ANTHROPIC_API_KEY",
-        "GROQ_API_KEY",
-        "GOOGLE_API_KEY",
-        "AZURE_OPENAI_API_KEY",
-        "ZYRA_LLM_PROVIDER",
-    ]
-    checks["llm_configured"] = any(os.environ.get(v) for v in llm_env_vars)
-
-    checks["ready"] = all(
-        [checks["server"], checks["zyra_cli"], checks["llm_configured"]]
-    )
-    return checks
-
 
 @app.get("/v1/manifest")
 def get_manifest(request: Request):

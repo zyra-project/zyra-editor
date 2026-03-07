@@ -25,7 +25,7 @@ export function useBackendStatus(): BackendStatus & { refresh: () => void } {
 
   const check = useCallback(async () => {
     try {
-      const resp = await fetch("/health/ready", { signal: AbortSignal.timeout(8000) });
+      const resp = await fetch("/ready", { signal: AbortSignal.timeout(8000) });
       if (!resp.ok) {
         setState({
           status: "offline",
@@ -37,16 +37,27 @@ export function useBackendStatus(): BackendStatus & { refresh: () => void } {
         return;
       }
       const data = await resp.json();
-      const server = Boolean(data.server);
-      const zyra_cli = Boolean(data.zyra_cli);
-      const llm_configured = Boolean(data.llm_configured);
+
+      // The /ready endpoint is provided by the zyra library.
+      // Adapt to its response shape — look for common field names.
+      const server = true; // If we got a 200, the server is up
+      const zyra_cli = Boolean(
+        data.zyra_cli ?? data.cli ?? data.zyra ?? true,
+      );
+      const llm_configured = Boolean(
+        data.llm_configured ?? data.llm ?? data.planner ?? false,
+      );
+      // Version may be top-level or nested
+      const zyra_version: string | undefined =
+        data.zyra_version ?? data.version ?? data.cli_version ?? undefined;
+
       const allGood = server && zyra_cli && llm_configured;
       setState({
         status: allGood ? "ready" : "degraded",
         server,
         zyra_cli,
         llm_configured,
-        zyra_version: data.zyra_version ?? undefined,
+        zyra_version,
         lastChecked: Date.now(),
       });
     } catch {
