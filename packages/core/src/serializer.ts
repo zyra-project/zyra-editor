@@ -126,7 +126,9 @@ export function graphToPipeline(
     // Fall back to the ArgDef default so wired control nodes with
     // defaults (e.g., boolean false) still serialize correctly.
     // Treat empty string as unset for non-string control types (matches UI display).
-    if (val === undefined || (val === "" && !srcNode.stageCommand.endsWith("/string"))) {
+    // Secret variables are exempt — their value is intentionally empty in the editor;
+    // the real value comes from environment variables at runtime.
+    if (!isSecretVar && (val === undefined || (val === "" && !srcNode.stageCommand.endsWith("/string")))) {
       const ctrlStage = stageMap.get(srcNode.stageCommand);
       const valueDef = ctrlStage?.args?.find((a) => a.key === "value");
       if (valueDef?.default !== undefined) {

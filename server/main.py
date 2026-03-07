@@ -54,6 +54,9 @@ _orig_cli_main = None
 _ENV_VAR_RE = re.compile(r"\$\{([A-Za-z_][A-Za-z0-9_]*)\}")
 
 
+_log = logging.getLogger("zyra-editor")
+
+
 def _resolve_env_vars(value: str) -> str:
     """Replace ${VAR_NAME} references with values from os.environ.
 
@@ -61,7 +64,16 @@ def _resolve_env_vars(value: str) -> str:
     string, which is preferable to silently dropping the value).
     """
     def _replace(m: re.Match) -> str:
-        return os.environ.get(m.group(1), m.group(0))
+        name = m.group(1)
+        resolved = os.environ.get(name)
+        if resolved is None:
+            _log.warning(
+                "Secret variable ${%s} is not set in the environment. "
+                "Add it to server/.env or export it before starting the server.",
+                name,
+            )
+            return m.group(0)
+        return resolved
     return _ENV_VAR_RE.sub(_replace, value)
 
 
