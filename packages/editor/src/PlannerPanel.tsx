@@ -131,7 +131,10 @@ export function PlannerPanel({
         setError(err);
         return;
       }
-      const data: PlanResponse = await resp.json();
+      const data: PlanResponse & { _warning?: string } = await resp.json();
+      if (data._warning) {
+        setError({ message: data._warning, status: undefined });
+      }
       setPlan(data);
       onHistoryAdd({ intent: intent.trim(), plan: data, timestamp: Date.now() });
     } catch (err) {
@@ -170,6 +173,18 @@ export function PlannerPanel({
         return;
       }
       const data: PlanResponse = await resp.json();
+
+      // Detect if the plan is unchanged (canned/template response)
+      const oldIds = plan.agents.map((a) => `${a.stage}/${a.command}`).join(",");
+      const newIds = data.agents.map((a) => `${a.stage}/${a.command}`).join(",");
+      if (oldIds === newIds) {
+        setError({
+          message: "Refinement returned the same plan. The LLM backend may not be configured — check that OPENAI_API_KEY or OLLAMA_HOST is set in your .env file.",
+          status: undefined,
+        });
+        return;
+      }
+
       setPlan(data);
       setFeedback("");
       setAcceptedIdxs(new Set());

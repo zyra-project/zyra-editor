@@ -329,12 +329,21 @@ def _run_zyra_plan(intent: str, guardrails: str = "") -> dict:
     if result.returncode != 0:
         raise HTTPException(status_code=400, detail=result.stderr.strip())
     try:
-        return json.loads(result.stdout)
+        data = json.loads(result.stdout)
     except json.JSONDecodeError:
         raise HTTPException(
             status_code=502,
             detail=f"zyra plan returned invalid JSON: {result.stdout[:500]}",
         )
+
+    # Flag when no LLM backend is configured — the plan may be a template
+    if not has_openai and not has_ollama:
+        data["_warning"] = (
+            "No LLM backend configured (OPENAI_API_KEY and OLLAMA_HOST are both missing). "
+            "The plan may be a static template. Set one of these in your .env file."
+        )
+
+    return data
 
 
 @app.get("/v1/plan/debug")
