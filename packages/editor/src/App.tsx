@@ -848,7 +848,7 @@ function Editor() {
           defaultEdgeOptions={{
             type: "smoothstep",
             style: { stroke: "var(--accent-blue)", strokeWidth: 2 },
-            animated: false,
+            animated: exec.running,
           }}
           style={{ width: "100%", height: "100%" }}
         >
