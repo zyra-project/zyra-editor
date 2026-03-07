@@ -304,6 +304,105 @@ export function ZyraNode({ id, data, selected }: NodeProps) {
             </div>
           );
         }
+
+        // Variable node: show name = value
+        if (stageDef.command === "variable") {
+          const name = argValues.name;
+          const val = argValues.value;
+          const varType = argValues.var_type;
+          const hasName = name !== undefined && name !== "";
+          const hasVal = val !== undefined && val !== "";
+          if (!hasName && !hasVal) return null;
+          const displayVal = varType === "secret" && hasVal ? "\u2022\u2022\u2022\u2022\u2022\u2022" : String(val ?? "");
+          const display = hasName ? `${name}${hasVal ? " = " + displayVal : ""}` : displayVal;
+          return (
+            <div
+              style={{
+                padding: "4px 12px",
+                fontSize: 11,
+                fontFamily: "var(--font-mono)",
+                color: "var(--accent-blue)",
+                background: "var(--bg-tertiary)",
+                overflow: "hidden",
+                textOverflow: "ellipsis",
+                whiteSpace: "nowrap",
+                borderBottom: "1px solid var(--border-default)",
+                flexShrink: 0,
+              }}
+              title={varType === "secret" ? String(name ?? "") : display}
+            >
+              {display}
+            </div>
+          );
+        }
+
+        // Conditional node: show field operator value
+        if (stageDef.command === "conditional") {
+          const field = argValues.field;
+          const op = argValues.operator;
+          const cmpVal = argValues.compare_value;
+          const hasField = field !== undefined && field !== "";
+          if (!hasField) return null;
+          const display = `${field} ${op ?? "=="} ${cmpVal ?? "?"}`;
+          return (
+            <div
+              style={{
+                padding: "4px 12px",
+                fontSize: 11,
+                fontFamily: "var(--font-mono)",
+                color: "var(--accent-yellow, #e3b341)",
+                background: "var(--bg-tertiary)",
+                overflow: "hidden",
+                textOverflow: "ellipsis",
+                whiteSpace: "nowrap",
+                borderBottom: "1px solid var(--border-default)",
+                flexShrink: 0,
+              }}
+              title={display}
+            >
+              if {display}
+            </div>
+          );
+        }
+
+        // Loop node: show mode and key details
+        if (stageDef.command === "loop") {
+          const mode = argValues.mode;
+          if (!mode) return null;
+          let detail = String(mode);
+          if (mode === "batch") {
+            const bs = argValues.batch_size;
+            if (bs !== undefined && bs !== "") detail = `batch(${bs})`;
+          } else if (mode === "range") {
+            const rs = argValues.range_start ?? "0";
+            const re = argValues.range_end ?? "?";
+            const step = argValues.range_step;
+            detail = `range(${rs}..${re}${step && step !== "" && step !== 1 ? `, step ${step}` : ""})`;
+          }
+          const mp = argValues.max_parallel;
+          const parallel = mp !== undefined && mp !== "" && mp !== 1 ? ` \u00d7${mp}` : "";
+          const display = `${detail}${parallel}`;
+          return (
+            <div
+              style={{
+                padding: "4px 12px",
+                fontSize: 11,
+                fontFamily: "var(--font-mono)",
+                color: "var(--accent-purple, #a371f7)",
+                background: "var(--bg-tertiary)",
+                overflow: "hidden",
+                textOverflow: "ellipsis",
+                whiteSpace: "nowrap",
+                borderBottom: "1px solid var(--border-default)",
+                flexShrink: 0,
+              }}
+              title={display}
+            >
+              {display}
+            </div>
+          );
+        }
+
         const val = argValues.value;
         const valueDef = stageDef.args.find((a) => a.key === "value");
         const hasValue = val !== undefined && val !== "";
