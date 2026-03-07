@@ -16,7 +16,7 @@ export interface ArgDef {
   /** CLI flag, e.g. "-o" or "--format". Omit for positional args. */
   flag?: string;
   label: string;
-  type: "string" | "number" | "boolean" | "filepath" | "enum";
+  type: "string" | "number" | "boolean" | "filepath" | "enum" | "date";
   required: boolean;
   default?: string | number | boolean;
   placeholder?: string;
@@ -67,6 +67,7 @@ const ARG_TYPE_MAP: Record<string, string[]> = {
   boolean: ["boolean"],
   filepath: ["filepath", "string"],
   enum: ["string"],
+  date: ["date", "string"],
 };
 
 /** Convert an ArgDef into an implicit input PortDef. */

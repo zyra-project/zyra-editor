@@ -654,6 +654,16 @@ function ArgField({
               <option key={opt} value={opt}>{opt}</option>
             ))}
           </select>
+        ) : arg.type === "date" ? (
+          <input
+            id={id}
+            className="zyra-input"
+            type="date"
+            value={(value as string) ?? ""}
+            placeholder={arg.placeholder ?? ""}
+            onChange={(e) => onChange(e.target.value)}
+            style={{ colorScheme: "dark" }}
+          />
         ) : arg.type === "boolean" ? (
           (() => {
             const effectiveValue = value !== undefined ? !!value : !!arg.default;

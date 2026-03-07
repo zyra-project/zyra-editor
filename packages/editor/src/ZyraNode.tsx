@@ -269,6 +269,39 @@ export function ZyraNode({ id, data, selected }: NodeProps) {
 
       {/* Value preview for control nodes */}
       {stageDef.stage === "control" && (() => {
+        // Date node: show compact date range preview
+        if (stageDef.command === "date") {
+          const start = argValues.start_date;
+          const end = argValues.end_date;
+          const period = argValues.period;
+          const hasStart = start !== undefined && start !== "";
+          const parts: string[] = [];
+          if (hasStart) parts.push(String(start));
+          if (end !== undefined && end !== "") parts.push(String(end));
+          const display = parts.length > 0
+            ? parts.join(" \u2192 ") + (period ? ` (${period})` : "")
+            : null;
+          if (!display) return null;
+          return (
+            <div
+              style={{
+                padding: "4px 12px",
+                fontSize: 11,
+                fontFamily: "var(--font-mono)",
+                color: "var(--accent-blue)",
+                background: "var(--bg-tertiary)",
+                overflow: "hidden",
+                textOverflow: "ellipsis",
+                whiteSpace: "nowrap",
+                borderBottom: "1px solid var(--border-default)",
+                flexShrink: 0,
+              }}
+              title={display}
+            >
+              {display}
+            </div>
+          );
+        }
         const val = argValues.value;
         const valueDef = stageDef.args.find((a) => a.key === "value");
         const hasValue = val !== undefined && val !== "";
