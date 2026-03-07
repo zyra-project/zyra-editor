@@ -290,11 +290,26 @@ class PlanRequest(BaseModel):
     guardrails: str = ""
 
 
+logger = logging.getLogger("zyra-editor.plan")
+
+
 def _run_zyra_plan(intent: str, guardrails: str = "") -> dict:
     """Run ``zyra plan`` and return parsed JSON."""
     cmd = ["zyra", "plan", "--intent", intent, "--no-clarify"]
     if guardrails:
         cmd += ["--guardrails", guardrails]
+
+    # Log the env vars visible to the subprocess so we can diagnose
+    # missing LLM configuration without leaking secrets.
+    has_openai = bool(os.environ.get("OPENAI_API_KEY"))
+    has_ollama = bool(os.environ.get("OLLAMA_HOST"))
+    logger.info(
+        "Running zyra plan — OPENAI_API_KEY=%s, OLLAMA_HOST=%s",
+        "set" if has_openai else "MISSING",
+        os.environ.get("OLLAMA_HOST", "MISSING"),
+    )
+    logger.debug("zyra plan command: %s", cmd)
+
     try:
         result = subprocess.run(cmd, capture_output=True, text=True, timeout=120)
     except FileNotFoundError:
@@ -304,6 +319,13 @@ def _run_zyra_plan(intent: str, guardrails: str = "") -> dict:
         )
     except subprocess.TimeoutExpired:
         raise HTTPException(status_code=504, detail="zyra plan timed out")
+
+    logger.info("zyra plan exit code: %d", result.returncode)
+    if result.stderr:
+        logger.info("zyra plan stderr:\n%s", result.stderr[:2000])
+    if result.stdout:
+        logger.debug("zyra plan stdout:\n%s", result.stdout[:2000])
+
     if result.returncode != 0:
         raise HTTPException(status_code=400, detail=result.stderr.strip())
     try:
@@ -311,8 +333,45 @@ def _run_zyra_plan(intent: str, guardrails: str = "") -> dict:
     except json.JSONDecodeError:
         raise HTTPException(
             status_code=502,
-            detail="zyra plan returned invalid JSON",
+            detail=f"zyra plan returned invalid JSON: {result.stdout[:500]}",
         )
+
+
+@app.get("/v1/plan/debug")
+async def plan_debug():
+    """Diagnostic endpoint — reports zyra CLI version and LLM configuration."""
+    info: dict = {
+        "openai_api_key": "set" if os.environ.get("OPENAI_API_KEY") else "missing",
+        "ollama_host": os.environ.get("OLLAMA_HOST", "not set"),
+        "zyra_verbosity": os.environ.get("ZYRA_VERBOSITY", "default"),
+    }
+
+    # zyra version
+    try:
+        ver = subprocess.run(
+            ["zyra", "--version"], capture_output=True, text=True, timeout=10
+        )
+        info["zyra_version"] = ver.stdout.strip() or ver.stderr.strip()
+    except FileNotFoundError:
+        info["zyra_version"] = "NOT INSTALLED"
+    except Exception as exc:
+        info["zyra_version"] = f"error: {exc}"
+
+    # Quick dry-run: ask zyra plan for a trivial intent to see what happens
+    try:
+        test = subprocess.run(
+            ["zyra", "plan", "--intent", "test", "--no-clarify"],
+            capture_output=True, text=True, timeout=30,
+        )
+        info["test_plan"] = {
+            "exit_code": test.returncode,
+            "stdout_preview": test.stdout[:500],
+            "stderr_preview": test.stderr[:500],
+        }
+    except Exception as exc:
+        info["test_plan"] = {"error": str(exc)}
+
+    return info
 
 
 @app.post("/v1/plan")

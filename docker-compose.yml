@@ -5,9 +5,14 @@ services:
       - "8765:8765"
     volumes:
       - ./_work:/data
+    env_file:
+      - .env
     environment:
       - ZYRA_VERBOSITY=debug
       - ZYRA_DATA_DIR=/data
+      # LLM provider keys — set in .env or host environment
+      - OPENAI_API_KEY=${OPENAI_API_KEY:-}
+      - OLLAMA_HOST=${OLLAMA_HOST:-}
 
   zyra-editor:
     build:
