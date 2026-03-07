@@ -308,7 +308,10 @@ def _run_zyra_plan(intent: str, guardrails: str = "") -> dict:
         "set" if has_openai else "MISSING",
         os.environ.get("OLLAMA_HOST", "MISSING"),
     )
-    logger.debug("zyra plan command: %s", cmd)
+    logger.info("zyra plan intent: %.200s", intent)
+    if guardrails:
+        logger.info("zyra plan guardrails: %.200s", guardrails)
+    logger.debug("zyra plan full command: %s", cmd)
 
     try:
         result = subprocess.run(cmd, capture_output=True, text=True, timeout=120)
@@ -398,26 +401,31 @@ class PlanRefineRequest(BaseModel):
 
 @app.post("/v1/plan/refine")
 async def refine_plan(body: PlanRefineRequest):
-    """Re-run ``zyra plan`` with the original intent augmented by user feedback
-    and a summary of the current plan so the LLM can course-correct."""
-    # Build a context-enriched intent that includes what was generated and
-    # what the user wants changed.
-    steps_summary = ""
+    """Re-run ``zyra plan`` keeping --intent clean and passing feedback
+    context via --guardrails so the CLI's prompt template handles it properly."""
+    # Build a concise, updated intent that incorporates the feedback directly
+    # rather than appending meta-instructions to the intent string.
+    refined_intent = f"{body.intent.strip()}. {body.feedback.strip()}"
+
+    # Use --guardrails to provide structural context about what was wrong
+    # with the previous plan, so the LLM can avoid repeating mistakes.
+    guardrail_parts = []
+    if body.guardrails:
+        guardrail_parts.append(body.guardrails)
+
     agents = body.current_plan.get("agents", [])
     if agents:
-        lines = []
-        for a in agents:
-            lines.append(f"  - {a.get('id', '?')}: {a.get('stage', '?')}/{a.get('command', '?')}")
-        steps_summary = "\nCurrent plan steps:\n" + "\n".join(lines)
+        prev_commands = [
+            f"{a.get('stage', '?')}/{a.get('command', '?')}" for a in agents
+        ]
+        guardrail_parts.append(
+            f"Previous plan had these steps: {', '.join(prev_commands)}. "
+            f"The user wants changes: {body.feedback.strip()}"
+        )
 
-    refined_intent = (
-        f"{body.intent}\n\n"
-        f"[User feedback on the previous plan: {body.feedback}]"
-        f"{steps_summary}\n\n"
-        f"Please regenerate the plan incorporating the feedback above."
-    )
+    guardrails = "; ".join(guardrail_parts)
 
-    return _run_zyra_plan(refined_intent, body.guardrails)
+    return _run_zyra_plan(refined_intent, guardrails)
 
 
 
