@@ -390,8 +390,13 @@ function InputPortRow({ port, isConnected, linkedValue, argDef, argValue }: {
   const hasFill = argValue !== undefined && argValue !== "";
   const sensitive = argDef ? isSensitive(argDef) : false;
 
+  const tooltip = argDef?.description || undefined;
+
   return (
-    <div style={{ position: "relative", marginBottom: 4, display: "flex", alignItems: "center", gap: 6 }}>
+    <div
+      style={{ position: "relative", marginBottom: 4, display: "flex", alignItems: "center", gap: 6 }}
+      title={tooltip}
+    >
       <Handle
         type="target"
         position={Position.Left}
