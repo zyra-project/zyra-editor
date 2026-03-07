@@ -289,35 +289,6 @@ export function PlannerPanel({
     setDismissedIdxs((prev) => new Set(prev).add(idx));
   }, [plan]);
 
-  const handleUndoAccept = useCallback((idx: number) => {
-    if (!plan) return;
-    const suggestion = plan.suggestions[idx];
-    // Remove the agent that was added for this suggestion
-    if (suggestion) {
-      const stage = suggestion.agent_template?.stage ?? suggestion.stage;
-      const command = suggestion.agent_template?.command ?? suggestion.stage;
-      setEditableAgents((prev) => {
-        let lastMatchIdx = -1;
-        for (let i = prev.length - 1; i >= 0; i--) {
-          if (prev[i].stage === stage && prev[i].command === command) {
-            lastMatchIdx = i;
-            break;
-          }
-        }
-        if (lastMatchIdx >= 0) {
-          const next = [...prev];
-          next.splice(lastMatchIdx, 1);
-          return next;
-        }
-        return prev;
-      });
-    }
-    setAcceptedIdxs((prev) => {
-      const next = new Set(prev);
-      next.delete(idx);
-      return next;
-    });
-  }, [plan]);
 
   // Editable agents: remove
   const handleRemoveAgent = useCallback((agentId: string) => {
@@ -366,9 +337,6 @@ export function PlannerPanel({
   const pendingSuggestions = suggestions
     .map((s, i) => ({ suggestion: s, idx: i }))
     .filter(({ idx }) => !acceptedIdxs.has(idx) && !dismissedIdxs.has(idx));
-  const acceptedSuggestions = suggestions
-    .map((s, i) => ({ suggestion: s, idx: i }))
-    .filter(({ idx }) => acceptedIdxs.has(idx));
 
   const canGenerate = !loading && intent.trim().length > 0 && backendStatus.status === "ready";
   const statusNotReady = backendStatus.status !== "ready" && backendStatus.status !== "checking";
@@ -745,50 +713,7 @@ export function PlannerPanel({
                   />
                 ))}
 
-                {/* Accepted suggestions */}
-                {acceptedSuggestions.length > 0 && (
-                  <>
-                    <div style={{ fontSize: 10, color: "var(--accent-green)", marginTop: 8, marginBottom: 4, fontWeight: 600 }}>
-                      Accepted
-                    </div>
-                    {acceptedSuggestions.map(({ suggestion, idx }) => (
-                      <div key={idx} style={{
-                        display: "flex",
-                        alignItems: "center",
-                        justifyContent: "space-between",
-                        padding: "6px 10px",
-                        marginBottom: 4,
-                        background: "rgba(63,185,80,0.1)",
-                        border: "1px solid rgba(63,185,80,0.3)",
-                        borderRadius: "var(--radius-md)",
-                        fontSize: 11,
-                        color: "var(--text-secondary)",
-                      }}>
-                        <span>
-                          <StageBadge stage={suggestion.stage} />
-                          {" "}{suggestion.description}
-                        </span>
-                        <button
-                          onClick={() => handleUndoAccept(idx)}
-                          style={{
-                            background: "none",
-                            border: "none",
-                            color: "var(--text-muted)",
-                            fontSize: 10,
-                            cursor: "pointer",
-                            textDecoration: "underline",
-                            padding: "2px 4px",
-                            fontFamily: "var(--font-sans)",
-                          }}
-                        >
-                          undo
-                        </button>
-                      </div>
-                    ))}
-                  </>
-                )}
-
-                {pendingSuggestions.length === 0 && acceptedSuggestions.length === 0 && (
+                {pendingSuggestions.length === 0 && (
                   <div style={{ fontSize: 11, color: "var(--text-muted)", fontStyle: "italic" }}>
                     All suggestions dismissed
                   </div>
