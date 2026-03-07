@@ -5,35 +5,6 @@ export const MOCK_MANIFEST: Manifest = {
   stages: [
     {
       stage: "control",
-      command: "variable",
-      label: "Variable",
-      description: "Define a named variable to pass values into the pipeline",
-      cli: "",
-      status: "implemented",
-      color: "#888888",
-      inputs: [],
-      outputs: [{ id: "value", label: "Value", types: ["any"] }],
-      args: [
-        {
-          key: "name",
-          label: "Name",
-          type: "string",
-          required: true,
-          placeholder: "my_var",
-          description: "Variable name",
-        },
-        {
-          key: "value",
-          label: "Value",
-          type: "string",
-          required: true,
-          placeholder: "...",
-          description: "The value to pass downstream",
-        },
-      ],
-    },
-    {
-      stage: "control",
       command: "string",
       label: "String",
       description: "A string constant to feed into other nodes",
