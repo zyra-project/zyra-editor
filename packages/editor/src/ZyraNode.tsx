@@ -2,6 +2,7 @@ import { useState, useMemo, useEffect, useRef } from "react";
 import { Handle, Position, NodeResizer, useReactFlow, useUpdateNodeInternals, type NodeProps } from "@xyflow/react";
 import type { ArgDef, StageDef, NodeRunStatus, PortDef } from "@zyra/core";
 import { STATUS_COLORS, getEffectivePorts } from "@zyra/core";
+import { describeCron } from "./CronScheduleEditor";
 
 export const SENSITIVE_PATTERNS = /password|secret|token|credential|auth|api.?key/i;
 export function isSensitive(arg: ArgDef): boolean {
@@ -336,20 +337,20 @@ export function ZyraNode({ id, data, selected }: NodeProps) {
           );
         }
 
-        // Cron schedule node: show cron expression and timezone
+        // Cron schedule node: show human-readable description
         if (stageDef.command === "cron") {
           const expr = argValues.expression;
           const tz = argValues.timezone;
           const enabled = argValues.enabled;
-          const hasExpr = expr !== undefined && expr !== "";
+          const hasExpr = typeof expr === "string" && expr.trim().length > 0;
           if (!hasExpr) return null;
-          const display = `${expr}${tz ? ` (${tz})` : ""}`;
+          const raw = `${expr}${tz ? ` (${tz})` : ""}`;
+          const readable = describeCron(String(expr));
           return (
             <div
               style={{
                 padding: "4px 12px",
                 fontSize: 11,
-                fontFamily: "var(--font-mono)",
                 color: enabled === false ? "var(--text-muted)" : "var(--accent-blue)",
                 textDecoration: enabled === false ? "line-through" : undefined,
                 background: "var(--bg-tertiary)",
@@ -359,9 +360,9 @@ export function ZyraNode({ id, data, selected }: NodeProps) {
                 borderBottom: "1px solid var(--border-default)",
                 flexShrink: 0,
               }}
-              title={enabled === false ? `(disabled) ${display}` : display}
+              title={raw}
             >
-              {display}
+              {readable}
             </div>
           );
         }

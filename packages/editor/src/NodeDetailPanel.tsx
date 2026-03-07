@@ -4,6 +4,7 @@ import { STATUS_COLORS, getEffectivePorts } from "@zyra/core";
 import type { ZyraNodeData } from "./ZyraNode";
 import { isSensitive } from "./ZyraNode";
 import type { NodeRunState } from "@zyra/core";
+import { CronScheduleEditor } from "./CronScheduleEditor";
 
 /** Scroll an element to its bottom. */
 function scrollToBottom(el: HTMLElement | null) {
@@ -213,6 +214,34 @@ function SettingsTab({
         const isSecretVariable = stageDef.command === "variable"
           && arg.key === "value"
           && argValues.var_type === "secret";
+
+        // Cron schedule: replace the expression field with the visual editor
+        if (stageDef.command === "cron" && arg.key === "expression") {
+          return (
+            <div key={arg.key} style={{ marginBottom: 14 }}>
+              <label style={{
+                display: "block",
+                fontSize: 12,
+                fontWeight: 600,
+                marginBottom: 4,
+                color: "var(--text-primary)",
+              }}>
+                {arg.label}
+                {arg.required && <span style={{ color: "var(--accent-red)" }}> *</span>}
+              </label>
+              {arg.description && (
+                <div style={{ fontSize: 11, color: "var(--text-secondary)", marginBottom: 6, lineHeight: 1.4 }}>
+                  {arg.description}
+                </div>
+              )}
+              <CronScheduleEditor
+                value={String(argValues[arg.key] ?? "")}
+                onChange={(v) => onArgChange(nodeId, arg.key, v)}
+              />
+            </div>
+          );
+        }
+
         return (
           <ArgField
             key={arg.key}
