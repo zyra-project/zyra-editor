@@ -17,7 +17,7 @@ interface Props {
   nodeId: string;
   data: ZyraNodeData;
   runState?: NodeRunState;
-  connectedInputs: { portId: string; peerNodeId: string; peerLabel: string; peerValue?: string; peerStatus?: NodeRunStatus }[];
+  connectedInputs: { portId: string; peerNodeId: string; peerLabel: string; peerValue?: string; peerSensitive?: boolean; peerStatus?: NodeRunStatus }[];
   connectedOutputs: { portId: string; peerNodeId: string; peerLabel: string; peerStatus?: NodeRunStatus }[];
   onArgChange: (nodeId: string, key: string, value: string | number | boolean) => void;
   onSelectNode: (nodeId: string) => void;
@@ -192,12 +192,12 @@ function SettingsTab({
   const definedKeys = new Set(stageDef.args.map((a) => a.key));
   const extraKeys = Object.keys(argValues).filter((k) => !definedKeys.has(k));
 
-  // Build a map of arg key -> { label, value } for wired arg-ports
-  const linkedArgs = new Map<string, { label: string; value?: string }>();
+  // Build a map of arg key -> { label, value, sensitive } for wired arg-ports
+  const linkedArgs = new Map<string, { label: string; value?: string; sensitive?: boolean }>();
   for (const conn of connectedInputs) {
     // arg-port IDs have the format "arg:<key>"
     if (conn.portId.startsWith("arg:")) {
-      linkedArgs.set(conn.portId.slice(4), { label: conn.peerLabel, value: conn.peerValue });
+      linkedArgs.set(conn.portId.slice(4), { label: conn.peerLabel, value: conn.peerValue, sensitive: conn.peerSensitive });
     }
   }
 
@@ -620,8 +620,8 @@ function ArgField({
 }: {
   arg: ArgDef;
   value: string | number | boolean | undefined;
-  /** If this arg is wired from another node, the peer node's label and optional value. */
-  linkedFrom?: { label: string; value?: string };
+  /** If this arg is wired from another node, the peer node's label, optional value, and sensitivity. */
+  linkedFrom?: { label: string; value?: string; sensitive?: boolean };
   onChange: (v: string | number | boolean) => void;
   /** Override: treat this field as a secret (password input) regardless of name/label. */
   forceSecret?: boolean;
@@ -632,7 +632,7 @@ function ArgField({
   const needsDurationValidation = arg.key === "custom_period";
   const strValue = typeof value === "string" ? value : "";
   const durationInvalid = needsDurationValidation && strValue.length > 0 && !isValidISO8601Duration(strValue);
-  const treatAsSensitive = forceSecret || isSensitive(arg);
+  const treatAsSensitive = forceSecret || isSensitive(arg) || !!linkedFrom?.sensitive;
 
   return (
     <div style={{ marginBottom: 14 }}>

@@ -171,6 +171,7 @@ export function CronScheduleEditor({ value, onChange }: Props) {
       }}>
         {PRESETS.map((preset) => (
           <button
+            type="button"
             key={preset.expression}
             onClick={() => onChange(preset.expression)}
             title={`${preset.expression} — ${preset.description}`}
@@ -220,6 +221,7 @@ export function CronScheduleEditor({ value, onChange }: Props) {
 
       {/* Toggle for advanced mode */}
       <button
+        type="button"
         onClick={() => setShowAdvanced(!showAdvanced)}
         style={{
           background: "none",

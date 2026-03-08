@@ -190,6 +190,11 @@ export function pipelineToGraph(
     }
     condGroups.get(key)!.steps.push(step.name);
   }
+  // Precompute step name → condition for O(1) lookup during edge wiring
+  const stepCondMap = new Map(
+    pipeline.steps.filter((s) => s.condition).map((s) => [s.name, s.condition!]),
+  );
+
   let condIdx = 0;
   for (const [, group] of condGroups) {
     const condId = uniqueId(`_cond_${condIdx++}`);
@@ -204,7 +209,7 @@ export function pipelineToGraph(
     });
     // Wire the conditional's true/false ports to the downstream steps
     for (const stepName of group.steps) {
-      const stepCond = pipeline.steps.find((s) => s.name === stepName)?.condition;
+      const stepCond = stepCondMap.get(stepName);
       if (!stepCond) continue;
       const targetInfo = nodeMap.get(stepName);
       const targetPort = targetInfo?.stage?.inputs[0]?.id ?? "in";
