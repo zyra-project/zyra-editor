@@ -21,7 +21,7 @@ import logging
 import requests as http_requests
 from fastapi import HTTPException, Request, WebSocket, WebSocketDisconnect
 from fastapi.staticfiles import StaticFiles
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from starlette.middleware.cors import CORSMiddleware
 from zyra.api.server import create_app
 from zyra.api.workers import jobs as _jobs_mod
@@ -445,7 +445,7 @@ async def generate_plan(body: PlanRequest):
 class PlanRefineRequest(BaseModel):
     intent: str
     feedback: str
-    current_plan: dict = {}
+    current_plan: dict = Field(default_factory=dict)
     guardrails: str = ""
 
 
@@ -1025,12 +1025,17 @@ async def ws_plan(websocket: WebSocket):
                         answer_ready_event.wait()
                     )
 
-                    done, _pending = await asyncio.wait(
+                    done, pending = await asyncio.wait(
                         [proc_done, clarification_wait, question_wait,
                          answer_wait, cancel_task],
                         timeout=WS_PLAN_TIMEOUT,
                         return_when=asyncio.FIRST_COMPLETED,
                     )
+
+                    # Cancel pending futures to avoid task leaks
+                    for fut in pending:
+                        if fut is not cancel_task:
+                            fut.cancel()
 
                     if not done:
                         # Timeout

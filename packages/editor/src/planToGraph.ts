@@ -138,20 +138,24 @@ export function planToGraph(
     };
   });
 
-  // Build edges from depends_on
+  // Build a map for O(1) node lookup by id
+  const nodesById = new Map(nodes.map((n) => [n.id, n] as const));
+
+  // Build edges from depends_on (unique prefix avoids ID collisions across plans)
   const edges: Edge[] = [];
+  const edgePrefix = `e-plan-${Date.now()}-`;
   let edgeIdx = 0;
   for (const a of agents) {
     for (const dep of a.depends_on) {
-      const srcNode = nodes.find((n) => n.id === dep);
-      const tgtNode = nodes.find((n) => n.id === a.id);
+      const srcNode = nodesById.get(dep);
+      const tgtNode = nodesById.get(a.id);
       if (!srcNode || !tgtNode) continue;
       const srcDef = (srcNode.data as ZyraNodeData).stageDef;
       const tgtDef = (tgtNode.data as ZyraNodeData).stageDef;
       const sourceHandle = srcDef.outputs[0]?.id ?? "file";
       const targetHandle = tgtDef.inputs[0]?.id ?? "file";
       edges.push({
-        id: `e-plan-${edgeIdx++}`,
+        id: `${edgePrefix}${edgeIdx++}`,
         source: dep,
         sourceHandle,
         target: a.id,

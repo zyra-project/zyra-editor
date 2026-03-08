@@ -6,7 +6,8 @@ services:
     volumes:
       - ./_work:/data
     env_file:
-      - .env
+      - path: .env
+        required: false
     environment:
       - ZYRA_VERBOSITY=debug
       - ZYRA_DATA_DIR=/data

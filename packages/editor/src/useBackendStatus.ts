@@ -41,8 +41,10 @@ export function useBackendStatus(): BackendStatus & { refresh: () => void } {
   const timerRef = useRef<ReturnType<typeof setInterval>>();
 
   const check = useCallback(async () => {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 8000);
     try {
-      const resp = await fetch("/ready", { signal: AbortSignal.timeout(8000) });
+      const resp = await fetch("/ready", { signal: controller.signal });
       if (!resp.ok) {
         setState({
           status: "offline",
@@ -85,6 +87,8 @@ export function useBackendStatus(): BackendStatus & { refresh: () => void } {
         llm_configured: false,
         lastChecked: Date.now(),
       });
+    } finally {
+      clearTimeout(timer);
     }
   }, []);
 

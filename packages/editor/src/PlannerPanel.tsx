@@ -881,7 +881,7 @@ export function PlannerPanel({
             <div style={{ color: "var(--text-muted)", fontSize: 11, lineHeight: 1.5 }}>
               {error.status
                 ? ERROR_GUIDANCE[error.status] ?? "An unexpected error occurred."
-                : ERROR_GUIDANCE.network}
+                : "An unexpected error occurred."}
             </div>
             <button
               onClick={handleGenerate}
