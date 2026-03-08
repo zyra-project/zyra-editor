@@ -236,12 +236,15 @@ export function PlannerPanel({
       }
       const data: PlanResponse = await resp.json();
 
-      // Detect if the plan is unchanged (canned/template response)
-      const oldIds = plan.agents.map((a) => `${a.stage}/${a.command}`).join(",");
-      const newIds = data.agents.map((a) => `${a.stage}/${a.command}`).join(",");
-      if (oldIds === newIds) {
+      // Detect if the plan is truly unchanged (compare full agent structure)
+      const serialize = (agents: PlanResponse["agents"]) =>
+        JSON.stringify(agents.map(({ id: _id, ...rest }) => rest));
+      if (serialize(plan.agents) === serialize(data.agents)) {
+        const warning = (data as unknown as Record<string, unknown>)._warning;
         setError({
-          message: "Refinement returned the same plan. The LLM backend may not be configured — check that OPENAI_API_KEY or OLLAMA_HOST is set in your .env file.",
+          message: typeof warning === "string" && warning
+            ? warning
+            : "Refinement returned the same plan. Try different feedback or check that the LLM backend is configured.",
           status: undefined,
         });
         return;

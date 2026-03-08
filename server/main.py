@@ -471,7 +471,7 @@ async def plan_debug():
 @app.post("/v1/plan")
 async def generate_plan(body: PlanRequest):
     """Run ``zyra plan`` as a subprocess and return the structured plan JSON."""
-    return _run_zyra_plan(body.intent, body.guardrails)
+    return await asyncio.to_thread(_run_zyra_plan, body.intent, body.guardrails)
 
 
 class PlanRefineRequest(BaseModel):
@@ -507,7 +507,7 @@ async def refine_plan(body: PlanRefineRequest):
 
     guardrails = "; ".join(guardrail_parts)
 
-    return _run_zyra_plan(refined_intent, guardrails)
+    return await asyncio.to_thread(_run_zyra_plan, refined_intent, guardrails)
 
 
 

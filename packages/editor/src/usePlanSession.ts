@@ -85,6 +85,7 @@ export function usePlanSession(): PlanSession {
     };
 
     ws.onmessage = (ev) => {
+      if (wsRef.current !== ws) return; // stale socket
       try {
         const msg = JSON.parse(ev.data);
         if (msg.keepalive) return;
@@ -124,12 +125,14 @@ export function usePlanSession(): PlanSession {
     };
 
     ws.onerror = () => {
+      if (wsRef.current !== ws) return; // stale socket
       setError("WebSocket connection failed");
       setPhase("error");
       wsRef.current = null;
     };
 
     ws.onclose = () => {
+      if (wsRef.current !== ws) return; // stale socket
       // If the socket closes while still in a non-terminal phase,
       // treat it as an error so the UI doesn't remain stuck.
       const p = phaseRef.current;

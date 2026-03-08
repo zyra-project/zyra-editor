@@ -63,6 +63,10 @@ export function planToGraph(
     manifest.stages.map((s) => [`${s.stage}/${s.command}`, s]),
   );
 
+  // Namespace agent IDs to avoid collisions when applying multiple plans
+  const ns = crypto.randomUUID().slice(0, 8);
+  const nsId = (id: string) => `${ns}-${id}`;
+
   // Compute topological depth for layout
   const depthMap = new Map<string, number>();
   const agentById = new Map(agents.map((a) => [a.id, a]));
@@ -102,7 +106,7 @@ export function planToGraph(
     const totalH = items.length * NODE_H + (items.length - 1) * PAD_Y;
     const startY = Math.max(PAD_Y, (600 - totalH) / 2);
     items.forEach((a, row) => {
-      positions.set(a.id, { x, y: startY + row * (NODE_H + PAD_Y) });
+      positions.set(nsId(a.id), { x, y: startY + row * (NODE_H + PAD_Y) });
     });
   }
 
@@ -132,9 +136,9 @@ export function planToGraph(
     }
 
     return {
-      id: a.id,
+      id: nsId(a.id),
       type: "zyra",
-      position: positions.get(a.id) ?? { x: 80, y: 80 },
+      position: positions.get(nsId(a.id)) ?? { x: 80, y: 80 },
       data: {
         stageDef,
         argValues,
@@ -151,8 +155,8 @@ export function planToGraph(
   let edgeIdx = 0;
   for (const a of agents) {
     for (const dep of a.depends_on) {
-      const srcNode = nodesById.get(dep);
-      const tgtNode = nodesById.get(a.id);
+      const srcNode = nodesById.get(nsId(dep));
+      const tgtNode = nodesById.get(nsId(a.id));
       if (!srcNode || !tgtNode) continue;
       const srcDef = (srcNode.data as ZyraNodeData).stageDef;
       const tgtDef = (tgtNode.data as ZyraNodeData).stageDef;
@@ -160,9 +164,9 @@ export function planToGraph(
       const targetHandle = tgtDef.inputs[0]?.id ?? "file";
       edges.push({
         id: `${edgePrefix}${edgeIdx++}`,
-        source: dep,
+        source: nsId(dep),
         sourceHandle,
-        target: a.id,
+        target: nsId(a.id),
         targetHandle,
         type: "smoothstep",
         style: { stroke: "var(--accent-blue)", strokeWidth: 2 },
