@@ -1158,51 +1158,20 @@ async def ws_plan(websocket: WebSocket):
                         cancel_task.cancel()
                         return
 
-                    if proc_done in done:
-                        # Process finished — break out of the loop to
-                        # drain and deliver the final output.
-                        break
-
-                    # An answer arrived for a question that already had
-                    # an input shown on the frontend (answer_ready but
-                    # no clarification or question event triggered this
-                    # iteration).  Write it directly to stdin.
-                    if (answer_wait in done
-                            and clarification_wait not in done
-                            and question_wait not in done
-                            and proc.returncode is None):
-                        answer_ready_event.clear()
-                        while not answer_queue.empty():
-                            msg = answer_queue.get_nowait()
-                            if msg.get("type") == "answer":
-                                value = msg.get("text", "")
-                                logger.debug(
-                                    "ws/plan: writing stdout-question "
-                                    "answer to stdin: %s",
-                                    value,
-                                )
-                                if proc.stdin and proc.returncode is None:
-                                    proc.stdin.write(
-                                        (value + "\n").encode("utf-8")
-                                    )
-                        if proc.stdin and proc.returncode is None:
-                            try:
-                                await proc.stdin.drain()
-                            except Exception:
-                                pass
-                        await _safe_send({
-                            "type": "status",
-                            "text": "Continuing with your answer...",
-                        })
-                        continue
+                    # ── Priority: handle pending questions/clarifications
+                    # BEFORE checking proc_done.  When the process emits a
+                    # question on stderr and then exits almost immediately,
+                    # both proc_done and question_wait fire in the same
+                    # asyncio.wait call.  We must present the question to
+                    # the user first; the answer can be merged into a
+                    # re-run or the final plan.
 
                     # A question was detected on stdout/stderr (not via
                     # "clarification needed:" on stderr).  Enrich it
                     # with manifest metadata and present it as a
                     # structured clarification card.
                     if (question_wait in done
-                            and clarification_wait not in done
-                            and proc.returncode is None):
+                            and clarification_wait not in done):
                         # Wait briefly for hint lines to arrive
                         await asyncio.sleep(0.3)
 
@@ -1291,7 +1260,7 @@ async def ws_plan(websocket: WebSocket):
                         })
                         continue
 
-                    if clarification_wait in done and proc.returncode is None:
+                    if clarification_wait in done:
                         # Also clear other events — the clarification
                         # loop below handles everything for this round.
                         answer_ready_event.clear()
@@ -1414,6 +1383,45 @@ async def ws_plan(websocket: WebSocket):
                                 proc.stdin.close()
                             break
 
+                    # ── Now check if the process finished ──
+                    if proc_done in done:
+                        # Process finished — break out of the loop to
+                        # drain and deliver the final output.
+                        break
+
+                    # An answer arrived for a question that already had
+                    # an input shown on the frontend (answer_ready but
+                    # no clarification or question event triggered this
+                    # iteration).  Write it directly to stdin.
+                    if (answer_wait in done
+                            and clarification_wait not in done
+                            and question_wait not in done
+                            and proc.returncode is None):
+                        answer_ready_event.clear()
+                        while not answer_queue.empty():
+                            msg = answer_queue.get_nowait()
+                            if msg.get("type") == "answer":
+                                value = msg.get("text", "")
+                                logger.debug(
+                                    "ws/plan: writing stdout-question "
+                                    "answer to stdin: %s",
+                                    value,
+                                )
+                                if proc.stdin and proc.returncode is None:
+                                    proc.stdin.write(
+                                        (value + "\n").encode("utf-8")
+                                    )
+                        if proc.stdin and proc.returncode is None:
+                            try:
+                                await proc.stdin.drain()
+                            except Exception:
+                                pass
+                        await _safe_send({
+                            "type": "status",
+                            "text": "Continuing with your answer...",
+                        })
+                        continue
+
                 # Process finished — cancel the cancel listener
                 cancel_task.cancel()
 
@@ -1444,10 +1452,19 @@ async def ws_plan(websocket: WebSocket):
                 # on stdout — send an explicit error so the client doesn't
                 # see a mysterious "connection closed unexpectedly".
                 logger.warning("ws/plan: process exited (code %s) without producing a plan", exit_code)
+                # Include any pending questions so the user knows what the
+                # planner was waiting for.
+                hint = ""
+                if pending_questions:
+                    qs = "; ".join(pending_questions[:3])
+                    hint = f" The planner was asking: {qs}"
+                    pending_questions.clear()
                 await _safe_send({
                     "type": "error",
-                    "text": "The planner finished without producing a plan. "
-                            "This may happen if it was waiting for input that was not detected. "
+                    "text": "The planner finished without producing a plan."
+                            + hint
+                            + " This may happen if it was waiting for input"
+                            " that was not detected. "
                             "Try rephrasing your intent or providing more detail.",
                 })
 
