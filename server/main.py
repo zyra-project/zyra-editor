@@ -8,6 +8,7 @@ Usage:
 import asyncio
 import json
 import os
+import re
 import subprocess
 from pathlib import Path
 
@@ -436,7 +437,12 @@ WS_PLAN_TIMEOUT = 120  # seconds
 WS_KEEPALIVE_INTERVAL = 15  # seconds
 
 # Heuristic: lines that look like a question from the CLI
-_QUESTION_SUFFIXES = ("?", "> ", "[y/n]", "[Y/n]", "[y/N]")
+_QUESTION_SUFFIXES = ("?", "> ", "[y/n]", "[Y/n]", "[y/N]", "]: ", "): ")
+_QUESTION_PATTERNS = re.compile(
+    r"(?:^(?:Q\d|Question|\d+[\.\)]))"  # "Q1:", "Question:", "1." or "1)"
+    r"|(?:please\s+(?:provide|specify|enter|choose|select))",  # polite prompts
+    re.IGNORECASE,
+)
 
 
 def _classify_stdout_line(line: str) -> tuple[str, str]:
@@ -454,6 +460,8 @@ def _classify_stdout_line(line: str) -> tuple[str, str]:
             pass
     # Detect clarification questions
     if any(stripped.endswith(s) for s in _QUESTION_SUFFIXES):
+        return ("question", stripped)
+    if _QUESTION_PATTERNS.search(stripped):
         return ("question", stripped)
     return ("log", stripped)
 
@@ -480,13 +488,17 @@ async def ws_plan(websocket: WebSocket):
             pass
 
     async def _read_stderr(proc: asyncio.subprocess.Process):
-        """Forward stderr lines as log messages."""
+        """Forward stderr lines as log messages, detecting questions too."""
         assert proc.stderr is not None
         try:
             async for raw in proc.stderr:
                 line = raw.decode("utf-8", errors="replace").rstrip("\n")
                 if line:
-                    await websocket.send_json({"type": "log", "text": line})
+                    kind, text = _classify_stdout_line(line)
+                    if kind == "question":
+                        await websocket.send_json({"type": "question", "text": text})
+                    else:
+                        await websocket.send_json({"type": "log", "text": text})
         except Exception:
             pass
 

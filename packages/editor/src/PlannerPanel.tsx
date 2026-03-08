@@ -84,6 +84,7 @@ export function PlannerPanel({
   const [lastFeedback, setLastFeedback] = useState("");
   const [answerText, setAnswerText] = useState("");
   const [wsMode, setWsMode] = useState(true); // true = try WebSocket, false = sync fallback
+  const [logOpen, setLogOpen] = useState(false);
 
   // Track accepted / dismissed suggestion indices
   const [acceptedIdxs, setAcceptedIdxs] = useState<Set<number>>(new Set());
@@ -279,6 +280,7 @@ export function PlannerPanel({
     setLastFeedback("");
     setError(null);
     setAnswerText("");
+    setLogOpen(false);
     onIntentChange("");
   }, [onIntentChange, session]);
 
@@ -715,6 +717,52 @@ export function PlannerPanel({
               <ChatBubble key={i} entry={entry} />
             ))}
             <div ref={chatEndRef} />
+          </div>
+        )}
+
+        {/* Session log — collapsible, persists after plan completes */}
+        {session.chat.length > 0 && plan && (
+          <div style={{ marginBottom: 8 }}>
+            <button
+              onClick={() => setLogOpen((v) => !v)}
+              style={{
+                background: "none",
+                border: "none",
+                color: "var(--text-muted)",
+                fontSize: 11,
+                cursor: "pointer",
+                padding: "4px 0",
+                fontFamily: "var(--font-sans)",
+                display: "flex",
+                alignItems: "center",
+                gap: 4,
+              }}
+            >
+              <span style={{
+                display: "inline-block",
+                fontSize: 8,
+                transition: "transform 0.15s",
+                transform: logOpen ? "rotate(90deg)" : "rotate(0deg)",
+              }}>
+                {"\u25B6"}
+              </span>
+              Session Log ({session.chat.length} entries)
+            </button>
+            {logOpen && (
+              <div style={{
+                marginTop: 4,
+                maxHeight: 200,
+                overflowY: "auto",
+                padding: "8px 10px",
+                background: "var(--bg-tertiary)",
+                border: "1px solid var(--border-default)",
+                borderRadius: "var(--radius-md)",
+              }}>
+                {session.chat.map((entry, i) => (
+                  <ChatBubble key={i} entry={entry} />
+                ))}
+              </div>
+            )}
           </div>
         )}
 
