@@ -508,6 +508,22 @@ _CLARIFICATION_CONFIRM_RE = re.compile(
 )
 
 
+# Regex to extract arg key and agent/command from question text
+# e.g. "Could you please provide the 'path' for the FTP command?"
+_QUESTION_ARG_RE = re.compile(
+    r"the\s+'(?P<arg>[^']+)'"  # 'arg' in single quotes
+)
+_QUESTION_AGENT_RE = re.compile(
+    r"for\s+(?:the\s+)?(?P<agent>\w+)\s+(?:command|step|stage|agent)",
+    re.IGNORECASE,
+)
+# Regex to parse hint lines: "hint: description (default: value)"
+_HINT_RE = re.compile(
+    r"^hint:\s*(?P<hint>.+?)(?:\s*\(default:\s*(?P<default>[^)]*)\))?\s*$",
+    re.IGNORECASE,
+)
+
+
 def _parse_clarification(detail: str) -> dict | None:
     """Parse a clarification detail string into structured data."""
     m = _CLARIFICATION_RE.search(detail)
@@ -621,6 +637,93 @@ def _lookup_arg_meta(manifest: dict, agent_id: str, arg_key: str) -> dict:
     return {}
 
 
+def _enrich_question(
+    question_text: str,
+    hint_lines: list[str],
+    manifest: dict,
+) -> dict:
+    """Convert a raw stdout/stderr question into a rich clarification item.
+
+    Extracts arg key, agent name, default, and options from the question
+    text, hint lines, and the manifest so the frontend can display a
+    structured ClarificationCard (with dropdown for enums, etc.).
+    """
+    # Try to extract arg key from single-quoted names in the question
+    arg_key = ""
+    m = _QUESTION_ARG_RE.search(question_text)
+    if m:
+        arg_key = m.group("arg")
+
+    # Try to extract agent/command name
+    agent_id = ""
+    m = _QUESTION_AGENT_RE.search(question_text)
+    if m:
+        agent_id = m.group("agent").lower()
+
+    # Parse hint lines for description and default value
+    hint_desc = ""
+    hint_default: str | None = None
+    for h in hint_lines:
+        hm = _HINT_RE.match(h)
+        if hm:
+            hint_desc = hm.group("hint") or ""
+            hint_default = hm.group("default")
+
+    # Look up manifest metadata
+    meta: dict = {}
+    if arg_key:
+        meta = _lookup_arg_meta(manifest, agent_id, arg_key)
+    if not meta and hint_desc:
+        # Try to match hint description against manifest arg labels/keys
+        hint_lower = hint_desc.lower().replace(" ", "_")
+        for stage_def in manifest.get("stages", []):
+            for arg in stage_def.get("args", []):
+                key = arg.get("key", "")
+                label = arg.get("label", "").lower().replace(" ", "_")
+                if key and (key in hint_lower or hint_lower in key):
+                    meta = arg
+                    if not arg_key:
+                        arg_key = key
+                    break
+                if label and (label in hint_lower or hint_lower in label):
+                    meta = arg
+                    if not arg_key:
+                        arg_key = arg.get("key", "")
+                    break
+            if meta:
+                break
+
+    # Determine the arg type: enum (with choices) vs string/number/etc.
+    arg_type = meta.get("type", "string")
+    options = meta.get("choices") or meta.get("options")
+    if options and isinstance(options, list) and len(options) > 0:
+        arg_type = "enum"
+
+    # Use hint default if manifest doesn't have one
+    default = meta.get("default")
+    if default is None and hint_default is not None:
+        default = hint_default
+
+    # Determine kind: "confirm" if the question mentions confirming
+    kind = "missing"
+    if "confirm" in question_text.lower():
+        kind = "confirm"
+
+    return {
+        "agent_id": agent_id or meta.get("command", ""),
+        "arg_key": arg_key or hint_desc,
+        "kind": kind,
+        "importance": "required" if kind == "missing" else "recommended",
+        "label": meta.get("label") or arg_key or hint_desc or "Answer",
+        "description": question_text,
+        "type": arg_type,
+        "placeholder": meta.get("placeholder", ""),
+        "default": default,
+        "options": options,
+        "current_value": str(default) if kind == "confirm" and default else None,
+    }
+
+
 def _classify_stdout_line(line: str) -> tuple[str, str]:
     """Classify a stdout line as 'plan', 'question', or 'log'."""
     stripped = line.strip()
@@ -672,6 +775,12 @@ async def ws_plan(websocket: WebSocket):
     # Signalled when an answer arrives (so the main loop can write it to
     # stdin even when no structured "clarification needed:" was detected).
     answer_ready_event = asyncio.Event()
+    # Buffer for questions detected on stdout/stderr (enriched with
+    # manifest metadata before being sent as clarification items).
+    pending_questions: list[str] = []
+    question_event = asyncio.Event()
+    # Recent hint lines (associated with the next/previous question)
+    recent_hints: list[str] = []
 
     async def _read_stderr(proc: asyncio.subprocess.Process):
         """Forward stderr lines as log messages, intercepting clarification notices."""
@@ -691,9 +800,21 @@ async def ws_plan(websocket: WebSocket):
                     if not clarification_event.is_set():
                         clarification_event.set()
                     continue
+                # Detect hint lines and buffer them
+                hint_m = _HINT_RE.match(line.strip())
+                if hint_m:
+                    recent_hints.append(line.strip())
+                    await websocket.send_json({"type": "log", "text": line})
+                    continue
                 kind, text = _classify_stdout_line(line)
                 if kind == "question":
-                    await websocket.send_json({"type": "question", "text": text})
+                    # Buffer the question for the main loop to enrich
+                    # with manifest metadata and send as a structured
+                    # clarification item.
+                    pending_questions.append(text)
+                    if not question_event.is_set():
+                        question_event.set()
+                    await websocket.send_json({"type": "log", "text": text})
                 else:
                     await websocket.send_json({"type": "log", "text": text})
         except Exception:
@@ -746,12 +867,23 @@ async def ws_plan(websocket: WebSocket):
                     except json.JSONDecodeError:
                         pass
 
+                # Detect hint lines and buffer them
+                hint_m = _HINT_RE.match(stripped)
+                if hint_m:
+                    recent_hints.append(stripped)
+                    await websocket.send_json({"type": "log", "text": stripped})
+                    continue
+
                 kind, text = _classify_stdout_line(line)
                 if kind == "plan":
                     data = json.loads(text)
                     await websocket.send_json({"type": "plan", "data": data})
                 elif kind == "question":
-                    await websocket.send_json({"type": "question", "text": text})
+                    # Buffer for main loop to enrich with manifest metadata
+                    pending_questions.append(text)
+                    if not question_event.is_set():
+                        question_event.set()
+                    await websocket.send_json({"type": "log", "text": text})
                 else:
                     # Check if this starts a multi-line JSON blob
                     if stripped.startswith("{"):
@@ -881,18 +1013,21 @@ async def ws_plan(websocket: WebSocket):
             try:
                 while proc.returncode is None and not cancelled:
                     # Race: process finishes vs clarification detected vs
-                    # answer arrives (for stdout questions with no
-                    # corresponding "clarification needed:" on stderr).
+                    # question detected on stdout/stderr vs answer arrives.
                     proc_done = asyncio.ensure_future(proc.wait())
                     clarification_wait = asyncio.ensure_future(
                         clarification_event.wait()
+                    )
+                    question_wait = asyncio.ensure_future(
+                        question_event.wait()
                     )
                     answer_wait = asyncio.ensure_future(
                         answer_ready_event.wait()
                     )
 
                     done, _pending = await asyncio.wait(
-                        [proc_done, clarification_wait, answer_wait, cancel_task],
+                        [proc_done, clarification_wait, question_wait,
+                         answer_wait, cancel_task],
                         timeout=WS_PLAN_TIMEOUT,
                         return_when=asyncio.FIRST_COMPLETED,
                     )
@@ -914,12 +1049,13 @@ async def ws_plan(websocket: WebSocket):
                         # drain and deliver the final output.
                         break
 
-                    # An answer arrived for a stdout/stderr question that
-                    # had no matching "clarification needed:" on stderr.
-                    # Write the answer directly to stdin so the subprocess
-                    # can continue.
+                    # An answer arrived for a question that already had
+                    # an input shown on the frontend (answer_ready but
+                    # no clarification or question event triggered this
+                    # iteration).  Write it directly to stdin.
                     if (answer_wait in done
                             and clarification_wait not in done
+                            and question_wait not in done
                             and proc.returncode is None):
                         answer_ready_event.clear()
                         while not answer_queue.empty():
@@ -946,10 +1082,106 @@ async def ws_plan(websocket: WebSocket):
                         })
                         continue
 
-                    if clarification_wait in done and proc.returncode is None:
-                        # Also clear answer_ready_event — any queued answers
-                        # will be consumed by the clarification loop below.
+                    # A question was detected on stdout/stderr (not via
+                    # "clarification needed:" on stderr).  Enrich it
+                    # with manifest metadata and present it as a
+                    # structured clarification card.
+                    if (question_wait in done
+                            and clarification_wait not in done
+                            and proc.returncode is None):
+                        # Wait briefly for hint lines to arrive
+                        await asyncio.sleep(0.3)
+
+                        batch_q = list(pending_questions)
+                        pending_questions.clear()
+                        hints = list(recent_hints)
+                        recent_hints.clear()
+                        question_event.clear()
                         answer_ready_event.clear()
+
+                        if not batch_q:
+                            continue
+
+                        manifest = await _get_cached_manifest()
+                        items: list[dict] = []
+                        for q_text in batch_q:
+                            item = _enrich_question(
+                                q_text, hints, manifest,
+                            )
+                            items.append(item)
+
+                        # Send one clarification per question and
+                        # wait for answers, then write to stdin.
+                        answers: list[dict] = []
+                        for i, item in enumerate(items):
+                            await websocket.send_json({
+                                "type": "clarification",
+                                "index": i,
+                                "total": len(items),
+                                "agent_id": item.get("agent_id", ""),
+                                "arg_key": item.get("arg_key", ""),
+                                "kind": item.get("kind", "missing"),
+                                "label": item.get("label", ""),
+                                "description": item.get(
+                                    "description", ""),
+                                "arg_type": item.get("type", "string"),
+                                "placeholder": item.get(
+                                    "placeholder", ""),
+                                "default": item.get("default"),
+                                "options": item.get("options"),
+                                "current_value": item.get(
+                                    "current_value"),
+                                "importance": item.get(
+                                    "importance", ""),
+                            })
+                            try:
+                                while True:
+                                    msg = await asyncio.wait_for(
+                                        answer_queue.get(),
+                                        timeout=WS_PLAN_TIMEOUT,
+                                    )
+                                    if msg.get("type") == "answer":
+                                        answers.append({
+                                            "agent_id": item.get(
+                                                "agent_id", ""),
+                                            "arg_key": item.get(
+                                                "arg_key", ""),
+                                            "value": msg.get(
+                                                "text", ""),
+                                        })
+                                        break
+                            except (asyncio.TimeoutError,
+                                    asyncio.CancelledError):
+                                return
+
+                        if proc.stdin and proc.returncode is None:
+                            for a in answers:
+                                value = a["value"]
+                                logger.debug(
+                                    "ws/plan: writing enriched-question "
+                                    "answer to stdin: %s=%s",
+                                    a["arg_key"], value,
+                                )
+                                proc.stdin.write(
+                                    (value + "\n").encode("utf-8")
+                                )
+                            try:
+                                await proc.stdin.drain()
+                            except Exception:
+                                pass
+
+                        await websocket.send_json({
+                            "type": "status",
+                            "text": "Continuing with your answers...",
+                        })
+                        continue
+
+                    if clarification_wait in done and proc.returncode is None:
+                        # Also clear other events — the clarification
+                        # loop below handles everything for this round.
+                        answer_ready_event.clear()
+                        question_event.clear()
+                        pending_questions.clear()
                         rounds += 1
                         # Wait briefly for more clarification lines to arrive
                         await asyncio.sleep(0.5)
