@@ -476,7 +476,6 @@ async def ws_plan(websocket: WebSocket):
       Client sends: {"type": "answer", "text": "..."} or {"type": "cancel"}
     """
     await websocket.accept()
-    proc: asyncio.subprocess.Process | None = None
 
     async def _keepalive():
         """Send periodic keepalive pings."""
@@ -487,18 +486,33 @@ async def ws_plan(websocket: WebSocket):
         except Exception:
             pass
 
+    # Shared state for clarification interception
+    clarifications: list[str] = []
+    clarification_event = asyncio.Event()
+
     async def _read_stderr(proc: asyncio.subprocess.Process):
-        """Forward stderr lines as log messages, detecting questions too."""
+        """Forward stderr lines as log messages, intercepting clarification notices."""
         assert proc.stderr is not None
         try:
             async for raw in proc.stderr:
                 line = raw.decode("utf-8", errors="replace").rstrip("\n")
-                if line:
-                    kind, text = _classify_stdout_line(line)
-                    if kind == "question":
-                        await websocket.send_json({"type": "question", "text": text})
-                    else:
-                        await websocket.send_json({"type": "log", "text": text})
+                if not line:
+                    continue
+                # Intercept "clarification needed:" lines from zyra CLI
+                if line.strip().lower().startswith("clarification needed:"):
+                    detail = line.strip().split(":", 1)[1].strip()
+                    clarifications.append(detail)
+                    await websocket.send_json({"type": "log", "text": line})
+                    # Signal that we have clarifications; use a short delay
+                    # so we can batch multiple lines that arrive together
+                    if not clarification_event.is_set():
+                        clarification_event.set()
+                    continue
+                kind, text = _classify_stdout_line(line)
+                if kind == "question":
+                    await websocket.send_json({"type": "question", "text": text})
+                else:
+                    await websocket.send_json({"type": "log", "text": text})
         except Exception:
             pass
 
@@ -566,66 +580,184 @@ async def ws_plan(websocket: WebSocket):
 
         logger.info("ws/plan: starting interactive session — intent=%.200s", intent)
 
-        try:
-            proc = await asyncio.create_subprocess_exec(
-                *cmd,
-                stdin=asyncio.subprocess.PIPE,
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE,
-            )
-        except FileNotFoundError:
-            await websocket.send_json({"type": "error", "text": "zyra CLI is not installed"})
-            await websocket.close()
-            return
+        proc: asyncio.subprocess.Process | None = None
 
-        await websocket.send_json({"type": "status", "text": "Planning started..."})
+        async def _run_plan_process(
+            cmd: list[str],
+            intent: str,
+            guardrails: str,
+        ) -> None:
+            """Run a zyra plan subprocess, intercepting clarifications.
 
-        # Launch background readers
-        keepalive_task = asyncio.create_task(_keepalive())
-        stderr_task = asyncio.create_task(_read_stderr(proc))
-        stdout_task = asyncio.create_task(_read_stdout(proc))
+            If "clarification needed:" lines appear on stderr, kills the
+            process before it auto-resolves, sends the issues as questions
+            to the client, waits for the user's answers, and restarts with
+            the answers folded into guardrails.
+            """
+            nonlocal proc, clarifications
 
-        # Listen for client messages while the process runs
-        async def _listen_client():
+            clarifications.clear()
+            clarification_event.clear()
+
             try:
-                while True:
-                    msg = await websocket.receive_json()
-                    msg_type = msg.get("type")
-                    if msg_type == "answer" and proc.stdin:
-                        text = msg.get("text", "")
-                        proc.stdin.write((text + "\n").encode("utf-8"))
-                        await proc.stdin.drain()
-                    elif msg_type == "cancel":
+                proc = await asyncio.create_subprocess_exec(
+                    *cmd,
+                    stdin=asyncio.subprocess.PIPE,
+                    stdout=asyncio.subprocess.PIPE,
+                    stderr=asyncio.subprocess.PIPE,
+                )
+            except FileNotFoundError:
+                await websocket.send_json({"type": "error", "text": "zyra CLI is not installed"})
+                return
+
+            # Launch background readers
+            nonlocal keepalive_task, stderr_task, stdout_task
+            if not keepalive_task:
+                keepalive_task = asyncio.create_task(_keepalive())
+            stderr_task = asyncio.create_task(_read_stderr(proc))
+            stdout_task = asyncio.create_task(_read_stdout(proc))
+
+            # Race: process finishes vs clarification detected
+            proc_done = asyncio.create_task(proc.wait())
+            clarification_wait = asyncio.create_task(clarification_event.wait())
+
+            # Also listen for client cancel
+            cancelled = False
+
+            async def _listen_cancel():
+                nonlocal cancelled
+                try:
+                    while True:
+                        msg = await websocket.receive_json()
+                        if msg.get("type") == "cancel":
+                            cancelled = True
+                            proc.kill()
+                            return
+                        elif msg.get("type") == "answer" and proc.stdin:
+                            # Shouldn't happen during initial run, but handle gracefully
+                            text = msg.get("text", "")
+                            proc.stdin.write((text + "\n").encode("utf-8"))
+                            await proc.stdin.drain()
+                except (WebSocketDisconnect, Exception):
+                    cancelled = True
+                    proc.kill()
+
+            cancel_task = asyncio.create_task(_listen_cancel())
+
+            try:
+                done, pending = await asyncio.wait(
+                    [proc_done, clarification_wait, cancel_task],
+                    timeout=WS_PLAN_TIMEOUT,
+                    return_when=asyncio.FIRST_COMPLETED,
+                )
+
+                if not done:
+                    # Timeout
+                    proc.kill()
+                    await websocket.send_json({"type": "error", "text": "Planning timed out"})
+                    cancel_task.cancel()
+                    return
+
+                if cancelled:
+                    cancel_task.cancel()
+                    return
+
+                if clarification_wait in done and proc.returncode is None:
+                    # Clarifications detected — wait briefly for more to arrive
+                    await asyncio.sleep(0.5)
+
+                    # Kill the process before it auto-resolves
+                    try:
                         proc.kill()
+                        await proc.wait()
+                    except Exception:
+                        pass
+
+                    cancel_task.cancel()
+
+                    # Drain remaining stderr/stdout
+                    if stderr_task:
+                        try:
+                            await asyncio.wait_for(stderr_task, timeout=2)
+                        except Exception:
+                            pass
+                    if stdout_task:
+                        try:
+                            await asyncio.wait_for(stdout_task, timeout=2)
+                        except Exception:
+                            pass
+
+                    # Send clarifications as a question to the client
+                    issues = list(clarifications)
+                    question_text = "Before I generate the plan, I need some details:\n\n" + \
+                        "\n".join(f"• {issue}" for issue in issues) + \
+                        "\n\nPlease provide the missing information."
+                    await websocket.send_json({
+                        "type": "question",
+                        "text": question_text,
+                    })
+
+                    # Wait for the user's answer
+                    try:
+                        while True:
+                            msg = await asyncio.wait_for(
+                                websocket.receive_json(),
+                                timeout=WS_PLAN_TIMEOUT,
+                            )
+                            if msg.get("type") == "cancel":
+                                return
+                            if msg.get("type") == "answer":
+                                user_answer = msg.get("text", "")
+                                break
+                    except (asyncio.TimeoutError, WebSocketDisconnect):
                         return
-            except (WebSocketDisconnect, Exception):
-                proc.kill()
 
-        client_task = asyncio.create_task(_listen_client())
+                    # Restart planning with the user's answers as guardrails
+                    new_guardrails = guardrails
+                    if new_guardrails:
+                        new_guardrails += "\n\n"
+                    new_guardrails += f"User clarifications: {user_answer}"
 
-        # Wait for process to finish (with timeout)
-        try:
-            await asyncio.wait_for(proc.wait(), timeout=WS_PLAN_TIMEOUT)
-        except asyncio.TimeoutError:
-            proc.kill()
-            await websocket.send_json({"type": "error", "text": "Planning timed out"})
+                    new_cmd = ["zyra", "plan", "--intent", intent]
+                    if new_guardrails:
+                        new_cmd += ["--guardrails", new_guardrails]
 
-        # Let stdout/stderr finish draining
-        if stdout_task:
-            await asyncio.wait_for(stdout_task, timeout=5)
-        if stderr_task:
-            await asyncio.wait_for(stderr_task, timeout=5)
+                    await websocket.send_json({
+                        "type": "status",
+                        "text": "Replanning with your answers...",
+                    })
 
-        # Cancel client listener
-        client_task.cancel()
+                    # Recurse with updated guardrails
+                    await _run_plan_process(new_cmd, intent, new_guardrails)
+                    return
 
-        exit_code = proc.returncode
-        if exit_code and exit_code != 0:
-            await websocket.send_json({
-                "type": "error",
-                "text": f"zyra plan exited with code {exit_code}",
-            })
+                # Process finished normally (no clarification intercept)
+                cancel_task.cancel()
 
+            except asyncio.CancelledError:
+                cancel_task.cancel()
+                return
+
+            # Let stdout/stderr finish draining
+            if stdout_task:
+                try:
+                    await asyncio.wait_for(stdout_task, timeout=5)
+                except Exception:
+                    pass
+            if stderr_task:
+                try:
+                    await asyncio.wait_for(stderr_task, timeout=5)
+                except Exception:
+                    pass
+
+            exit_code = proc.returncode
+            if exit_code and exit_code != 0:
+                await websocket.send_json({
+                    "type": "error",
+                    "text": f"zyra plan exited with code {exit_code}",
+                })
+
+        await _run_plan_process(cmd, intent, guardrails)
         await websocket.close()
 
     except WebSocketDisconnect:
