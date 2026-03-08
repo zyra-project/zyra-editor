@@ -113,129 +113,132 @@ export function pipelineToGraph(
     });
   }
 
+  // Build a set of step names that already have a matching control node
+  // wired from _controls, so we only reconstruct missing ones per-step.
+  const stepsWithDelayControl = new Set<string>();
+  const stepsWithCondControl = new Set<string>();
+  const stepsWithLoopControl = new Set<string>();
+  if (pipeline._controls) {
+    for (const ctrl of pipeline._controls) {
+      for (const ce of ctrl.edges) {
+        if (ctrl.stageCommand === "control/delay") stepsWithDelayControl.add(ce.targetNode);
+        if (ctrl.stageCommand === "control/conditional") stepsWithCondControl.add(ce.targetNode);
+        if (ctrl.stageCommand === "control/loop") stepsWithLoopControl.add(ce.targetNode);
+      }
+    }
+  }
+
   // Reconstruct delay control nodes from steps with delay_seconds
-  // when there is no matching delay control already in _controls.
-  const hasDelayControls = pipeline._controls?.some(
-    (c) => c.stageCommand === "control/delay",
-  );
-  if (!hasDelayControls) {
-    for (const step of pipeline.steps) {
-      if (step.delay_seconds == null || step.delay_seconds <= 0) continue;
-      let duration = step.delay_seconds;
-      let unit: string = "seconds";
-      if (duration >= 3600 && duration % 3600 === 0) {
-        duration = duration / 3600;
-        unit = "hours";
-      } else if (duration >= 60 && duration % 60 === 0) {
-        duration = duration / 60;
-        unit = "minutes";
-      }
-      const delayId = `_delay_${step.name}`;
-      nodes.push({
-        id: delayId,
-        stageCommand: "control/delay",
-        argValues: { duration, unit },
+  // when no matching delay control already targets this step.
+  for (const step of pipeline.steps) {
+    if (step.delay_seconds == null || step.delay_seconds <= 0) continue;
+    if (stepsWithDelayControl.has(step.name)) continue;
+    let duration = step.delay_seconds;
+    let unit: string = "seconds";
+    if (duration >= 3600 && duration % 3600 === 0) {
+      duration = duration / 3600;
+      unit = "hours";
+    } else if (duration >= 60 && duration % 60 === 0) {
+      duration = duration / 60;
+      unit = "minutes";
+    }
+    const delayId = `_delay_${step.name}`;
+    nodes.push({
+      id: delayId,
+      stageCommand: "control/delay",
+      argValues: { duration, unit },
+    });
+    // Wire the delay node to the target step's first arg port
+    const targetInfo = nodeMap.get(step.name);
+    if (targetInfo?.stage && targetInfo.stage.args.length > 0) {
+      edges.push({
+        sourceNode: delayId,
+        sourcePort: "delay",
+        targetNode: step.name,
+        targetPort: `arg:${targetInfo.stage.args[0].key}`,
       });
-      // Wire the delay node to the target step's first arg port
-      const targetInfo = nodeMap.get(step.name);
-      if (targetInfo?.stage && targetInfo.stage.args.length > 0) {
-        edges.push({
-          sourceNode: delayId,
-          sourcePort: "delay",
-          targetNode: step.name,
-          targetPort: `arg:${targetInfo.stage.args[0].key}`,
-        });
-      }
     }
   }
 
   // Reconstruct conditional control nodes from steps with condition
-  // when there is no matching conditional control already in _controls.
-  const hasConditionalControls = pipeline._controls?.some(
-    (c) => c.stageCommand === "control/conditional",
-  );
-  if (!hasConditionalControls) {
-    // Group steps by their condition signature (field+operator+value) to
-    // reconstruct a single conditional node per unique condition.
-    const condGroups = new Map<string, { condition: NonNullable<(typeof pipeline.steps)[0]["condition"]>; steps: string[] }>();
-    for (const step of pipeline.steps) {
-      if (!step.condition) continue;
-      const key = `${step.condition.field}|${step.condition.operator}|${step.condition.value}`;
-      if (!condGroups.has(key)) {
-        condGroups.set(key, { condition: step.condition, steps: [] });
-      }
-      condGroups.get(key)!.steps.push(step.name);
+  // when no matching conditional control already targets this step.
+  // Group steps by their condition signature (field+operator+value) to
+  // reconstruct a single conditional node per unique condition.
+  const condGroups = new Map<string, { condition: NonNullable<(typeof pipeline.steps)[0]["condition"]>; steps: string[] }>();
+  for (const step of pipeline.steps) {
+    if (!step.condition) continue;
+    if (stepsWithCondControl.has(step.name)) continue;
+    const key = `${step.condition.field}|${step.condition.operator}|${step.condition.value}`;
+    if (!condGroups.has(key)) {
+      condGroups.set(key, { condition: step.condition, steps: [] });
     }
-    let condIdx = 0;
-    for (const [, group] of condGroups) {
-      const condId = `_cond_${Date.now().toString(36)}_${condIdx++}`;
-      nodes.push({
-        id: condId,
-        stageCommand: "control/conditional",
-        argValues: {
-          field: group.condition.field,
-          operator: group.condition.operator,
-          compare_value: group.condition.value,
-        },
+    condGroups.get(key)!.steps.push(step.name);
+  }
+  let condIdx = 0;
+  for (const [, group] of condGroups) {
+    const condId = `_cond_${Date.now().toString(36)}_${condIdx++}`;
+    nodes.push({
+      id: condId,
+      stageCommand: "control/conditional",
+      argValues: {
+        field: group.condition.field,
+        operator: group.condition.operator,
+        compare_value: group.condition.value,
+      },
+    });
+    // Wire the conditional's true/false ports to the downstream steps
+    for (const stepName of group.steps) {
+      const stepCond = pipeline.steps.find((s) => s.name === stepName)?.condition;
+      if (!stepCond) continue;
+      const targetInfo = nodeMap.get(stepName);
+      const targetPort = targetInfo?.stage?.inputs[0]?.id ?? "in";
+      edges.push({
+        sourceNode: condId,
+        sourcePort: stepCond.branch,
+        targetNode: stepName,
+        targetPort,
       });
-      // Wire the conditional's true/false ports to the downstream steps
-      for (const stepName of group.steps) {
-        const stepCond = pipeline.steps.find((s) => s.name === stepName)?.condition;
-        if (!stepCond) continue;
-        const targetInfo = nodeMap.get(stepName);
-        const targetPort = targetInfo?.stage?.inputs[0]?.id ?? "in";
-        edges.push({
-          sourceNode: condId,
-          sourcePort: stepCond.branch,
-          targetNode: stepName,
-          targetPort,
-        });
-      }
     }
   }
 
   // Reconstruct loop control nodes from steps with loop
-  // when there is no matching loop control already in _controls.
-  const hasLoopControls = pipeline._controls?.some(
-    (c) => c.stageCommand === "control/loop",
-  );
-  if (!hasLoopControls) {
-    for (const step of pipeline.steps) {
-      if (!step.loop) continue;
-      const loopId = `_loop_${step.name}`;
-      const loopArgs: Record<string, string | number | boolean> = {
-        mode: step.loop.mode,
-      };
-      if (step.loop.batch_size != null) loopArgs.batch_size = step.loop.batch_size;
-      if (step.loop.range_start != null) loopArgs.range_start = step.loop.range_start;
-      if (step.loop.range_end != null) loopArgs.range_end = step.loop.range_end;
-      if (step.loop.range_step != null) loopArgs.range_step = step.loop.range_step;
-      if (step.loop.max_parallel != null) loopArgs.max_parallel = step.loop.max_parallel;
-      nodes.push({
-        id: loopId,
-        stageCommand: "control/loop",
-        argValues: loopArgs,
-      });
-      // Wire loop's "item" output to the step's first input port
-      const targetInfo = nodeMap.get(step.name);
-      const targetPort = targetInfo?.stage?.inputs[0]?.id ?? "in";
+  // when no matching loop control already targets this step.
+  for (const step of pipeline.steps) {
+    if (!step.loop) continue;
+    if (stepsWithLoopControl.has(step.name)) continue;
+    const loopId = `_loop_${step.name}`;
+    const loopArgs: Record<string, string | number | boolean> = {
+      mode: step.loop.mode,
+    };
+    if (step.loop.batch_size != null) loopArgs.batch_size = step.loop.batch_size;
+    if (step.loop.range_start != null) loopArgs.range_start = step.loop.range_start;
+    if (step.loop.range_end != null) loopArgs.range_end = step.loop.range_end;
+    if (step.loop.range_step != null) loopArgs.range_step = step.loop.range_step;
+    if (step.loop.max_parallel != null) loopArgs.max_parallel = step.loop.max_parallel;
+    nodes.push({
+      id: loopId,
+      stageCommand: "control/loop",
+      argValues: loopArgs,
+    });
+    // Wire loop's "item" output to the step's first input port
+    const targetInfo = nodeMap.get(step.name);
+    const targetPort = targetInfo?.stage?.inputs[0]?.id ?? "in";
+    edges.push({
+      sourceNode: loopId,
+      sourcePort: "item",
+      targetNode: step.name,
+      targetPort,
+    });
+    // Wire the "over" source step's output to the loop's "items" input
+    if (step.loop.over && nodeMap.has(step.loop.over)) {
+      const overInfo = nodeMap.get(step.loop.over);
+      const overPort = overInfo?.stage?.outputs[0]?.id ?? "out";
       edges.push({
-        sourceNode: loopId,
-        sourcePort: "item",
-        targetNode: step.name,
-        targetPort,
+        sourceNode: step.loop.over,
+        sourcePort: overPort,
+        targetNode: loopId,
+        targetPort: "items",
       });
-      // Wire the "over" source step's output to the loop's "items" input
-      if (step.loop.over && nodeMap.has(step.loop.over)) {
-        const overInfo = nodeMap.get(step.loop.over);
-        const overPort = overInfo?.stage?.outputs[0]?.id ?? "out";
-        edges.push({
-          sourceNode: step.loop.over,
-          sourcePort: overPort,
-          targetNode: loopId,
-          targetPort: "items",
-        });
-      }
     }
   }
 

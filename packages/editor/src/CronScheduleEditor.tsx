@@ -80,6 +80,15 @@ export function describeCron(expr: string): string {
   // Time
   if (minute === "*" && hour === "*") {
     pieces.push("Every minute");
+  } else if (minute.startsWith("*/")) {
+    const minInterval = minute.slice(2);
+    if (hour === "*") {
+      pieces.push(`Every ${minInterval} minutes`);
+    } else if (hour.startsWith("*/")) {
+      pieces.push(`Every ${minInterval} minutes, every ${hour.slice(2)} hours`);
+    } else {
+      pieces.push(`Every ${minInterval} minutes during hour ${describeField(hour, "every hour")}`);
+    }
   } else if (minute !== "*" && hour === "*") {
     pieces.push(`At :${minute.padStart(2, "0")} every hour`);
   } else if (hour.startsWith("*/")) {

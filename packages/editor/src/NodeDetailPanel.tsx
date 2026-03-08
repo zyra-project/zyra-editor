@@ -216,7 +216,8 @@ function SettingsTab({
           && argValues.var_type === "secret";
 
         // Cron schedule: replace the expression field with the visual editor
-        if (stageDef.command === "cron" && arg.key === "expression") {
+        // (unless the arg is linked from another node — then fall through to ArgField)
+        if (stageDef.command === "cron" && arg.key === "expression" && !linkedFrom) {
           return (
             <div key={arg.key} style={{ marginBottom: 14 }}>
               <label style={{

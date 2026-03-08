@@ -154,6 +154,13 @@ export function graphToPipeline(
     if (n.stageCommand !== "control/cron") continue;
     const expr = n.argValues.expression;
     if (typeof expr === "string" && expr.trim().length > 0) {
+      if (schedule) {
+        diagnostics?.push({
+          level: "warn",
+          message: `Multiple cron schedule nodes found — only the first will be used. Node "${n.id}" will be ignored.`,
+        });
+        continue;
+      }
       schedule = { cron: expr.trim() };
       const tz = n.argValues.timezone;
       if (typeof tz === "string" && tz.trim().length > 0) schedule.timezone = tz.trim();
@@ -172,7 +179,13 @@ export function graphToPipeline(
   for (const e of graph.edges) {
     const srcNode = nodeMap.get(e.sourceNode);
     if (!srcNode || srcNode.stageCommand !== "control/delay") continue;
-    if (!e.targetPort.startsWith("arg:")) continue;
+    if (!e.targetPort.startsWith("arg:")) {
+      diagnostics?.push({
+        level: "warn",
+        message: `Delay node "${e.sourceNode}" is connected to non-argument port "${e.targetPort}" on node "${e.targetNode}" — delay_seconds will not be set for this connection.`,
+      });
+      continue;
+    }
     const dur = Number(srcNode.argValues.duration);
     if (isNaN(dur) || dur <= 0) continue;
     const unit = srcNode.argValues.unit ?? "seconds";
@@ -295,6 +308,13 @@ export function graphToPipeline(
     if (isSecretVar) {
       const varName = srcNode.argValues.name;
       if (typeof varName === "string" && varName.length > 0) {
+        if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(varName)) {
+          diagnostics?.push({
+            level: "warn",
+            message: `Secret variable node "${e.sourceNode}" has an invalid name "${varName}" — environment variable names must match [A-Za-z_][A-Za-z0-9_]*. The secret value will be omitted.`,
+          });
+          continue;
+        }
         val = `\${${varName}}`;
       } else {
         diagnostics?.push({
