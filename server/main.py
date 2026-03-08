@@ -1375,14 +1375,65 @@ async def ws_plan(websocket: WebSocket):
                             )
                             items.append(item)
 
-                        # Send one clarification per question and
-                        # wait for answers, then write to stdin.
+                        # ── Auto-replay: if we already answered this
+                        # exact question (same agent_id + arg_key),
+                        # silently replay the previous answer instead
+                        # of bothering the user again.  The planner
+                        # often asks for the same arg twice (once in
+                        # the clarification round, once via input()
+                        # after FTP listing, etc.).
+                        prev_answers: dict[tuple[str, str], str] = {}
+                        for a in collected_answers:
+                            key = (a.get("agent_id", ""), a.get("arg_key", ""))
+                            if key[0] or key[1]:  # at least one must be set
+                                prev_answers[key] = a.get("value", "")
+
+                        auto_replayed: list[dict] = []
+                        remaining_items: list[dict] = []
+                        for item in items:
+                            key = (item.get("agent_id", ""), item.get("arg_key", ""))
+                            prev_val = prev_answers.get(key) if (key[0] or key[1]) else None
+                            if prev_val:
+                                logger.info(
+                                    "ws/plan: auto-replaying answer for "
+                                    "%s.%s = %s",
+                                    key[0], key[1], prev_val,
+                                )
+                                auto_replayed.append({
+                                    "agent_id": key[0],
+                                    "arg_key": key[1],
+                                    "value": prev_val,
+                                })
+                            else:
+                                remaining_items.append(item)
+
+                        # Write auto-replayed answers immediately
+                        if auto_replayed:
+                            if proc.stdin and proc.returncode is None:
+                                for a in auto_replayed:
+                                    proc.stdin.write(
+                                        (a["value"] + "\n").encode("utf-8")
+                                    )
+                                try:
+                                    await proc.stdin.drain()
+                                except Exception:
+                                    pass
+                            collected_answers.extend(auto_replayed)
+                            await _safe_send({
+                                "type": "status",
+                                "text": "Using your previous answer...",
+                            })
+                            if not remaining_items:
+                                continue
+
+                        # Send one clarification per remaining question
+                        # and wait for answers, then write to stdin.
                         answers: list[dict] = []
-                        for i, item in enumerate(items):
+                        for i, item in enumerate(remaining_items):
                             await _safe_send({
                                 "type": "clarification",
                                 "index": i,
-                                "total": len(items),
+                                "total": len(remaining_items),
                                 "agent_id": item.get("agent_id", ""),
                                 "arg_key": item.get("arg_key", ""),
                                 "kind": item.get("kind", "missing"),
