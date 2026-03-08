@@ -755,10 +755,13 @@ async def ws_plan(websocket: WebSocket):
 
         proc: asyncio.subprocess.Process | None = None
 
+        MAX_CLARIFICATION_ROUNDS = 2
+
         async def _run_plan_process(
             cmd: list[str],
             intent: str,
             guardrails: str,
+            _depth: int = 0,
         ) -> None:
             """Run a zyra plan subprocess, intercepting clarifications.
 
@@ -934,12 +937,14 @@ async def ws_plan(websocket: WebSocket):
                         except (asyncio.TimeoutError, WebSocketDisconnect):
                             return
 
-                    # Build guardrails from collected answers
+                    # Build guardrails from collected answers — use an
+                    # explicit directive format so the LLM sets the values.
                     answer_lines = []
                     for a in answers:
                         if a["agent_id"] and a["arg_key"]:
                             answer_lines.append(
-                                f"Agent '{a['agent_id']}' argument '{a['arg_key']}' = {a['value']}"
+                                f"IMPORTANT: For agent '{a['agent_id']}', "
+                                f"set argument '{a['arg_key']}' to: {a['value']}"
                             )
                         else:
                             answer_lines.append(a["value"])
@@ -947,11 +952,21 @@ async def ws_plan(websocket: WebSocket):
                     new_guardrails = guardrails
                     if new_guardrails:
                         new_guardrails += "\n\n"
-                    new_guardrails += "User clarifications:\n" + "\n".join(answer_lines)
+                    new_guardrails += (
+                        "The user has provided the following required values. "
+                        "Use them exactly as given — do NOT ask for clarification "
+                        "on these arguments again:\n"
+                        + "\n".join(answer_lines)
+                    )
 
+                    next_depth = _depth + 1
                     new_cmd = ["zyra", "plan", "--intent", intent]
                     if new_guardrails:
                         new_cmd += ["--guardrails", new_guardrails]
+                    # On the last allowed attempt, disable clarification to
+                    # prevent an infinite loop.
+                    if next_depth >= MAX_CLARIFICATION_ROUNDS:
+                        new_cmd.append("--no-clarify")
 
                     await websocket.send_json({
                         "type": "status",
@@ -959,7 +974,9 @@ async def ws_plan(websocket: WebSocket):
                     })
 
                     # Recurse with updated guardrails
-                    await _run_plan_process(new_cmd, intent, new_guardrails)
+                    await _run_plan_process(
+                        new_cmd, intent, new_guardrails, _depth=next_depth,
+                    )
                     return
 
                 # Process finished normally (no clarification intercept)
