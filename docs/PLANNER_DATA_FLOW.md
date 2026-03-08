@@ -122,16 +122,20 @@ Key behaviors:
 
 ## Scope Instruction
 
-The zyra CLI's LLM planner tends to generate overly ambitious pipelines — e.g. adding visualization, narration, and video composition steps when the user only asked to download data. The editor server appends a **scope instruction** to the intent before passing it to `zyra plan`:
+The zyra CLI's LLM planner tends to generate overly ambitious pipelines — e.g. adding visualization, narration, and video composition steps when the user only asked to download data. The editor server appends a **scope instruction** to the intent before passing it to `zyra plan`. The instruction uses a stage-based approach: it tells the LLM to first identify which zyra stages are needed, then only generate agents from those stages:
 
 ```
-IMPORTANT: Generate ONLY the minimum steps directly required to fulfill
-this request. Do NOT add visualization, narration, video composition, or
-other downstream steps unless the user explicitly asked for them.
+IMPORTANT: Before generating agents, first identify which zyra stages
+(e.g. acquire, process, visualize, narrate, verify, compose) are actually
+required to fulfill this request. Then generate agents ONLY from those
+stages. Do NOT include agents from stages the user did not ask for.
+For example, if the user asks to download data, only use 'acquire' stage
+agents — do not add 'visualize', 'narrate', or 'compose' stages unless
+explicitly requested.
 ```
 
 This is configurable via the `ZYRA_PLAN_SCOPE` environment variable:
-- Default: the instruction above
+- Default: the stage-based instruction above
 - Set to empty string (`ZYRA_PLAN_SCOPE=""`) to disable and get the planner's full output
 - Set to custom text to override the default instruction
 

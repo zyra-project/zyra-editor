@@ -346,10 +346,13 @@ logger = logging.getLogger("zyra-editor.plan")
 # the steps the user actually asked for.  Override or disable via the
 # ZYRA_PLAN_SCOPE env var (set to empty string to disable).
 _DEFAULT_PLAN_SCOPE = (
-    "\n\nIMPORTANT: Generate ONLY the minimum steps directly required "
-    "to fulfill this request. Do NOT add visualization, narration, "
-    "video composition, or other downstream steps unless the user "
-    "explicitly asked for them. Keep the plan focused and minimal."
+    "\n\nIMPORTANT: Before generating agents, first identify which zyra "
+    "stages (e.g. acquire, process, visualize, narrate, verify, compose) "
+    "are actually required to fulfill this request. Then generate agents "
+    "ONLY from those stages. Do NOT include agents from stages the user "
+    "did not ask for. For example, if the user asks to download data, "
+    "only use 'acquire' stage agents — do not add 'visualize', 'narrate', "
+    "or 'compose' stages unless explicitly requested."
 )
 PLAN_SCOPE = os.environ.get("ZYRA_PLAN_SCOPE", _DEFAULT_PLAN_SCOPE)
 
