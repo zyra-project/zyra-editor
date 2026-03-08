@@ -149,51 +149,6 @@ export function Toolbar({
         Plan
       </button>
 
-      {/* AI Status indicator */}
-      <div style={{ position: "relative" }} data-status-toggle>
-        <button
-          onClick={() => setStatusPopoverOpen((v) => !v)}
-          title={`AI Status: ${backendStatus.status}`}
-          style={{
-            background: "none",
-            border: "1px solid var(--border-default)",
-            borderRadius: "var(--radius-md)",
-            color: "var(--text-secondary)",
-            cursor: "pointer",
-            padding: "4px 8px",
-            fontSize: 11,
-            lineHeight: 1,
-            display: "flex",
-            alignItems: "center",
-            gap: 5,
-            fontFamily: "var(--font-sans)",
-            fontWeight: 500,
-          }}
-        >
-          <span style={{
-            display: "inline-block",
-            width: 8,
-            height: 8,
-            borderRadius: "50%",
-            background:
-              backendStatus.status === "ready" ? "var(--accent-green)"
-              : backendStatus.status === "degraded" ? "var(--accent-yellow)"
-              : backendStatus.status === "checking" ? "var(--text-muted)"
-              : "var(--accent-red)",
-          }} />
-          {backendStatus.status === "ready" ? "AI Ready"
-            : backendStatus.status === "degraded" ? "Degraded"
-            : backendStatus.status === "checking" ? "Checking..."
-            : "Offline"}
-        </button>
-        {statusPopoverOpen && (
-          <StatusPopover
-            status={backendStatus}
-            onClose={() => setStatusPopoverOpen(false)}
-          />
-        )}
-      </div>
-
       {/* Spacer */}
       <div style={{ flex: 1 }} />
 
@@ -242,6 +197,51 @@ export function Toolbar({
         <span style={{ fontSize: 14 }}>{"\u21A7"}</span>
         Export
       </button>
+
+      {/* AI Status indicator */}
+      <div style={{ position: "relative" }} data-status-toggle>
+        <button
+          onClick={() => setStatusPopoverOpen((v) => !v)}
+          title={`AI Status: ${backendStatus.status}`}
+          style={{
+            background: "none",
+            border: "1px solid var(--border-default)",
+            borderRadius: "var(--radius-md)",
+            color: "var(--text-secondary)",
+            cursor: "pointer",
+            padding: "4px 8px",
+            fontSize: 11,
+            lineHeight: 1,
+            display: "flex",
+            alignItems: "center",
+            gap: 5,
+            fontFamily: "var(--font-sans)",
+            fontWeight: 500,
+          }}
+        >
+          <span style={{
+            display: "inline-block",
+            width: 8,
+            height: 8,
+            borderRadius: "50%",
+            background:
+              backendStatus.status === "ready" ? "var(--accent-green)"
+              : backendStatus.status === "degraded" ? "var(--accent-yellow)"
+              : backendStatus.status === "checking" ? "var(--text-muted)"
+              : "var(--accent-red)",
+          }} />
+          {backendStatus.status === "ready" ? "AI Ready"
+            : backendStatus.status === "degraded" ? "Degraded"
+            : backendStatus.status === "checking" ? "Checking..."
+            : "Offline"}
+        </button>
+        {statusPopoverOpen && (
+          <StatusPopover
+            status={backendStatus}
+            onClose={() => setStatusPopoverOpen(false)}
+          />
+        )}
+      </div>
 
       {/* Help */}
       <button
