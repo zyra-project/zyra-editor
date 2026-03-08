@@ -913,6 +913,7 @@ function Editor() {
           onConnect={onConnect}
           onNodeDragStop={onNodeDragStop}
           onNodeClick={handleNodeClick}
+          onEdgeClick={() => setSelectedNodeId(null)}
           onPaneClick={() => setSelectedNodeId(null)}
           onDragOver={onDragOver}
           onDrop={onDrop}
@@ -922,10 +923,12 @@ function Editor() {
           panOnDrag
           selectionOnDrag={false}
           proOptions={{ hideAttribution: true }}
+          deleteKeyCode={["Backspace", "Delete"]}
           defaultEdgeOptions={{
             type: "smoothstep",
             style: { stroke: "var(--accent-blue)", strokeWidth: 2 },
             animated: exec.running,
+            interactionWidth: 20,
           }}
           style={{ width: "100%", height: "100%" }}
         >
