@@ -1065,10 +1065,13 @@ async def ws_plan(websocket: WebSocket):
                         return_when=asyncio.FIRST_COMPLETED,
                     )
 
-                    # Cancel pending futures to avoid task leaks
-                    for fut in pending:
-                        if fut is not cancel_task:
-                            fut.cancel()
+                    # Cancel pending futures and await them to avoid
+                    # "Task was destroyed but it is pending" warnings.
+                    to_cancel = [fut for fut in pending if fut is not cancel_task]
+                    for fut in to_cancel:
+                        fut.cancel()
+                    if to_cancel:
+                        await asyncio.gather(*to_cancel, return_exceptions=True)
 
                     if not done:
                         # Timeout

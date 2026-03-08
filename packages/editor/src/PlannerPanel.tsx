@@ -94,6 +94,13 @@ export function PlannerPanel({
   const timerRef = useRef<ReturnType<typeof setInterval>>();
   const chatEndRef = useRef<HTMLDivElement>(null);
 
+  // Refs to avoid stale closures in effects that react to session changes
+  const intentRef = useRef(intent);
+  intentRef.current = intent;
+  const onHistoryAddRef = useRef(onHistoryAdd);
+  onHistoryAddRef.current = onHistoryAdd;
+  const handleSyncGenerateRef = useRef<() => void>(() => {});
+
   // Interactive WebSocket planning session
   const session = usePlanSession();
 
@@ -102,9 +109,9 @@ export function PlannerPanel({
     if (session.plan) {
       setPlan(session.plan);
       setLoading(false);
-      onHistoryAdd({ intent: intent.trim(), plan: session.plan, timestamp: Date.now() });
+      onHistoryAddRef.current({ intent: intentRef.current.trim(), plan: session.plan, timestamp: Date.now() });
     }
-  }, [session.plan]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [session.plan]);
 
   // When WebSocket errors, fall back to sync mode
   useEffect(() => {
@@ -113,7 +120,7 @@ export function PlannerPanel({
       if (session.chat.length <= 1) {
         setWsMode(false);
         // Automatically retry with sync
-        handleSyncGenerate();
+        handleSyncGenerateRef.current();
       } else {
         // Map known WS error messages to status codes for correct guidance
         const status = session.error.toLowerCase().includes("timed out") ? 504 : undefined;
@@ -121,7 +128,7 @@ export function PlannerPanel({
         setLoading(false);
       }
     }
-  }, [session.phase, session.error]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [session.phase, session.error, session.chat.length]);
 
   // Auto-scroll chat
   useEffect(() => {
@@ -190,6 +197,7 @@ export function PlannerPanel({
       abortRef.current = null;
     }
   }, [intent, onHistoryAdd]);
+  handleSyncGenerateRef.current = handleSyncGenerate;
 
   /** Primary generate: try WebSocket (interactive) first, sync fallback. */
   const handleGenerate = useCallback(() => {
