@@ -24,12 +24,9 @@ if _env_file.exists():
             line = line.strip()
             if not line or line.startswith("#"):
                 continue
-            # Allow optional leading 'export'
-            if line.startswith("export"):
-                parts = line.split(None, 1)
-                if len(parts) < 2:
-                    continue
-                line = parts[1].lstrip()
+            # Allow optional leading 'export ' (must be followed by whitespace)
+            if line.startswith("export ") or line.startswith("export\t"):
+                line = line[6:].lstrip()
             if "=" not in line:
                 continue
             key, _, raw_val = line.partition("=")

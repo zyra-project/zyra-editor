@@ -179,13 +179,8 @@ export function graphToPipeline(
   for (const e of graph.edges) {
     const srcNode = nodeMap.get(e.sourceNode);
     if (!srcNode || srcNode.stageCommand !== "control/delay") continue;
-    if (!e.targetPort.startsWith("arg:")) {
-      diagnostics?.push({
-        level: "warn",
-        message: `Delay node "${e.sourceNode}" is connected to non-argument port "${e.targetPort}" on node "${e.targetNode}" — delay_seconds will not be set for this connection.`,
-      });
-      continue;
-    }
+    // Apply delay to the target step regardless of port type — delay is a
+    // step-level concept, not tied to a specific argument.
     const dur = Number(srcNode.argValues.duration);
     if (isNaN(dur) || dur <= 0) continue;
     const unit = srcNode.argValues.unit ?? "seconds";
@@ -212,9 +207,17 @@ export function graphToPipeline(
       });
       continue;
     }
+    const validOperators = new Set(["==", "!=", ">", "<", ">=", "<=", "contains", "matches"]);
+    const op = typeof operator === "string" && validOperators.has(operator) ? operator as StepCondition["operator"] : undefined;
+    if (!op) {
+      diagnostics?.push({
+        level: "warn",
+        message: `Conditional node "${e.sourceNode}" has an invalid operator "${String(operator)}" — defaulting to "==".`,
+      });
+    }
     conditionMap.set(e.targetNode, {
       field,
-      operator: (operator as StepCondition["operator"]) ?? "==",
+      operator: op ?? "==",
       value: String(compareValue ?? ""),
       branch: e.sourcePort as "true" | "false",
     });
@@ -234,7 +237,14 @@ export function graphToPipeline(
     if (loopMap.has(e.targetNode)) continue;
 
     const mode = srcNode.argValues.mode;
-    if (!mode) continue;
+    const validModes = new Set(["each", "batch", "range"]);
+    if (!mode || !validModes.has(String(mode))) {
+      diagnostics?.push({
+        level: "warn",
+        message: `Loop node "${srcNode.id}" has an invalid mode "${String(mode ?? "")}" — loop will be omitted.`,
+      });
+      continue;
+    }
 
     // Find what provides items to the loop node (edge into the loop's "items" input)
     let over: string | undefined;
@@ -331,6 +341,31 @@ export function graphToPipeline(
     inlinedArgs.get(e.targetNode)!.set(argKey, val);
   }
 
+  // ── Derive transitive dependencies through control nodes ────────
+  // When step A → control node → step B, step B should depend on step A.
+  // Build a map: control node ID → set of non-control source step IDs feeding into it.
+  const controlInputSteps = new Map<string, Set<string>>();
+  for (const e of graph.edges) {
+    if (!controlNodeIds.has(e.targetNode)) continue;
+    if (controlNodeIds.has(e.sourceNode)) continue; // skip control→control
+    if (!controlInputSteps.has(e.targetNode)) controlInputSteps.set(e.targetNode, new Set());
+    controlInputSteps.get(e.targetNode)!.add(e.sourceNode);
+  }
+
+  // Collect transitive edges: for each control→step edge, add dependencies
+  // from the control node's upstream steps to the downstream step.
+  const transitiveDeps = new Map<string, Set<string>>();
+  for (const e of graph.edges) {
+    if (!controlNodeIds.has(e.sourceNode)) continue;
+    if (controlNodeIds.has(e.targetNode)) continue; // skip control→control
+    const upstreamSteps = controlInputSteps.get(e.sourceNode);
+    if (!upstreamSteps || upstreamSteps.size === 0) continue;
+    if (!transitiveDeps.has(e.targetNode)) transitiveDeps.set(e.targetNode, new Set());
+    for (const dep of upstreamSteps) {
+      transitiveDeps.get(e.targetNode)!.add(dep);
+    }
+  }
+
   // Filter out control-node edges from the graph for topo sort and depends_on
   const nonControlEdges = graph.edges.filter(
     (e) => !controlNodeIds.has(e.sourceNode) && !controlNodeIds.has(e.targetNode),
@@ -352,6 +387,19 @@ export function graphToPipeline(
     children.get(e.sourceNode)!.push(e.targetNode);
     parentMap.get(e.targetNode)!.push(e.sourceNode);
     inDegree.set(e.targetNode, (inDegree.get(e.targetNode) ?? 0) + 1);
+  }
+
+  // Inject transitive dependencies from control nodes (step A → cond/loop → step B)
+  for (const [targetId, deps] of transitiveDeps) {
+    if (!parentMap.has(targetId)) continue;
+    const existing = new Set(parentMap.get(targetId));
+    for (const dep of deps) {
+      if (!existing.has(dep) && inDegree.has(dep)) {
+        parentMap.get(targetId)!.push(dep);
+        children.get(dep)!.push(targetId);
+        inDegree.set(targetId, (inDegree.get(targetId) ?? 0) + 1);
+      }
+    }
   }
 
   // Kahn's algorithm
