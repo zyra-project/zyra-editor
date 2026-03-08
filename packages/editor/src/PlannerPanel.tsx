@@ -79,6 +79,7 @@ export function PlannerPanel({
   const [error, setError] = useState<{ message: string; status?: number | string } | null>(null);
   const [plan, setPlan] = useState<PlanResponse | null>(null);
   const [editableAgents, setEditableAgents] = useState<PlanAgent[]>([]);
+  const [expandedAgentId, setExpandedAgentId] = useState<string | null>(null);
   const [historyOpen, setHistoryOpen] = useState(false);
   const [feedback, setFeedback] = useState("");
   const [lastFeedback, setLastFeedback] = useState("");
@@ -206,6 +207,7 @@ export function PlannerPanel({
     setError(null);
     setPlan(null);
     setEditableAgents([]);
+    setExpandedAgentId(null);
     setAcceptedIdxs(new Set());
     setDismissedIdxs(new Set());
     setFeedback("");
@@ -953,6 +955,12 @@ export function PlannerPanel({
                 agent={agent}
                 index={idx}
                 total={editableAgents.length}
+                expanded={expandedAgentId === agent.id}
+                onToggle={() =>
+                  setExpandedAgentId((prev) =>
+                    prev === agent.id ? null : agent.id,
+                  )
+                }
                 onRemove={() => handleRemoveAgent(agent.id)}
                 onMoveUp={() => handleMoveAgent(idx, -1)}
                 onMoveDown={() => handleMoveAgent(idx, 1)}
@@ -1093,6 +1101,8 @@ function AgentCard({
   agent,
   index,
   total,
+  expanded,
+  onToggle,
   onRemove,
   onMoveUp,
   onMoveDown,
@@ -1100,26 +1110,58 @@ function AgentCard({
   agent: PlanAgent;
   index: number;
   total: number;
+  expanded: boolean;
+  onToggle: () => void;
   onRemove: () => void;
   onMoveUp: () => void;
   onMoveDown: () => void;
 }) {
   const [hovered, setHovered] = useState(false);
+  const argEntries = Object.entries(agent.args).filter(
+    ([, v]) => v !== "" && v !== undefined && v !== null,
+  );
+  const hasArgs = argEntries.length > 0;
+
   return (
     <div
       style={{
-        padding: "6px 10px",
         marginBottom: 4,
         background: "var(--bg-tertiary)",
-        border: "1px solid var(--border-default)",
+        border: expanded
+          ? "1px solid var(--border-strong)"
+          : "1px solid var(--border-default)",
         borderRadius: "var(--radius-md)",
         fontSize: 11,
         color: "var(--text-secondary)",
+        cursor: "pointer",
+        transition: "border-color 0.15s",
       }}
       onMouseEnter={() => setHovered(true)}
       onMouseLeave={() => setHovered(false)}
     >
-      <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+      {/* Header row */}
+      <div
+        style={{
+          display: "flex",
+          alignItems: "center",
+          gap: 6,
+          padding: "6px 10px",
+        }}
+        onClick={onToggle}
+      >
+        <span
+          style={{
+            fontSize: 8,
+            color: "var(--text-muted)",
+            transition: "transform 0.15s",
+            transform: expanded ? "rotate(90deg)" : "rotate(0deg)",
+            display: "inline-block",
+            width: 10,
+            flexShrink: 0,
+          }}
+        >
+          {"\u25B6"}
+        </span>
         <StageBadge stage={agent.stage} />
         <span style={{ fontWeight: 600, color: "var(--text-primary)" }}>
           {agent.command}
@@ -1128,7 +1170,10 @@ function AgentCard({
           {agent.id}
         </span>
         {hovered && (
-          <div style={{ display: "flex", gap: 2, flexShrink: 0 }}>
+          <div
+            style={{ display: "flex", gap: 2, flexShrink: 0 }}
+            onClick={(e) => e.stopPropagation()}
+          >
             <button
               onClick={onMoveUp}
               disabled={index === 0}
@@ -1179,9 +1224,66 @@ function AgentCard({
           </div>
         )}
       </div>
+
+      {/* Dependency line (always visible) */}
       {agent.depends_on.length > 0 && (
-        <div style={{ fontSize: 10, color: "var(--text-muted)", marginTop: 3 }}>
+        <div style={{ fontSize: 10, color: "var(--text-muted)", padding: "0 10px 4px 26px" }}>
           depends on: {agent.depends_on.join(", ")}
+        </div>
+      )}
+
+      {/* Expanded args detail */}
+      {expanded && (
+        <div
+          style={{
+            borderTop: "1px solid var(--border-default)",
+            padding: "6px 10px 8px 26px",
+          }}
+        >
+          {hasArgs ? (
+            <table style={{ width: "100%", borderCollapse: "collapse" }}>
+              <tbody>
+                {argEntries.map(([key, val]) => {
+                  // Strip leading dashes from flag-style keys
+                  const displayKey = key.replace(/^-+/, "");
+                  const isLong = typeof val === "string" && val.length > 40;
+                  return (
+                    <tr key={key}>
+                      <td
+                        style={{
+                          fontSize: 10,
+                          color: "var(--accent-blue)",
+                          fontFamily: "var(--font-mono)",
+                          padding: "2px 8px 2px 0",
+                          verticalAlign: "top",
+                          whiteSpace: "nowrap",
+                          userSelect: "all",
+                        }}
+                      >
+                        {displayKey}
+                      </td>
+                      <td
+                        style={{
+                          fontSize: 10,
+                          color: "var(--text-primary)",
+                          fontFamily: "var(--font-mono)",
+                          padding: "2px 0",
+                          wordBreak: isLong ? "break-all" : "normal",
+                          userSelect: "all",
+                        }}
+                      >
+                        {val}
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          ) : (
+            <div style={{ fontSize: 10, color: "var(--text-muted)", fontStyle: "italic" }}>
+              No arguments configured
+            </div>
+          )}
         </div>
       )}
     </div>
