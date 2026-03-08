@@ -387,8 +387,8 @@ function StatusPopover({
   // Close on outside click
   useEffect(() => {
     const handler = (e: MouseEvent) => {
-      const target = e.target as HTMLElement | null;
-      if (!target) return;
+      const target = e.target;
+      if (!(target instanceof Element)) return;
       if (
         target.closest("[data-status-popover]") ||
         target.closest("[data-status-toggle]")

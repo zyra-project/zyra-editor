@@ -752,7 +752,7 @@ def _enrich_question(
         "placeholder": meta.get("placeholder", ""),
         "default": default,
         "options": options,
-        "current_value": str(default) if kind == "confirm" and default else None,
+        "current_value": str(default) if kind == "confirm" and default is not None and default != "" else None,
     }
 
 

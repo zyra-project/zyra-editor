@@ -147,7 +147,7 @@ export function planToGraph(
 
   // Build edges from depends_on (unique prefix avoids ID collisions across plans)
   const edges: Edge[] = [];
-  const edgePrefix = `e-plan-${Date.now()}-`;
+  const edgePrefix = `e-plan-${crypto.randomUUID()}-`;
   let edgeIdx = 0;
   for (const a of agents) {
     for (const dep of a.depends_on) {

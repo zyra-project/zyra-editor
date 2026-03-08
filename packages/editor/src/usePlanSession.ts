@@ -51,6 +51,8 @@ export function usePlanSession(): PlanSession {
   const [error, setError] = useState<string | null>(null);
   const [clarification, setClarification] = useState<ClarificationItem | null>(null);
   const wsRef = useRef<WebSocket | null>(null);
+  const phaseRef = useRef<PlanPhase>(phase);
+  phaseRef.current = phase;
 
   const appendChat = useCallback((role: ChatEntry["role"], text: string) => {
     setChat((prev) => [...prev, { role, text, timestamp: Date.now() }]);
@@ -128,6 +130,13 @@ export function usePlanSession(): PlanSession {
     };
 
     ws.onclose = () => {
+      // If the socket closes while still in a non-terminal phase,
+      // treat it as an error so the UI doesn't remain stuck.
+      const p = phaseRef.current;
+      if (p !== "done" && p !== "idle" && p !== "error") {
+        setError("WebSocket connection closed unexpectedly");
+        setPhase("error");
+      }
       wsRef.current = null;
     };
   }, [cleanup, appendChat]);
