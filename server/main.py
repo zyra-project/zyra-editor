@@ -526,45 +526,54 @@ def _parse_clarification(detail: str) -> dict | None:
     return None
 
 
-def _get_cached_manifest() -> dict:
-    """Fetch the manifest, trying the local HTTP endpoint then CLI fallback."""
-    if not hasattr(_get_cached_manifest, "_cache") or not _get_cached_manifest._cache.get("stages"):
-        _get_cached_manifest._cache = {"version": "1.0", "stages": []}
+def _get_cached_manifest_sync() -> dict:
+    """Fetch the manifest (sync helper — must NOT be called from the event loop).
 
-        # Strategy 1: call our own /v1/commands endpoint
-        port = int(os.environ.get("PORT", "8765"))
-        try:
-            resp = http_requests.get(
-                f"http://127.0.0.1:{port}/v1/commands",
-                timeout=10,
-            )
-            resp.raise_for_status()
-            data = resp.json()
+    Tries the local /v1/commands HTTP endpoint first, then the zyra CLI.
+    """
+    port = int(os.environ.get("PORT", "8765"))
+    try:
+        resp = http_requests.get(
+            f"http://127.0.0.1:{port}/v1/commands",
+            timeout=10,
+        )
+        resp.raise_for_status()
+        data = resp.json()
+        manifest = _commands_to_manifest(data.get("commands", {}))
+        if manifest.get("stages"):
+            logger.debug("Manifest from /v1/commands (%d stages)",
+                         len(manifest["stages"]))
+            return manifest
+    except Exception as exc:
+        logger.debug("Failed to fetch /v1/commands: %s", exc)
+
+    # Fallback: call zyra CLI directly
+    try:
+        result = subprocess.run(
+            ["zyra", "commands", "--json"],
+            capture_output=True, text=True, timeout=30,
+        )
+        if result.returncode == 0:
+            data = json.loads(result.stdout)
             manifest = _commands_to_manifest(data.get("commands", {}))
             if manifest.get("stages"):
-                _get_cached_manifest._cache = manifest
-                logger.debug("Cached manifest from /v1/commands (%d stages)",
+                logger.debug("Manifest from zyra CLI (%d stages)",
                              len(manifest["stages"]))
-                return _get_cached_manifest._cache
-        except Exception as exc:
-            logger.debug("Failed to fetch /v1/commands: %s", exc)
+                return manifest
+    except Exception as exc:
+        logger.debug("Failed to run zyra commands --json: %s", exc)
 
-        # Strategy 2: call zyra CLI directly
-        try:
-            result = subprocess.run(
-                ["zyra", "commands", "--json"],
-                capture_output=True, text=True, timeout=30,
-            )
-            if result.returncode == 0:
-                data = json.loads(result.stdout)
-                manifest = _commands_to_manifest(data.get("commands", {}))
-                if manifest.get("stages"):
-                    _get_cached_manifest._cache = manifest
-                    logger.debug("Cached manifest from zyra CLI (%d stages)",
-                                 len(manifest["stages"]))
-        except Exception as exc:
-            logger.debug("Failed to run zyra commands --json: %s", exc)
+    return {"version": "1.0", "stages": []}
 
+
+async def _get_cached_manifest() -> dict:
+    """Return the cached manifest, fetching it in a threadpool if needed.
+
+    Uses asyncio.to_thread so the sync HTTP self-call doesn't deadlock
+    the event loop that uvicorn is also using to serve /v1/commands.
+    """
+    if not hasattr(_get_cached_manifest, "_cache") or not _get_cached_manifest._cache.get("stages"):
+        _get_cached_manifest._cache = await asyncio.to_thread(_get_cached_manifest_sync)
     return _get_cached_manifest._cache
 
 
@@ -852,7 +861,7 @@ async def ws_plan(websocket: WebSocket):
                             pass
 
                     # Parse clarifications and enrich with manifest metadata
-                    manifest = _get_cached_manifest()
+                    manifest = await _get_cached_manifest()
                     parsed_items: list[dict] = []
                     for detail in clarifications:
                         parsed = _parse_clarification(detail)
