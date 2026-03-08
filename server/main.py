@@ -921,7 +921,16 @@ async def ws_plan(websocket: WebSocket):
                             plan_sent = True
                             continue
                     except json.JSONDecodeError:
-                        pass
+                        # Incomplete JSON (multi-line plan) — the prompt
+                        # text (e.g. "Provide value for 'path': ") is
+                        # glued to the start of the JSON blob because
+                        # input() doesn't write a newline.  Start the
+                        # json_buffer and skip question classification
+                        # to avoid a spurious duplicate question.
+                        if prefix:
+                            await _safe_send({"type": "log", "text": prefix})
+                        json_buffer = maybe_json
+                        continue
 
                 # Detect hint lines and buffer them
                 hint_m = _HINT_RE.match(stripped)
@@ -941,21 +950,10 @@ async def ws_plan(websocket: WebSocket):
                     if not question_event.is_set():
                         question_event.set()
                     await _safe_send({"type": "log", "text": text})
-                    # If a question line also contains the start of a JSON
-                    # blob (e.g. input() prompt glued to multi-line plan
-                    # output), start the json_buffer so the plan isn't lost.
-                    if json_start > 0 and stripped[json_start:].startswith("{"):
-                        json_buffer = stripped[json_start:]
                 else:
                     # Check if this starts a multi-line JSON blob
                     if stripped.startswith("{"):
                         json_buffer = line
-                    elif json_start > 0 and stripped[json_start:].startswith("{"):
-                        # Prompt text followed by start of multi-line JSON
-                        prefix = stripped[:json_start].strip()
-                        if prefix:
-                            await _safe_send({"type": "log", "text": prefix})
-                        json_buffer = stripped[json_start:]
                     else:
                         await _safe_send({"type": "log", "text": text})
         except Exception:
