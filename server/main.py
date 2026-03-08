@@ -402,7 +402,10 @@ def _run_zyra_plan(intent: str, guardrails: str = "") -> dict:
         logger.debug("zyra plan stdout:\n%s", result.stdout[:2000])
 
     if result.returncode != 0:
-        raise HTTPException(status_code=400, detail=result.stderr.strip())
+        stderr_text = (result.stderr or "").strip()
+        if len(stderr_text) > 1000:
+            stderr_text = f"...(truncated)...\n{stderr_text[-1000:]}"
+        raise HTTPException(status_code=400, detail=stderr_text)
     try:
         data = json.loads(result.stdout)
     except json.JSONDecodeError:
@@ -851,6 +854,53 @@ async def ws_plan(websocket: WebSocket):
     _stdout_lines: list[str] = []
     _STDERR_TAIL_SIZE = 30
 
+    # Accumulate all clarification answers across rounds so we can
+    # merge them into the final plan if the CLI omits them.
+    # Defined at ws_plan scope so _read_stderr/_read_stdout can access it.
+    collected_answers: list[dict] = []
+
+    def _merge_answers_into_plan(plan_data: dict) -> dict:
+        """Patch agent args with clarification answers the CLI missed."""
+        if not collected_answers:
+            return plan_data
+        agents = plan_data.get("agents")
+        if not agents or not isinstance(agents, list):
+            return plan_data
+        # Build lookup: agent_id -> {arg_key: value}
+        answer_map: dict[str, dict[str, str]] = {}
+        for a in collected_answers:
+            aid = a.get("agent_id", "")
+            key = a.get("arg_key", "")
+            val = a.get("value", "")
+            if aid and key and val:
+                answer_map.setdefault(aid, {})[key] = val
+        if not answer_map:
+            return plan_data
+        for agent in agents:
+            aid = agent.get("id", "")
+            cmd_name = agent.get("command", "")
+            stage = agent.get("stage", "")
+            args = agent.get("args", {})
+            # Try matching by agent id, command name, or stage/command combo
+            patches = (
+                answer_map.get(aid)
+                or answer_map.get(cmd_name)
+                or answer_map.get(f"{stage}_{cmd_name}")
+                or answer_map.get(cmd_name.lower())
+                or answer_map.get(aid.lower())
+            )
+            if patches:
+                for k, v in patches.items():
+                    # Only fill in missing or empty args
+                    if k not in args or not args[k]:
+                        args[k] = v
+                    # Also try matching by flag-style key (--key -> key)
+                    bare_key = k.lstrip("-")
+                    if bare_key != k and (bare_key not in args or not args[bare_key]):
+                        args[bare_key] = v
+                agent["args"] = args
+        return plan_data
+
     async def _read_stderr(proc: asyncio.subprocess.Process):
         """Forward stderr lines as log messages, intercepting clarification notices."""
         nonlocal plan_sent
@@ -1201,52 +1251,7 @@ async def ws_plan(websocket: WebSocket):
 
             clarifications.clear()
             clarification_event.clear()
-
-            # Accumulate all clarification answers across rounds so we can
-            # merge them into the final plan if the CLI omits them.
-            collected_answers: list[dict] = []
-
-            def _merge_answers_into_plan(plan_data: dict) -> dict:
-                """Patch agent args with clarification answers the CLI missed."""
-                if not collected_answers:
-                    return plan_data
-                agents = plan_data.get("agents")
-                if not agents or not isinstance(agents, list):
-                    return plan_data
-                # Build lookup: agent_id -> {arg_key: value}
-                answer_map: dict[str, dict[str, str]] = {}
-                for a in collected_answers:
-                    aid = a.get("agent_id", "")
-                    key = a.get("arg_key", "")
-                    val = a.get("value", "")
-                    if aid and key and val:
-                        answer_map.setdefault(aid, {})[key] = val
-                if not answer_map:
-                    return plan_data
-                for agent in agents:
-                    aid = agent.get("id", "")
-                    cmd_name = agent.get("command", "")
-                    stage = agent.get("stage", "")
-                    args = agent.get("args", {})
-                    # Try matching by agent id, command name, or stage/command combo
-                    patches = (
-                        answer_map.get(aid)
-                        or answer_map.get(cmd_name)
-                        or answer_map.get(f"{stage}_{cmd_name}")
-                        or answer_map.get(cmd_name.lower())
-                        or answer_map.get(aid.lower())
-                    )
-                    if patches:
-                        for k, v in patches.items():
-                            # Only fill in missing or empty args
-                            if k not in args or not args[k]:
-                                args[k] = v
-                            # Also try matching by flag-style key (--key -> key)
-                            bare_key = k.lstrip("-")
-                            if bare_key != k and (bare_key not in args or not args[bare_key]):
-                                args[bare_key] = v
-                        agent["args"] = args
-                return plan_data
+            collected_answers.clear()
 
             try:
                 # ZYRA_FORCE_PLAN_PROMPT makes the planner use input()

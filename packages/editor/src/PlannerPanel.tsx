@@ -1345,7 +1345,10 @@ function AddArgRow({
         <input
           ref={valRef}
           className="zyra-input"
-          placeholder={selectedDef?.placeholder || selectedDef?.default != null ? String(selectedDef?.default) : "value"}
+          placeholder={
+            selectedDef?.placeholder ??
+            (selectedDef?.default != null ? String(selectedDef.default) : "value")
+          }
           value={val}
           onChange={(e) => setVal(e.target.value)}
           onKeyDown={(e) => {
