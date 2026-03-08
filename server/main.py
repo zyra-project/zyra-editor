@@ -755,20 +755,27 @@ async def ws_plan(websocket: WebSocket):
 
         proc: asyncio.subprocess.Process | None = None
 
-        MAX_CLARIFICATION_ROUNDS = 2
+        MAX_CLARIFICATION_ROUNDS = 3
 
         async def _run_plan_process(
             cmd: list[str],
             intent: str,
             guardrails: str,
-            _depth: int = 0,
         ) -> None:
-            """Run a zyra plan subprocess, intercepting clarifications.
+            """Run a zyra plan subprocess, feeding clarification answers
+            back into its stdin so the planner can update its session state.
 
-            If "clarification needed:" lines appear on stderr, kills the
-            process before it auto-resolves, sends the issues as questions
-            to the client, waits for the user's answers, and restarts with
-            the answers folded into guardrails.
+            Flow:
+            1. Launch ``zyra plan`` with stdin/stdout/stderr pipes.
+            2. Read stderr — when "clarification needed:" lines appear,
+               batch them, present rich questions to the user via
+               WebSocket, then write each answer back to the process's
+               stdin (one line per clarification, in the order they
+               appeared).
+            3. The planner reads the answers, updates its internal
+               resolved_parameters, and continues planning.
+            4. Repeat up to MAX_CLARIFICATION_ROUNDS times.
+            5. stdout is watched for the final JSON plan output.
             """
             nonlocal proc, clarifications
 
@@ -793,193 +800,186 @@ async def ws_plan(websocket: WebSocket):
             stderr_task = asyncio.create_task(_read_stderr(proc))
             stdout_task = asyncio.create_task(_read_stdout(proc))
 
-            # Race: process finishes vs clarification detected
-            proc_done = asyncio.create_task(proc.wait())
-            clarification_wait = asyncio.create_task(clarification_event.wait())
-
             # Also listen for client cancel
             cancelled = False
 
             async def _listen_cancel():
+                """Listen for cancel messages from the client.
+
+                Only handles cancel — answer messages are handled in the
+                main clarification loop below.
+                """
                 nonlocal cancelled
                 try:
                     while True:
                         msg = await websocket.receive_json()
                         if msg.get("type") == "cancel":
                             cancelled = True
-                            proc.kill()
+                            if proc.returncode is None:
+                                proc.kill()
                             return
-                        elif msg.get("type") == "answer" and proc.stdin:
-                            # Shouldn't happen during initial run, but handle gracefully
-                            text = msg.get("text", "")
-                            proc.stdin.write((text + "\n").encode("utf-8"))
-                            await proc.stdin.drain()
+                        # Put answer messages back for the main loop to handle
+                        # by storing them in a shared queue.
+                        if msg.get("type") == "answer":
+                            answer_queue.put_nowait(msg)
                 except (WebSocketDisconnect, Exception):
                     cancelled = True
-                    proc.kill()
+                    if proc.returncode is None:
+                        proc.kill()
 
+            answer_queue: asyncio.Queue = asyncio.Queue()
             cancel_task = asyncio.create_task(_listen_cancel())
 
+            rounds = 0
             try:
-                done, pending = await asyncio.wait(
-                    [proc_done, clarification_wait, cancel_task],
-                    timeout=WS_PLAN_TIMEOUT,
-                    return_when=asyncio.FIRST_COMPLETED,
-                )
+                while proc.returncode is None and not cancelled:
+                    # Race: process finishes vs clarification detected
+                    proc_done = asyncio.ensure_future(proc.wait())
+                    clarification_wait = asyncio.ensure_future(
+                        clarification_event.wait()
+                    )
 
-                if not done:
-                    # Timeout
-                    proc.kill()
-                    await websocket.send_json({"type": "error", "text": "Planning timed out"})
-                    cancel_task.cancel()
-                    return
+                    done, _pending = await asyncio.wait(
+                        [proc_done, clarification_wait, cancel_task],
+                        timeout=WS_PLAN_TIMEOUT,
+                        return_when=asyncio.FIRST_COMPLETED,
+                    )
 
-                if cancelled:
-                    cancel_task.cancel()
-                    return
+                    if not done:
+                        # Timeout
+                        if proc.returncode is None:
+                            proc.kill()
+                        await websocket.send_json({"type": "error", "text": "Planning timed out"})
+                        cancel_task.cancel()
+                        return
 
-                if clarification_wait in done and proc.returncode is None:
-                    # Clarifications detected — wait briefly for more to arrive
-                    await asyncio.sleep(0.5)
+                    if cancelled:
+                        cancel_task.cancel()
+                        return
 
-                    # Kill the process before it auto-resolves
-                    try:
-                        proc.kill()
-                        await proc.wait()
-                    except Exception:
-                        pass
+                    if proc_done in done:
+                        # Process finished — break out of the loop to
+                        # drain and deliver the final output.
+                        break
 
-                    cancel_task.cancel()
+                    if clarification_wait in done and proc.returncode is None:
+                        rounds += 1
+                        # Wait briefly for more clarification lines to arrive
+                        await asyncio.sleep(0.5)
 
-                    # Drain remaining stderr/stdout
-                    if stderr_task:
-                        try:
-                            await asyncio.wait_for(stderr_task, timeout=2)
-                        except Exception:
-                            pass
-                    if stdout_task:
-                        try:
-                            await asyncio.wait_for(stdout_task, timeout=2)
-                        except Exception:
-                            pass
+                        # Reset the event so we can detect the next round
+                        batch = list(clarifications)
+                        clarifications.clear()
+                        clarification_event.clear()
 
-                    # Parse clarifications and enrich with manifest metadata
-                    manifest = await _get_cached_manifest()
-                    parsed_items: list[dict] = []
-                    for detail in clarifications:
-                        parsed = _parse_clarification(detail)
-                        if parsed:
-                            # Look up arg metadata from manifest
-                            meta = _lookup_arg_meta(
-                                manifest,
-                                parsed["agent_id"],
-                                parsed["arg_key"],
-                            )
-                            parsed["label"] = meta.get("label", parsed["arg_key"])
-                            parsed["description"] = meta.get("description", "")
-                            parsed["type"] = meta.get("type", "string")
-                            parsed["placeholder"] = meta.get("placeholder", "")
-                            parsed["default"] = meta.get("default")
-                            parsed["options"] = meta.get("options")
-                        else:
-                            # Couldn't parse — fall back to plain text
-                            parsed_items.append({
-                                "agent_id": "",
-                                "arg_key": "",
-                                "kind": "unknown",
-                                "label": detail,
-                                "description": "",
-                                "type": "string",
-                                "placeholder": "",
-                                "default": None,
-                                "options": None,
-                                "raw": detail,
-                            })
+                        if not batch:
                             continue
-                        parsed_items.append(parsed)
 
-                    # Ask one question at a time and collect answers
-                    answers: list[dict] = []
-                    for i, item in enumerate(parsed_items):
+                        # Parse clarifications and enrich with manifest metadata
+                        manifest = await _get_cached_manifest()
+                        parsed_items: list[dict] = []
+                        for detail in batch:
+                            parsed = _parse_clarification(detail)
+                            if parsed:
+                                meta = _lookup_arg_meta(
+                                    manifest,
+                                    parsed["agent_id"],
+                                    parsed["arg_key"],
+                                )
+                                parsed["label"] = meta.get("label", parsed["arg_key"])
+                                parsed["description"] = meta.get("description", "")
+                                parsed["type"] = meta.get("type", "string")
+                                parsed["placeholder"] = meta.get("placeholder", "")
+                                parsed["default"] = meta.get("default")
+                                parsed["options"] = meta.get("options")
+                            else:
+                                parsed_items.append({
+                                    "agent_id": "",
+                                    "arg_key": "",
+                                    "kind": "unknown",
+                                    "label": detail,
+                                    "description": "",
+                                    "type": "string",
+                                    "placeholder": "",
+                                    "default": None,
+                                    "options": None,
+                                    "raw": detail,
+                                })
+                                continue
+                            parsed_items.append(parsed)
+
+                        # Ask one question at a time and collect answers
+                        answers: list[dict] = []
+                        for i, item in enumerate(parsed_items):
+                            await websocket.send_json({
+                                "type": "clarification",
+                                "index": i,
+                                "total": len(parsed_items),
+                                "agent_id": item.get("agent_id", ""),
+                                "arg_key": item.get("arg_key", ""),
+                                "kind": item.get("kind", "missing"),
+                                "label": item.get("label", ""),
+                                "description": item.get("description", ""),
+                                "arg_type": item.get("type", "string"),
+                                "placeholder": item.get("placeholder", ""),
+                                "default": item.get("default"),
+                                "options": item.get("options"),
+                                "current_value": item.get("current_value"),
+                                "importance": item.get("importance", ""),
+                            })
+
+                            # Wait for answer (from the queue populated by _listen_cancel)
+                            try:
+                                while True:
+                                    msg = await asyncio.wait_for(
+                                        answer_queue.get(),
+                                        timeout=WS_PLAN_TIMEOUT,
+                                    )
+                                    if msg.get("type") == "answer":
+                                        answers.append({
+                                            "agent_id": item.get("agent_id", ""),
+                                            "arg_key": item.get("arg_key", ""),
+                                            "value": msg.get("text", ""),
+                                        })
+                                        break
+                            except (asyncio.TimeoutError, asyncio.CancelledError):
+                                return
+
+                        # Write answers to the process's stdin so the
+                        # planner can update its session state.
+                        if proc.stdin and proc.returncode is None:
+                            for a in answers:
+                                value = a["value"]
+                                logger.debug(
+                                    "ws/plan: writing answer to stdin: %s=%s",
+                                    a["arg_key"], value,
+                                )
+                                proc.stdin.write(
+                                    (value + "\n").encode("utf-8")
+                                )
+                            try:
+                                await proc.stdin.drain()
+                            except Exception:
+                                pass
+
                         await websocket.send_json({
-                            "type": "clarification",
-                            "index": i,
-                            "total": len(parsed_items),
-                            "agent_id": item.get("agent_id", ""),
-                            "arg_key": item.get("arg_key", ""),
-                            "kind": item.get("kind", "missing"),
-                            "label": item.get("label", ""),
-                            "description": item.get("description", ""),
-                            "arg_type": item.get("type", "string"),
-                            "placeholder": item.get("placeholder", ""),
-                            "default": item.get("default"),
-                            "options": item.get("options"),
-                            "current_value": item.get("current_value"),
-                            "importance": item.get("importance", ""),
+                            "type": "status",
+                            "text": "Continuing with your answers...",
                         })
 
-                        # Wait for answer
-                        try:
-                            while True:
-                                msg = await asyncio.wait_for(
-                                    websocket.receive_json(),
-                                    timeout=WS_PLAN_TIMEOUT,
-                                )
-                                if msg.get("type") == "cancel":
-                                    return
-                                if msg.get("type") == "answer":
-                                    answers.append({
-                                        "agent_id": item.get("agent_id", ""),
-                                        "arg_key": item.get("arg_key", ""),
-                                        "value": msg.get("text", ""),
-                                    })
-                                    break
-                        except (asyncio.TimeoutError, WebSocketDisconnect):
-                            return
-
-                    # Build guardrails from collected answers — use an
-                    # explicit directive format so the LLM sets the values.
-                    answer_lines = []
-                    for a in answers:
-                        if a["agent_id"] and a["arg_key"]:
-                            answer_lines.append(
-                                f"IMPORTANT: For agent '{a['agent_id']}', "
-                                f"set argument '{a['arg_key']}' to: {a['value']}"
+                        if rounds >= MAX_CLARIFICATION_ROUNDS:
+                            logger.warning(
+                                "ws/plan: hit max clarification rounds (%d)",
+                                MAX_CLARIFICATION_ROUNDS,
                             )
-                        else:
-                            answer_lines.append(a["value"])
+                            # Close stdin to signal the planner to
+                            # proceed with defaults for any remaining
+                            # unresolved parameters.
+                            if proc.stdin:
+                                proc.stdin.close()
+                            break
 
-                    new_guardrails = guardrails
-                    if new_guardrails:
-                        new_guardrails += "\n\n"
-                    new_guardrails += (
-                        "The user has provided the following required values. "
-                        "Use them exactly as given — do NOT ask for clarification "
-                        "on these arguments again:\n"
-                        + "\n".join(answer_lines)
-                    )
-
-                    next_depth = _depth + 1
-                    new_cmd = ["zyra", "plan", "--intent", intent]
-                    if new_guardrails:
-                        new_cmd += ["--guardrails", new_guardrails]
-                    # On the last allowed attempt, disable clarification to
-                    # prevent an infinite loop.
-                    if next_depth >= MAX_CLARIFICATION_ROUNDS:
-                        new_cmd.append("--no-clarify")
-
-                    await websocket.send_json({
-                        "type": "status",
-                        "text": "Replanning with your answers...",
-                    })
-
-                    # Recurse with updated guardrails
-                    await _run_plan_process(
-                        new_cmd, intent, new_guardrails, _depth=next_depth,
-                    )
-                    return
-
-                # Process finished normally (no clarification intercept)
+                # Process finished — cancel the cancel listener
                 cancel_task.cancel()
 
             except asyncio.CancelledError:
