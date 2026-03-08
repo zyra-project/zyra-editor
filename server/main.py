@@ -835,14 +835,24 @@ async def ws_plan(websocket: WebSocket):
     # Recent hint lines (associated with the next/previous question)
     recent_hints: list[str] = []
 
+    # Collect the last N stdout/stderr lines for post-mortem diagnostics
+    _stderr_tail: list[str] = []
+    _stdout_lines: list[str] = []
+    _STDERR_TAIL_SIZE = 30
+
     async def _read_stderr(proc: asyncio.subprocess.Process):
         """Forward stderr lines as log messages, intercepting clarification notices."""
+        nonlocal plan_sent
         assert proc.stderr is not None
         try:
             async for raw in proc.stderr:
                 line = raw.decode("utf-8", errors="replace").rstrip("\n")
                 if not line:
                     continue
+                # Keep a rolling tail of stderr for diagnostics
+                _stderr_tail.append(line)
+                if len(_stderr_tail) > _STDERR_TAIL_SIZE:
+                    _stderr_tail.pop(0)
                 # Intercept "clarification needed:" lines from zyra CLI
                 if line.strip().lower().startswith("clarification needed:"):
                     detail = line.strip().split(":", 1)[1].strip()
@@ -859,6 +869,19 @@ async def ws_plan(websocket: WebSocket):
                     recent_hints.append(line.strip())
                     await _safe_send({"type": "log", "text": line})
                     continue
+                # Check if stderr contains a plan JSON (some CLIs output
+                # the plan to stderr instead of stdout).
+                stripped = line.strip()
+                if stripped.startswith("{"):
+                    try:
+                        data = json.loads(stripped)
+                        if "agents" in data:
+                            logger.info("ws/plan: plan JSON found on stderr (unexpected)")
+                            await _safe_send({"type": "plan", "data": _merge_answers_into_plan(data)})
+                            plan_sent = True
+                            continue
+                    except json.JSONDecodeError:
+                        pass
                 kind, text = _classify_stdout_line(line)
                 if kind == "question":
                     # Buffer the question for the main loop to enrich
@@ -944,6 +967,12 @@ async def ws_plan(websocket: WebSocket):
                     stripped = line.strip()
                     if not stripped:
                         continue
+
+                    # Track for diagnostics
+                    _stdout_lines.append(stripped[:200])
+                    if len(_stdout_lines) > 50:
+                        _stdout_lines.pop(0)
+                    logger.debug("ws/plan STDOUT: %s", stripped[:200])
 
                     # If we're buffering a multi-line JSON blob, keep accumulating
                     if json_buffer:
@@ -1039,6 +1068,103 @@ async def ws_plan(websocket: WebSocket):
         logger.info("ws/plan: starting interactive session — intent=%.200s", intent)
 
         MAX_CLARIFICATION_ROUNDS = 3
+
+        async def _fallback_non_interactive(
+            intent: str,
+            guardrails: str,
+            answers: list[dict],
+            send_fn,
+            merge_fn,
+        ) -> None:
+            """Retry plan generation in non-interactive mode.
+
+            Bakes the collected answers into the intent string and runs
+            ``zyra plan --no-clarify`` so the planner doesn't ask for input.
+            """
+            nonlocal plan_sent
+            # Build an augmented intent with the user's answers
+            answer_parts = []
+            for a in answers:
+                key = a.get("arg_key", "")
+                val = a.get("value", "")
+                aid = a.get("agent_id", "")
+                if key and val:
+                    if aid:
+                        answer_parts.append(f"{aid}.{key}={val}")
+                    else:
+                        answer_parts.append(f"{key}={val}")
+            if answer_parts:
+                augmented = f"{intent} (use these values: {', '.join(answer_parts)})"
+            else:
+                augmented = intent
+            scoped = _apply_scope(augmented)
+            fallback_cmd = ["zyra", "plan", "--intent", scoped, "--no-clarify"]
+            if guardrails:
+                fallback_cmd += ["--guardrails", guardrails]
+            logger.info(
+                "ws/plan: fallback non-interactive — cmd=%s",
+                fallback_cmd,
+            )
+            try:
+                result = await asyncio.to_thread(
+                    subprocess.run,
+                    fallback_cmd,
+                    capture_output=True,
+                    text=True,
+                    timeout=120,
+                )
+                logger.info(
+                    "ws/plan: fallback exit code=%d, stdout=%d bytes, "
+                    "stderr=%d bytes",
+                    result.returncode,
+                    len(result.stdout),
+                    len(result.stderr),
+                )
+                if result.returncode == 0 and result.stdout.strip():
+                    try:
+                        data = json.loads(result.stdout.strip())
+                        if "agents" in data:
+                            await send_fn({
+                                "type": "plan",
+                                "data": merge_fn(data),
+                            })
+                            plan_sent = True
+                            return
+                    except json.JSONDecodeError:
+                        logger.warning(
+                            "ws/plan: fallback stdout not valid JSON: %.500s",
+                            result.stdout,
+                        )
+                # Fallback failed too
+                stderr_hint = ""
+                if result.stderr:
+                    # Show last few non-DEBUG lines
+                    lines = [
+                        l for l in result.stderr.strip().split("\n")[-5:]
+                        if not l.startswith("DEBUG")
+                    ]
+                    if lines:
+                        stderr_hint = "\n\nPlanner output:\n" + "\n".join(
+                            lines[-3:]
+                        )
+                await send_fn({
+                    "type": "error",
+                    "text": "The planner could not generate a plan."
+                            + stderr_hint
+                            + "\n\nTry rephrasing your intent or "
+                              "providing more detail.",
+                })
+            except subprocess.TimeoutExpired:
+                await send_fn({
+                    "type": "error",
+                    "text": "Planning timed out (fallback mode).",
+                })
+            except Exception as exc:
+                logger.exception("ws/plan: fallback failed")
+                await send_fn({
+                    "type": "error",
+                    "text": f"Planning failed: {exc}",
+                })
 
         async def _run_plan_process(
             cmd: list[str],
@@ -1297,7 +1423,7 @@ async def ws_plan(websocket: WebSocket):
                         if proc.stdin and proc.returncode is None:
                             for a in answers:
                                 value = a["value"]
-                                logger.debug(
+                                logger.info(
                                     "ws/plan: writing enriched-question "
                                     "answer to stdin: %s=%s",
                                     a["arg_key"], value,
@@ -1307,8 +1433,15 @@ async def ws_plan(websocket: WebSocket):
                                 )
                             try:
                                 await proc.stdin.drain()
-                            except Exception:
-                                pass
+                            except Exception as exc:
+                                logger.warning(
+                                    "ws/plan: stdin drain failed: %s", exc)
+                        else:
+                            logger.warning(
+                                "ws/plan: cannot write answers — "
+                                "stdin=%s, returncode=%s",
+                                proc.stdin, proc.returncode,
+                            )
 
                         # Clear answer_ready so the next iteration doesn't
                         # spuriously enter the answer_wait branch.
@@ -1413,8 +1546,9 @@ async def ws_plan(websocket: WebSocket):
                         if proc.stdin and proc.returncode is None:
                             for a in answers:
                                 value = a["value"]
-                                logger.debug(
-                                    "ws/plan: writing answer to stdin: %s=%s",
+                                logger.info(
+                                    "ws/plan: writing clarification "
+                                    "answer to stdin: %s=%s",
                                     a["arg_key"], value,
                                 )
                                 proc.stdin.write(
@@ -1422,8 +1556,15 @@ async def ws_plan(websocket: WebSocket):
                                 )
                             try:
                                 await proc.stdin.drain()
-                            except Exception:
-                                pass
+                            except Exception as exc:
+                                logger.warning(
+                                    "ws/plan: stdin drain failed: %s", exc)
+                        else:
+                            logger.warning(
+                                "ws/plan: cannot write clarification answers — "
+                                "stdin=%s, returncode=%s",
+                                proc.stdin, proc.returncode,
+                            )
 
                         # Clear answer_ready so the next iteration doesn't
                         # spuriously enter the answer_wait branch.
@@ -1485,6 +1626,11 @@ async def ws_plan(websocket: WebSocket):
                         continue
 
                 # Process finished — cancel the cancel listener
+                logger.info(
+                    "ws/plan: main loop exited — returncode=%s, "
+                    "cancelled=%s, plan_sent=%s",
+                    proc.returncode, cancelled, plan_sent,
+                )
                 cancel_task.cancel()
 
             except asyncio.CancelledError:
@@ -1504,31 +1650,88 @@ async def ws_plan(websocket: WebSocket):
                     pass
 
             exit_code = proc.returncode
+
+            # ── Post-mortem diagnostics ──
+            # Log detailed info about what the process did so we can
+            # debug failures.
+            logger.info(
+                "ws/plan: process exited — code=%s, plan_sent=%s, "
+                "stdout_lines=%d, stderr_tail=%d, collected_answers=%d",
+                exit_code, plan_sent,
+                len(_stdout_lines), len(_stderr_tail),
+                len(collected_answers),
+            )
+            diag_text = ""
+            if not plan_sent:
+                # Show the last few stdout lines so we know what the
+                # planner was doing right before exit.
+                if _stdout_lines:
+                    logger.warning(
+                        "ws/plan: last stdout lines:\n  %s",
+                        "\n  ".join(_stdout_lines[-10:]),
+                    )
+                if _stderr_tail:
+                    logger.warning(
+                        "ws/plan: last stderr lines:\n  %s",
+                        "\n  ".join(_stderr_tail[-10:]),
+                    )
+
+                # Send last few log lines as diagnostic info to the
+                # client so the user can see what happened.
+                diag_lines = _stderr_tail[-5:] if _stderr_tail else _stdout_lines[-5:]
+                if diag_lines:
+                    # Filter out DEBUG lines which are noisy
+                    useful = [l for l in diag_lines if not l.startswith("DEBUG")]
+                    if useful:
+                        diag_text = "\n\nLast output:\n" + "\n".join(useful[-3:])
+
             if exit_code and exit_code != 0:
-                await _safe_send({
-                    "type": "error",
-                    "text": f"zyra plan exited with code {exit_code}",
-                })
+                logger.warning(
+                    "ws/plan: process exited with code %s", exit_code)
+                if not plan_sent and collected_answers:
+                    # Try fallback non-interactive mode
+                    await _fallback_non_interactive(
+                        intent, guardrails, collected_answers,
+                        _safe_send, _merge_answers_into_plan,
+                    )
+                elif not plan_sent:
+                    await _safe_send({
+                        "type": "error",
+                        "text": f"zyra plan exited with code {exit_code}.{diag_text}",
+                    })
             elif not plan_sent:
                 # Process exited successfully but no plan JSON was detected
-                # on stdout — send an explicit error so the client doesn't
-                # see a mysterious "connection closed unexpectedly".
-                logger.warning("ws/plan: process exited (code %s) without producing a plan", exit_code)
-                # Include any pending questions so the user knows what the
-                # planner was waiting for.
-                hint = ""
-                if pending_questions:
-                    qs = "; ".join(pending_questions[:3])
-                    hint = f" The planner was asking: {qs}"
-                    pending_questions.clear()
-                await _safe_send({
-                    "type": "error",
-                    "text": "The planner finished without producing a plan."
-                            + hint
-                            + " This may happen if it was waiting for input"
-                            " that was not detected. "
-                            "Try rephrasing your intent or providing more detail.",
-                })
+                # on stdout.
+                if collected_answers:
+                    # We have answers — try fallback non-interactive mode
+                    # with answers baked into the intent.
+                    logger.info(
+                        "ws/plan: no plan from interactive mode, "
+                        "retrying non-interactively with %d answers",
+                        len(collected_answers),
+                    )
+                    await _safe_send({
+                        "type": "status",
+                        "text": "Retrying with your answers...",
+                    })
+                    await _fallback_non_interactive(
+                        intent, guardrails, collected_answers,
+                        _safe_send, _merge_answers_into_plan,
+                    )
+                else:
+                    hint = ""
+                    if pending_questions:
+                        qs = "; ".join(pending_questions[:3])
+                        hint = f" The planner was asking: {qs}"
+                        pending_questions.clear()
+                    await _safe_send({
+                        "type": "error",
+                        "text": "The planner finished without producing a plan."
+                                + hint
+                                + diag_text
+                                + "\n\nTry rephrasing your intent or "
+                                  "providing more detail.",
+                    })
 
         await _run_plan_process(cmd, intent, guardrails)
         await websocket.close()
