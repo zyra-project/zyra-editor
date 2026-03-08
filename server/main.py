@@ -803,12 +803,21 @@ async def ws_plan(websocket: WebSocket):
     """
     await websocket.accept()
 
+    # Serialize all outbound WebSocket sends to avoid interleaved frames
+    # from concurrent tasks (_keepalive, _read_stdout, _read_stderr, main loop).
+    _send_lock = asyncio.Lock()
+
+    async def _safe_send(data: dict) -> None:
+        """Send JSON over WebSocket, serialized via lock."""
+        async with _send_lock:
+            await websocket.send_json(data)
+
     async def _keepalive():
         """Send periodic keepalive pings."""
         try:
             while True:
                 await asyncio.sleep(WS_KEEPALIVE_INTERVAL)
-                await websocket.send_json({"keepalive": True})
+                await _safe_send({"keepalive": True})
         except Exception:
             pass
 
@@ -838,7 +847,7 @@ async def ws_plan(websocket: WebSocket):
                 if line.strip().lower().startswith("clarification needed:"):
                     detail = line.strip().split(":", 1)[1].strip()
                     clarifications.append(detail)
-                    await websocket.send_json({"type": "log", "text": line})
+                    await _safe_send({"type": "log", "text": line})
                     # Signal that we have clarifications; use a short delay
                     # so we can batch multiple lines that arrive together
                     if not clarification_event.is_set():
@@ -848,7 +857,7 @@ async def ws_plan(websocket: WebSocket):
                 hint_m = _HINT_RE.match(line.strip())
                 if hint_m:
                     recent_hints.append(line.strip())
-                    await websocket.send_json({"type": "log", "text": line})
+                    await _safe_send({"type": "log", "text": line})
                     continue
                 kind, text = _classify_stdout_line(line)
                 if kind == "question":
@@ -858,11 +867,11 @@ async def ws_plan(websocket: WebSocket):
                     pending_questions.append(text)
                     if not question_event.is_set():
                         question_event.set()
-                    await websocket.send_json({"type": "log", "text": text})
+                    await _safe_send({"type": "log", "text": text})
                 else:
-                    await websocket.send_json({"type": "log", "text": text})
+                    await _safe_send({"type": "log", "text": text})
         except Exception:
-            pass
+            logger.debug("ws/plan: stderr reader stopped", exc_info=True)
 
     async def _read_stdout(proc: asyncio.subprocess.Process):
         """Read stdout, classify lines, and send appropriate messages.
@@ -886,7 +895,7 @@ async def ws_plan(websocket: WebSocket):
                     try:
                         data = json.loads(json_buffer)
                         if "agents" in data:
-                            await websocket.send_json({"type": "plan", "data": _merge_answers_into_plan(data)})
+                            await _safe_send({"type": "plan", "data": _merge_answers_into_plan(data)})
                             plan_sent = True
                             json_buffer = ""
                             continue
@@ -907,8 +916,8 @@ async def ws_plan(websocket: WebSocket):
                         data = json.loads(maybe_json)
                         if "agents" in data:
                             if prefix:
-                                await websocket.send_json({"type": "log", "text": prefix})
-                            await websocket.send_json({"type": "plan", "data": _merge_answers_into_plan(data)})
+                                await _safe_send({"type": "log", "text": prefix})
+                            await _safe_send({"type": "plan", "data": _merge_answers_into_plan(data)})
                             plan_sent = True
                             continue
                     except json.JSONDecodeError:
@@ -918,20 +927,20 @@ async def ws_plan(websocket: WebSocket):
                 hint_m = _HINT_RE.match(stripped)
                 if hint_m:
                     recent_hints.append(stripped)
-                    await websocket.send_json({"type": "log", "text": stripped})
+                    await _safe_send({"type": "log", "text": stripped})
                     continue
 
                 kind, text = _classify_stdout_line(line)
                 if kind == "plan":
                     data = json.loads(text)
-                    await websocket.send_json({"type": "plan", "data": _merge_answers_into_plan(data)})
+                    await _safe_send({"type": "plan", "data": _merge_answers_into_plan(data)})
                     plan_sent = True
                 elif kind == "question":
                     # Buffer for main loop to enrich with manifest metadata
                     pending_questions.append(text)
                     if not question_event.is_set():
                         question_event.set()
-                    await websocket.send_json({"type": "log", "text": text})
+                    await _safe_send({"type": "log", "text": text})
                     # If a question line also contains the start of a JSON
                     # blob (e.g. input() prompt glued to multi-line plan
                     # output), start the json_buffer so the plan isn't lost.
@@ -945,12 +954,12 @@ async def ws_plan(websocket: WebSocket):
                         # Prompt text followed by start of multi-line JSON
                         prefix = stripped[:json_start].strip()
                         if prefix:
-                            await websocket.send_json({"type": "log", "text": prefix})
+                            await _safe_send({"type": "log", "text": prefix})
                         json_buffer = stripped[json_start:]
                     else:
-                        await websocket.send_json({"type": "log", "text": text})
+                        await _safe_send({"type": "log", "text": text})
         except Exception:
-            pass
+            logger.debug("ws/plan: stdout reader stopped", exc_info=True)
 
     keepalive_task: asyncio.Task | None = None
     stderr_task: asyncio.Task | None = None
@@ -961,7 +970,7 @@ async def ws_plan(websocket: WebSocket):
         # Wait for the start message
         start_msg = await asyncio.wait_for(websocket.receive_json(), timeout=30)
         if start_msg.get("type") != "start" or not start_msg.get("intent"):
-            await websocket.send_json({"type": "error", "text": "Expected {type: 'start', intent: '...'}"})
+            await _safe_send({"type": "error", "text": "Expected {type: 'start', intent: '...'}"})
             await websocket.close()
             return
 
@@ -1067,7 +1076,7 @@ async def ws_plan(websocket: WebSocket):
                     env=plan_env,
                 )
             except FileNotFoundError:
-                await websocket.send_json({"type": "error", "text": "zyra CLI is not installed"})
+                await _safe_send({"type": "error", "text": "zyra CLI is not installed"})
                 return
 
             # Launch background readers
@@ -1143,7 +1152,7 @@ async def ws_plan(websocket: WebSocket):
                         # Timeout
                         if proc.returncode is None:
                             proc.kill()
-                        await websocket.send_json({"type": "error", "text": "Planning timed out"})
+                        await _safe_send({"type": "error", "text": "Planning timed out"})
                         cancel_task.cancel()
                         return
 
@@ -1183,7 +1192,7 @@ async def ws_plan(websocket: WebSocket):
                                 await proc.stdin.drain()
                             except Exception:
                                 pass
-                        await websocket.send_json({
+                        await _safe_send({
                             "type": "status",
                             "text": "Continuing with your answer...",
                         })
@@ -1221,7 +1230,7 @@ async def ws_plan(websocket: WebSocket):
                         # wait for answers, then write to stdin.
                         answers: list[dict] = []
                         for i, item in enumerate(items):
-                            await websocket.send_json({
+                            await _safe_send({
                                 "type": "clarification",
                                 "index": i,
                                 "total": len(items),
@@ -1278,7 +1287,7 @@ async def ws_plan(websocket: WebSocket):
                             except Exception:
                                 pass
 
-                        await websocket.send_json({
+                        await _safe_send({
                             "type": "status",
                             "text": "Continuing with your answers...",
                         })
@@ -1338,7 +1347,7 @@ async def ws_plan(websocket: WebSocket):
                         # Ask one question at a time and collect answers
                         answers: list[dict] = []
                         for i, item in enumerate(parsed_items):
-                            await websocket.send_json({
+                            await _safe_send({
                                 "type": "clarification",
                                 "index": i,
                                 "total": len(parsed_items),
@@ -1390,7 +1399,7 @@ async def ws_plan(websocket: WebSocket):
                             except Exception:
                                 pass
 
-                        await websocket.send_json({
+                        await _safe_send({
                             "type": "status",
                             "text": "Continuing with your answers...",
                         })
@@ -1428,7 +1437,7 @@ async def ws_plan(websocket: WebSocket):
 
             exit_code = proc.returncode
             if exit_code and exit_code != 0:
-                await websocket.send_json({
+                await _safe_send({
                     "type": "error",
                     "text": f"zyra plan exited with code {exit_code}",
                 })
@@ -1437,7 +1446,7 @@ async def ws_plan(websocket: WebSocket):
                 # on stdout — send an explicit error so the client doesn't
                 # see a mysterious "connection closed unexpectedly".
                 logger.warning("ws/plan: process exited (code %s) without producing a plan", exit_code)
-                await websocket.send_json({
+                await _safe_send({
                     "type": "error",
                     "text": "The planner finished without producing a plan. "
                             "This may happen if it was waiting for input that was not detected. "
@@ -1451,14 +1460,14 @@ async def ws_plan(websocket: WebSocket):
         logger.info("ws/plan: client disconnected")
     except asyncio.TimeoutError:
         try:
-            await websocket.send_json({"type": "error", "text": "Timed out waiting for start message"})
+            await _safe_send({"type": "error", "text": "Timed out waiting for start message"})
             await websocket.close()
         except Exception:
             pass
     except Exception as exc:
         logger.exception("ws/plan: unexpected error")
         try:
-            await websocket.send_json({"type": "error", "text": str(exc)})
+            await _safe_send({"type": "error", "text": str(exc)})
             await websocket.close()
         except Exception:
             pass

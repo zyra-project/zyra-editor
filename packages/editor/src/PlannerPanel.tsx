@@ -24,8 +24,8 @@ const STAGE_COLORS: Record<string, string> = {
   simulate: "#C04000",
 };
 
-/** Error guidance keyed by HTTP status code. */
-const ERROR_GUIDANCE: Record<number | string, string> = {
+/** Error guidance keyed by HTTP status code or error kind. */
+const ERROR_GUIDANCE: Record<string, string> = {
   503: "The zyra CLI is not installed in the server container. Rebuild with zyra[api] in requirements.txt.",
   504: "The planner timed out (120s limit). Try a simpler intent or check that the LLM backend (OPENAI_API_KEY / OLLAMA_HOST) is configured.",
   400: "The planner returned an error. Try rephrasing your intent description.",
@@ -76,7 +76,7 @@ export function PlannerPanel({
 }: PlannerPanelProps) {
   const [loading, setLoading] = useState(false);
   const [elapsed, setElapsed] = useState(0);
-  const [error, setError] = useState<{ message: string; status?: number } | null>(null);
+  const [error, setError] = useState<{ message: string; status?: number | string } | null>(null);
   const [plan, setPlan] = useState<PlanResponse | null>(null);
   const [editableAgents, setEditableAgents] = useState<PlanAgent[]>([]);
   const [historyOpen, setHistoryOpen] = useState(false);
@@ -188,9 +188,10 @@ export function PlannerPanel({
       onHistoryAdd({ intent: intent.trim(), plan: data, timestamp: Date.now() });
     } catch (err) {
       if (err instanceof DOMException && err.name === "AbortError") return;
+      const isNetwork = err instanceof TypeError && (err.message === "Failed to fetch" || err.message === "NetworkError when attempting to fetch resource.");
       setError({
         message: err instanceof Error ? err.message : "Unknown error",
-        status: undefined,
+        status: isNetwork ? "network" : undefined,
       });
     } finally {
       setLoading(false);
@@ -211,13 +212,13 @@ export function PlannerPanel({
     setAnswerText("");
     setLoading(true);
 
-    if (wsMode) {
-      session.reset();
-      session.start(intent.trim());
-    } else {
-      handleSyncGenerate();
-    }
-  }, [intent, wsMode, session, handleSyncGenerate]);
+    // Re-enable WebSocket mode on each manual generate attempt so a
+    // transient failure doesn't permanently disable interactive planning.
+    if (!wsMode) setWsMode(true);
+
+    session.reset();
+    session.start(intent.trim());
+  }, [intent, wsMode, session]);
 
   const handleRefine = useCallback(async () => {
     if (!feedback.trim() || !plan) return;
@@ -413,7 +414,7 @@ export function PlannerPanel({
     .map((s, i) => ({ suggestion: s, idx: i }))
     .filter(({ idx }) => !acceptedIdxs.has(idx) && !dismissedIdxs.has(idx));
 
-  const canGenerate = !loading && intent.trim().length > 0 && backendStatus.status === "ready";
+  const canGenerate = !loading && intent.trim().length > 0 && (backendStatus.status === "ready" || backendStatus.status === "checking");
   const statusNotReady = backendStatus.status !== "ready" && backendStatus.status !== "checking";
 
   return (
