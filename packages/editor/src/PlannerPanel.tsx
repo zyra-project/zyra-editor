@@ -956,6 +956,7 @@ export function PlannerPanel({
                 index={idx}
                 total={editableAgents.length}
                 expanded={expandedAgentId === agent.id}
+                manifest={manifest}
                 onToggle={() =>
                   setExpandedAgentId((prev) =>
                     prev === agent.id ? null : agent.id,
@@ -1212,25 +1213,47 @@ function ArgRow({
 }
 
 /** Inline form to add a new arg key-value pair. */
-function AddArgRow({ onAdd }: { onAdd: (key: string, value: string) => void }) {
+/** Inline form to add a new arg.  Shows a dropdown of unused manifest
+ *  args when available, with a "custom..." escape hatch. */
+function AddArgRow({
+  availableArgs,
+  onAdd,
+}: {
+  availableArgs: import("@zyra/core").ArgDef[];
+  onAdd: (key: string, value: string) => void;
+}) {
   const [active, setActive] = useState(false);
   const [key, setKey] = useState("");
   const [val, setVal] = useState("");
-  const keyRef = useRef<HTMLInputElement>(null);
+  const [customKey, setCustomKey] = useState(false);
+  const valRef = useRef<HTMLInputElement>(null);
+  const keyInputRef = useRef<HTMLInputElement>(null);
 
+  // When switching to custom mode, focus the text input
   useEffect(() => {
-    if (active) keyRef.current?.focus();
-  }, [active]);
+    if (customKey && active) keyInputRef.current?.focus();
+  }, [customKey, active]);
+
+  // Find the selected ArgDef to show placeholder/default
+  const selectedDef = availableArgs.find((a) => a.key === key);
 
   const commit = () => {
     const k = key.trim();
-    const v = val.trim();
     if (k) {
+      const v = val.trim() || (selectedDef?.default != null ? String(selectedDef.default) : "");
       onAdd(k, v);
       setKey("");
       setVal("");
       setActive(false);
+      setCustomKey(false);
     }
+  };
+
+  const cancel = () => {
+    setKey("");
+    setVal("");
+    setActive(false);
+    setCustomKey(false);
   };
 
   if (!active) {
@@ -1264,65 +1287,117 @@ function AddArgRow({ onAdd }: { onAdd: (key: string, value: string) => void }) {
     boxSizing: "border-box",
   };
 
+  const hasDropdownArgs = availableArgs.length > 0 && !customKey;
+
   return (
     <div
-      style={{ display: "flex", gap: 4, alignItems: "center", paddingTop: 3 }}
+      style={{ paddingTop: 3 }}
       onClick={(e) => e.stopPropagation()}
     >
-      <input
-        ref={keyRef}
-        className="zyra-input"
-        placeholder="key"
-        value={key}
-        onChange={(e) => setKey(e.target.value)}
-        onKeyDown={(e) => {
-          if (e.key === "Enter") commit();
-          if (e.key === "Escape") { setKey(""); setVal(""); setActive(false); }
-        }}
-        style={{ ...inputStyle, width: 70 }}
-      />
-      <input
-        className="zyra-input"
-        placeholder="value"
-        value={val}
-        onChange={(e) => setVal(e.target.value)}
-        onKeyDown={(e) => {
-          if (e.key === "Enter") commit();
-          if (e.key === "Escape") { setKey(""); setVal(""); setActive(false); }
-        }}
-        style={{ ...inputStyle, flex: 1 }}
-      />
-      <button
-        onClick={commit}
-        disabled={!key.trim()}
-        style={{
-          background: "none",
-          border: "none",
-          color: key.trim() ? "var(--accent-green)" : "var(--text-muted)",
-          fontSize: 12,
-          cursor: key.trim() ? "pointer" : "default",
-          padding: "0 2px",
-          lineHeight: 1,
-        }}
-        title="Add"
-      >
-        {"\u2713"}
-      </button>
-      <button
-        onClick={() => { setKey(""); setVal(""); setActive(false); }}
-        style={{
-          background: "none",
-          border: "none",
+      <div style={{ display: "flex", gap: 4, alignItems: "center" }}>
+        {/* Key: dropdown or text input */}
+        {hasDropdownArgs ? (
+          <select
+            value={key}
+            onChange={(e) => {
+              const v = e.target.value;
+              if (v === "__custom__") {
+                setCustomKey(true);
+                setKey("");
+              } else {
+                setKey(v);
+                // Pre-fill default value if the arg has one
+                const def = availableArgs.find((a) => a.key === v);
+                if (def?.default != null && !val) setVal(String(def.default));
+                // Focus value input
+                setTimeout(() => valRef.current?.focus(), 0);
+              }
+            }}
+            style={{
+              ...inputStyle,
+              width: 90,
+              cursor: "pointer",
+              fontFamily: "var(--font-mono)",
+            }}
+          >
+            <option value="">-- select --</option>
+            {availableArgs.map((a) => (
+              <option key={a.key} value={a.key}>
+                {a.key}{a.required ? " *" : ""}
+              </option>
+            ))}
+            <option value="__custom__">custom...</option>
+          </select>
+        ) : (
+          <input
+            ref={keyInputRef}
+            className="zyra-input"
+            placeholder="key"
+            value={key}
+            onChange={(e) => setKey(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") commit();
+              if (e.key === "Escape") cancel();
+            }}
+            style={{ ...inputStyle, width: 70 }}
+          />
+        )}
+        <input
+          ref={valRef}
+          className="zyra-input"
+          placeholder={selectedDef?.placeholder || selectedDef?.default != null ? String(selectedDef?.default) : "value"}
+          value={val}
+          onChange={(e) => setVal(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === "Enter") commit();
+            if (e.key === "Escape") cancel();
+          }}
+          style={{ ...inputStyle, flex: 1 }}
+        />
+        <button
+          onClick={commit}
+          disabled={!key.trim()}
+          style={{
+            background: "none",
+            border: "none",
+            color: key.trim() ? "var(--accent-green)" : "var(--text-muted)",
+            fontSize: 12,
+            cursor: key.trim() ? "pointer" : "default",
+            padding: "0 2px",
+            lineHeight: 1,
+          }}
+          title="Add"
+        >
+          {"\u2713"}
+        </button>
+        <button
+          onClick={cancel}
+          style={{
+            background: "none",
+            border: "none",
+            color: "var(--text-muted)",
+            fontSize: 12,
+            cursor: "pointer",
+            padding: "0 2px",
+            lineHeight: 1,
+          }}
+          title="Cancel"
+        >
+          {"\u00D7"}
+        </button>
+      </div>
+      {/* Show description of selected arg */}
+      {selectedDef?.description && (
+        <div style={{
+          fontSize: 9,
           color: "var(--text-muted)",
-          fontSize: 12,
-          cursor: "pointer",
-          padding: "0 2px",
-          lineHeight: 1,
-        }}
-        title="Cancel"
-      >
-        {"\u00D7"}
-      </button>
+          fontStyle: "italic",
+          paddingTop: 2,
+          paddingLeft: 2,
+        }}>
+          {selectedDef.description}
+        </div>
+      )}
     </div>
   );
 }
@@ -1332,6 +1407,7 @@ function AgentCard({
   index,
   total,
   expanded,
+  manifest,
   onToggle,
   onUpdateArgs,
   onRemove,
@@ -1342,6 +1418,7 @@ function AgentCard({
   index: number;
   total: number;
   expanded: boolean;
+  manifest: Manifest;
   onToggle: () => void;
   onUpdateArgs: (args: Record<string, string>) => void;
   onRemove: () => void;
@@ -1351,6 +1428,16 @@ function AgentCard({
   const [hovered, setHovered] = useState(false);
   const argEntries = Object.entries(agent.args).filter(
     ([, v]) => v !== "" && v !== undefined && v !== null,
+  );
+
+  // Look up the StageDef for this agent to get all possible args
+  const stageDef = manifest.stages.find(
+    (s) => s.stage === agent.stage && s.command === agent.command,
+  );
+  // Filter to args not already set on this agent
+  const usedKeys = new Set(Object.keys(agent.args));
+  const availableArgs = (stageDef?.args ?? []).filter(
+    (a) => !usedKeys.has(a.key) && !usedKeys.has(a.flag ?? ""),
   );
 
   const handleArgChange = (key: string, newVal: string) => {
@@ -1501,7 +1588,7 @@ function AgentCard({
               </tbody>
             </table>
           )}
-          <AddArgRow onAdd={handleArgAdd} />
+          <AddArgRow availableArgs={availableArgs} onAdd={handleArgAdd} />
         </div>
       )}
     </div>
