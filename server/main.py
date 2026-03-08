@@ -170,6 +170,8 @@ def _opt_to_arg(flag: str, info) -> dict | None:
         "required": False,
         "description": help_text,
     }
+    if help_text:
+        arg["placeholder"] = help_text
     if default is not None:
         arg["default"] = default
     if choices:
