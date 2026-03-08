@@ -1288,6 +1288,33 @@ function AddArgRow({
   };
 
   const hasDropdownArgs = availableArgs.length > 0 && !customKey;
+  const [dropdownOpen, setDropdownOpen] = useState(false);
+  const dropdownRef = useRef<HTMLDivElement>(null);
+
+  // Close dropdown when clicking outside
+  useEffect(() => {
+    if (!dropdownOpen) return;
+    const handler = (e: MouseEvent) => {
+      if (dropdownRef.current && !dropdownRef.current.contains(e.target as HTMLElement)) {
+        setDropdownOpen(false);
+      }
+    };
+    document.addEventListener("mousedown", handler);
+    return () => document.removeEventListener("mousedown", handler);
+  }, [dropdownOpen]);
+
+  const selectArg = (argKey: string) => {
+    if (argKey === "__custom__") {
+      setCustomKey(true);
+      setKey("");
+    } else {
+      setKey(argKey);
+      const def = availableArgs.find((a) => a.key === argKey);
+      if (def?.default != null && !val) setVal(String(def.default));
+      setTimeout(() => valRef.current?.focus(), 0);
+    }
+    setDropdownOpen(false);
+  };
 
   return (
     <div
@@ -1295,39 +1322,114 @@ function AddArgRow({
       onClick={(e) => e.stopPropagation()}
     >
       <div style={{ display: "flex", gap: 4, alignItems: "center" }}>
-        {/* Key: dropdown or text input */}
+        {/* Key: custom dropdown with descriptions or text input */}
         {hasDropdownArgs ? (
-          <select
-            value={key}
-            onChange={(e) => {
-              const v = e.target.value;
-              if (v === "__custom__") {
-                setCustomKey(true);
-                setKey("");
-              } else {
-                setKey(v);
-                // Pre-fill default value if the arg has one
-                const def = availableArgs.find((a) => a.key === v);
-                if (def?.default != null && !val) setVal(String(def.default));
-                // Focus value input
-                setTimeout(() => valRef.current?.focus(), 0);
-              }
-            }}
-            style={{
-              ...inputStyle,
-              width: 90,
-              cursor: "pointer",
-              fontFamily: "var(--font-mono)",
-            }}
-          >
-            <option value="">-- select --</option>
-            {availableArgs.map((a) => (
-              <option key={a.key} value={a.key}>
-                {a.key}{a.required ? " *" : ""}
-              </option>
-            ))}
-            <option value="__custom__">custom...</option>
-          </select>
+          <div ref={dropdownRef} style={{ position: "relative" }}>
+            <button
+              type="button"
+              onClick={() => setDropdownOpen((v) => !v)}
+              style={{
+                ...inputStyle,
+                width: 110,
+                cursor: "pointer",
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "space-between",
+                gap: 4,
+              }}
+            >
+              <span style={{
+                overflow: "hidden",
+                textOverflow: "ellipsis",
+                whiteSpace: "nowrap",
+              }}>
+                {key || "-- select --"}
+              </span>
+              <span style={{ fontSize: 8, opacity: 0.6 }}>&#9660;</span>
+            </button>
+            {dropdownOpen && (
+              <div style={{
+                position: "absolute",
+                top: "100%",
+                left: 0,
+                zIndex: 100,
+                minWidth: 260,
+                maxHeight: 280,
+                overflowY: "auto",
+                background: "var(--bg-secondary)",
+                border: "1px solid var(--border-strong)",
+                borderRadius: 4,
+                boxShadow: "0 4px 16px rgba(0,0,0,0.4)",
+                marginTop: 2,
+              }}>
+                {availableArgs.map((a) => (
+                  <div
+                    key={a.key}
+                    onClick={() => selectArg(a.key)}
+                    style={{
+                      padding: "6px 10px",
+                      cursor: "pointer",
+                      borderBottom: "1px solid var(--border-default)",
+                      background: a.key === key ? "var(--bg-tertiary)" : "transparent",
+                    }}
+                    onMouseEnter={(e) => { (e.currentTarget as HTMLElement).style.background = "var(--bg-tertiary)"; }}
+                    onMouseLeave={(e) => { (e.currentTarget as HTMLElement).style.background = a.key === key ? "var(--bg-tertiary)" : "transparent"; }}
+                  >
+                    <div style={{ display: "flex", alignItems: "baseline", gap: 6 }}>
+                      <span style={{
+                        fontFamily: "var(--font-mono)",
+                        fontSize: 11,
+                        color: "var(--text-primary)",
+                        fontWeight: 600,
+                      }}>
+                        {a.key}
+                      </span>
+                      {a.required && (
+                        <span style={{ color: "var(--accent-orange, #e3b341)", fontSize: 9 }}>required</span>
+                      )}
+                      {a.type === "enum" && (
+                        <span style={{ color: "var(--text-muted)", fontSize: 9 }}>[{a.options?.join(" | ")}]</span>
+                      )}
+                    </div>
+                    {(a.description || a.label) && (
+                      <div style={{
+                        fontSize: 10,
+                        color: "var(--text-muted)",
+                        marginTop: 2,
+                        lineHeight: 1.3,
+                      }}>
+                        {a.description || a.label}
+                      </div>
+                    )}
+                    {a.default != null && (
+                      <div style={{
+                        fontSize: 9,
+                        color: "var(--text-muted)",
+                        opacity: 0.7,
+                        marginTop: 1,
+                      }}>
+                        default: {String(a.default)}
+                      </div>
+                    )}
+                  </div>
+                ))}
+                <div
+                  onClick={() => selectArg("__custom__")}
+                  style={{
+                    padding: "6px 10px",
+                    cursor: "pointer",
+                    fontStyle: "italic",
+                    fontSize: 10,
+                    color: "var(--text-muted)",
+                  }}
+                  onMouseEnter={(e) => { (e.currentTarget as HTMLElement).style.background = "var(--bg-tertiary)"; }}
+                  onMouseLeave={(e) => { (e.currentTarget as HTMLElement).style.background = "transparent"; }}
+                >
+                  custom...
+                </div>
+              </div>
+            )}
+          </div>
         ) : (
           <input
             ref={keyInputRef}
