@@ -120,6 +120,21 @@ Key behaviors:
 - `PYTHONUNBUFFERED=1` ensures prompt text is flushed immediately (though `input()` prompts have no trailing newline, so `async for line in proc.stdout:` may not yield them until the next newline arrives)
 - Answers are written as `value + "\n"` to stdin, then drained
 
+## Scope Instruction
+
+The zyra CLI's LLM planner tends to generate overly ambitious pipelines — e.g. adding visualization, narration, and video composition steps when the user only asked to download data. The editor server appends a **scope instruction** to the intent before passing it to `zyra plan`:
+
+```
+IMPORTANT: Generate ONLY the minimum steps directly required to fulfill
+this request. Do NOT add visualization, narration, video composition, or
+other downstream steps unless the user explicitly asked for them.
+```
+
+This is configurable via the `ZYRA_PLAN_SCOPE` environment variable:
+- Default: the instruction above
+- Set to empty string (`ZYRA_PLAN_SCOPE=""`) to disable and get the planner's full output
+- Set to custom text to override the default instruction
+
 ## Main Loop State Machine
 
 ```

@@ -342,10 +342,29 @@ class PlanRequest(BaseModel):
 
 logger = logging.getLogger("zyra-editor.plan")
 
+# Scope instruction appended to the intent so the LLM generates only
+# the steps the user actually asked for.  Override or disable via the
+# ZYRA_PLAN_SCOPE env var (set to empty string to disable).
+_DEFAULT_PLAN_SCOPE = (
+    "\n\nIMPORTANT: Generate ONLY the minimum steps directly required "
+    "to fulfill this request. Do NOT add visualization, narration, "
+    "video composition, or other downstream steps unless the user "
+    "explicitly asked for them. Keep the plan focused and minimal."
+)
+PLAN_SCOPE = os.environ.get("ZYRA_PLAN_SCOPE", _DEFAULT_PLAN_SCOPE)
+
+
+def _apply_scope(intent: str) -> str:
+    """Append the scope instruction to the intent if configured."""
+    if PLAN_SCOPE:
+        return intent + PLAN_SCOPE
+    return intent
+
 
 def _run_zyra_plan(intent: str, guardrails: str = "") -> dict:
     """Run ``zyra plan`` and return parsed JSON."""
-    cmd = ["zyra", "plan", "--intent", intent, "--no-clarify"]
+    scoped_intent = _apply_scope(intent)
+    cmd = ["zyra", "plan", "--intent", scoped_intent, "--no-clarify"]
     if guardrails:
         cmd += ["--guardrails", guardrails]
 
@@ -914,7 +933,8 @@ async def ws_plan(websocket: WebSocket):
         intent = start_msg["intent"]
         guardrails = start_msg.get("guardrails", "")
 
-        cmd = ["zyra", "plan", "--intent", intent]
+        scoped_intent = _apply_scope(intent)
+        cmd = ["zyra", "plan", "--intent", scoped_intent]
         if guardrails:
             cmd += ["--guardrails", guardrails]
 
