@@ -523,7 +523,14 @@ _QUESTION_PATTERNS = re.compile(
     r"|(?:please\s+(?:provide|specify|enter|choose|select|confirm|set|indicate))"  # polite prompts
     r"|(?:could\s+you\s+(?:please\s+)?(?:provide|specify|enter|choose|select|confirm))"  # "could you ..."
     r"|(?:what\s+(?:is|should|would)\b)"  # "what is/should/would ..."
-    r"|(?:which\s+\w+\s+(?:do|would|should)\b)",  # "which X do/would/should ..."
+    r"|(?:which\s+\w+\s+(?:do|would|should)\b)"  # "which X do/would/should ..."
+    r"|(?:(?:provide|enter|specify|set)\s+(?:a\s+)?value\s+for\b)",  # "Provide value for 'X':"
+    re.IGNORECASE,
+)
+# Regex to detect input() prompts from the zyra CLI that end with ':'
+# e.g. "[fetch_sst_data — acquire ftp] Provide value for 'path':"
+_INPUT_PROMPT_RE = re.compile(
+    r"\]\s*(?:Provide|Enter|Specify|Set)\s+.*?'[^']*'\s*:\s*$",
     re.IGNORECASE,
 )
 
@@ -774,6 +781,9 @@ def _classify_stdout_line(line: str) -> tuple[str, str]:
         return ("question", stripped)
     if _QUESTION_PATTERNS.search(stripped):
         return ("question", stripped)
+    # Detect input() prompts like "[agent — command] Provide value for 'arg':"
+    if _INPUT_PROMPT_RE.search(stripped):
+        return ("question", stripped)
     # Lines containing '?' are likely questions even if the '?' is mid-sentence
     # (e.g. "Could you confirm X? This ensures Y.")
     if "?" in stripped and not stripped.startswith(("DEBUG", "INFO", "WARNING", "ERROR", "http")):
@@ -803,6 +813,7 @@ async def ws_plan(websocket: WebSocket):
             pass
 
     # Shared state for clarification interception
+    plan_sent = False  # Set to True once a plan message is sent to the client
     clarifications: list[str] = []
     clarification_event = asyncio.Event()
     # Signalled when an answer arrives (so the main loop can write it to
@@ -859,6 +870,7 @@ async def ws_plan(websocket: WebSocket):
         Buffers partial JSON across multiple lines so multi-line plan
         output is still detected.
         """
+        nonlocal plan_sent
         assert proc.stdout is not None
         json_buffer = ""
         try:
@@ -875,6 +887,7 @@ async def ws_plan(websocket: WebSocket):
                         data = json.loads(json_buffer)
                         if "agents" in data:
                             await websocket.send_json({"type": "plan", "data": _merge_answers_into_plan(data)})
+                            plan_sent = True
                             json_buffer = ""
                             continue
                     except json.JSONDecodeError:
@@ -896,6 +909,7 @@ async def ws_plan(websocket: WebSocket):
                             if prefix:
                                 await websocket.send_json({"type": "log", "text": prefix})
                             await websocket.send_json({"type": "plan", "data": _merge_answers_into_plan(data)})
+                            plan_sent = True
                             continue
                     except json.JSONDecodeError:
                         pass
@@ -911,12 +925,18 @@ async def ws_plan(websocket: WebSocket):
                 if kind == "plan":
                     data = json.loads(text)
                     await websocket.send_json({"type": "plan", "data": _merge_answers_into_plan(data)})
+                    plan_sent = True
                 elif kind == "question":
                     # Buffer for main loop to enrich with manifest metadata
                     pending_questions.append(text)
                     if not question_event.is_set():
                         question_event.set()
                     await websocket.send_json({"type": "log", "text": text})
+                    # If a question line also contains the start of a JSON
+                    # blob (e.g. input() prompt glued to multi-line plan
+                    # output), start the json_buffer so the plan isn't lost.
+                    if json_start > 0 and stripped[json_start:].startswith("{"):
+                        json_buffer = stripped[json_start:]
                 else:
                     # Check if this starts a multi-line JSON blob
                     if stripped.startswith("{"):
@@ -1411,6 +1431,17 @@ async def ws_plan(websocket: WebSocket):
                 await websocket.send_json({
                     "type": "error",
                     "text": f"zyra plan exited with code {exit_code}",
+                })
+            elif not plan_sent:
+                # Process exited successfully but no plan JSON was detected
+                # on stdout — send an explicit error so the client doesn't
+                # see a mysterious "connection closed unexpectedly".
+                logger.warning("ws/plan: process exited (code %s) without producing a plan", exit_code)
+                await websocket.send_json({
+                    "type": "error",
+                    "text": "The planner finished without producing a plan. "
+                            "This may happen if it was waiting for input that was not detected. "
+                            "Try rephrasing your intent or providing more detail.",
                 })
 
         await _run_plan_process(cmd, intent, guardrails)
