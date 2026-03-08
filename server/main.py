@@ -514,6 +514,35 @@ async def refine_plan(body: PlanRefineRequest):
 
 
 
+# ── Feedback endpoint ─────────────────────────────────────────────
+
+FEEDBACK_DIR = Path(os.environ.get("ZYRA_FEEDBACK_DIR", "/data/feedback"))
+
+
+class FeedbackPayload(BaseModel):
+    name: str = ""
+    email: str = ""
+    type: str = "question"
+    message: str
+    timestamp: str = ""
+    userAgent: str = ""
+
+
+@app.post("/v1/feedback")
+async def submit_feedback(body: FeedbackPayload):
+    """Save user feedback as a JSON file in the feedback directory."""
+    FEEDBACK_DIR.mkdir(parents=True, exist_ok=True)
+    ts = body.timestamp or __import__("datetime").datetime.utcnow().isoformat()
+    # Use timestamp + short hash for unique filename
+    safe_ts = re.sub(r"[^a-zA-Z0-9_-]", "_", ts)
+    path = FEEDBACK_DIR / f"feedback_{safe_ts}.json"
+    payload = body.model_dump()
+    payload["timestamp"] = ts
+    path.write_text(json.dumps(payload, indent=2))
+    logger.info("Feedback saved to %s", path)
+    return {"status": "ok", "file": str(path)}
+
+
 # ── Interactive planner via WebSocket ─────────────────────────────
 
 WS_PLAN_TIMEOUT = 120  # seconds

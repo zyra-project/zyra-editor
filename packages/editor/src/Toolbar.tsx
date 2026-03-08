@@ -350,6 +350,19 @@ const HELP_SECTIONS: { title: string; items: string[] }[] = [
     ],
   },
   {
+    title: "AI Planner",
+    items: [
+      "Open the AI Planner with Ctrl+P or the robot icon in the toolbar. Describe what you want in plain English (e.g. \u201cDownload HRRR data from S3 and convert to NetCDF\u201d).",
+      "The planner sends your intent to an LLM which proposes a pipeline of stages. Review the generated steps before applying.",
+      "Click \u201cDefine Plan\u201d (or Ctrl+Enter) to generate a plan. The planner may ask clarifying questions first \u2014 answer them in the chat panel.",
+      "Each step shows the stage name, a confidence score, and its arguments. You can edit arguments inline before applying.",
+      "\u201cApply to Canvas\u201d adds the planned nodes and edges to your graph. You can undo a batch with the Undo button.",
+      "Use \u201cNew Plan\u201d to start over, or revisit previous plans via the History dropdown.",
+      "The SUGGESTIONS section at the bottom recommends additional stages (e.g. verification, export) \u2014 click Accept to add them.",
+      "Requires a running backend with an LLM configured (OPENAI_API_KEY or OLLAMA_HOST). Check the status indicator if plans fail.",
+    ],
+  },
+  {
     title: "Keyboard Shortcuts",
     items: [
       "Ctrl+P \u2014 Toggle AI Planner",
@@ -482,7 +495,18 @@ function StatusPopover({
   );
 }
 
+const FEEDBACK_EMAIL = "Eric.J.Hackathorn@noaa.gov";
+
+type HelpTab = "guide" | "feedback";
+
 function HelpModal({ onClose }: { onClose: () => void }) {
+  const [tab, setTab] = useState<HelpTab>("guide");
+  const [fbName, setFbName] = useState("");
+  const [fbEmail, setFbEmail] = useState("");
+  const [fbType, setFbType] = useState<"question" | "bug" | "feature" | "other">("question");
+  const [fbMessage, setFbMessage] = useState("");
+  const [fbStatus, setFbStatus] = useState<"idle" | "saving" | "saved" | "error">("idle");
+
   // Close on Escape — stop propagation so App-level Escape handler doesn't also fire
   const handleKey = useCallback((e: KeyboardEvent) => {
     if (e.key === "Escape") {
@@ -496,6 +520,72 @@ function HelpModal({ onClose }: { onClose: () => void }) {
     document.addEventListener("keydown", handleKey);
     return () => document.removeEventListener("keydown", handleKey);
   }, [handleKey]);
+
+  const submitFeedback = useCallback(async () => {
+    if (!fbMessage.trim()) return;
+
+    const payload = {
+      name: fbName.trim(),
+      email: fbEmail.trim(),
+      type: fbType,
+      message: fbMessage.trim(),
+      timestamp: new Date().toISOString(),
+      userAgent: navigator.userAgent,
+    };
+
+    setFbStatus("saving");
+    try {
+      await fetch("/v1/feedback", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+      setFbStatus("saved");
+    } catch {
+      // Save failed (server may be offline) — still open mailto
+      setFbStatus("saved");
+    }
+
+    // Open mailto link
+    const subject = encodeURIComponent(`[Zyra Editor Feedback] ${fbType}: ${fbMessage.trim().slice(0, 60)}`);
+    const body = encodeURIComponent(
+      `Type: ${fbType}\nFrom: ${fbName.trim() || "Anonymous"}${fbEmail.trim() ? ` <${fbEmail.trim()}>` : ""}\n\n${fbMessage.trim()}`
+    );
+    window.open(`mailto:${FEEDBACK_EMAIL}?subject=${subject}&body=${body}`, "_blank");
+  }, [fbName, fbEmail, fbType, fbMessage]);
+
+  const tabStyle = (t: HelpTab): React.CSSProperties => ({
+    background: "none",
+    border: "none",
+    borderBottom: tab === t ? "2px solid var(--accent-blue)" : "2px solid transparent",
+    color: tab === t ? "var(--text-bright)" : "var(--text-muted)",
+    fontSize: 13,
+    fontWeight: tab === t ? 700 : 500,
+    cursor: "pointer",
+    padding: "8px 16px",
+    fontFamily: "var(--font-sans)",
+  });
+
+  const fieldLabel: React.CSSProperties = {
+    display: "block",
+    fontSize: 11,
+    fontWeight: 600,
+    color: "var(--text-secondary)",
+    marginBottom: 4,
+  };
+
+  const fieldInput: React.CSSProperties = {
+    width: "100%",
+    boxSizing: "border-box",
+    padding: "6px 10px",
+    fontSize: 12,
+    fontFamily: "var(--font-sans)",
+    background: "var(--bg-primary)",
+    border: "1px solid var(--border-default)",
+    borderRadius: 4,
+    color: "var(--text-primary)",
+    outline: "none",
+  };
 
   return (
     <div
@@ -528,33 +618,41 @@ function HelpModal({ onClose }: { onClose: () => void }) {
           overflow: "hidden",
         }}
       >
-        {/* Header */}
+        {/* Header with tabs */}
         <div style={{
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "space-between",
-          padding: "16px 20px",
+          padding: "16px 20px 0",
           borderBottom: "1px solid var(--border-default)",
           flexShrink: 0,
         }}>
-          <h2 style={{ margin: 0, fontSize: 18, fontWeight: 700, color: "var(--text-bright)" }}>
-            Zyra Editor Help
-          </h2>
-          <button
-            onClick={onClose}
-            aria-label="Close help"
-            style={{
-              background: "none",
-              border: "none",
-              color: "var(--text-muted)",
-              fontSize: 20,
-              cursor: "pointer",
-              padding: "2px 6px",
-              lineHeight: 1,
-            }}
-          >
-            &times;
-          </button>
+          <div style={{
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "space-between",
+            marginBottom: 12,
+          }}>
+            <h2 style={{ margin: 0, fontSize: 18, fontWeight: 700, color: "var(--text-bright)" }}>
+              Zyra Editor
+            </h2>
+            <button
+              onClick={onClose}
+              aria-label="Close help"
+              style={{
+                background: "none",
+                border: "none",
+                color: "var(--text-muted)",
+                fontSize: 20,
+                cursor: "pointer",
+                padding: "2px 6px",
+                lineHeight: 1,
+              }}
+            >
+              &times;
+            </button>
+          </div>
+          <div style={{ display: "flex", gap: 0 }}>
+            <button style={tabStyle("guide")} onClick={() => setTab("guide")}>Help Guide</button>
+            <button style={tabStyle("feedback")} onClick={() => setTab("feedback")}>Questions &amp; Feedback</button>
+          </div>
         </div>
 
         {/* Content */}
@@ -563,45 +661,169 @@ function HelpModal({ onClose }: { onClose: () => void }) {
           overflowY: "auto",
           padding: "16px 20px 24px",
         }}>
-          <p style={{
-            color: "var(--text-secondary)",
-            fontSize: 13,
-            lineHeight: 1.5,
-            margin: "0 0 20px",
-          }}>
-            Zyra Editor is a visual node editor for orchestrating data processing pipelines.
-            Connect nodes representing CLI commands into a graph, configure their arguments,
-            then run or export your pipeline.
-          </p>
+          {tab === "guide" && (
+            <>
+              <p style={{
+                color: "var(--text-secondary)",
+                fontSize: 13,
+                lineHeight: 1.5,
+                margin: "0 0 20px",
+              }}>
+                Zyra Editor is a visual node editor for orchestrating data processing pipelines.
+                Connect nodes representing CLI commands into a graph, configure their arguments,
+                then run or export your pipeline.
+              </p>
 
-          {HELP_SECTIONS.map((section) => (
-            <div key={section.title} style={{ marginBottom: 18 }}>
-              <h3 style={{
-                fontSize: 14,
-                fontWeight: 700,
-                color: "var(--text-primary)",
-                margin: "0 0 8px",
-              }}>
-                {section.title}
-              </h3>
-              <ul style={{
-                margin: 0,
-                paddingLeft: 18,
-                listStyle: "disc",
-              }}>
-                {section.items.map((item, i) => (
-                  <li key={i} style={{
-                    fontSize: 12,
-                    color: "var(--text-secondary)",
-                    lineHeight: 1.6,
-                    marginBottom: 2,
+              {HELP_SECTIONS.map((section) => (
+                <div key={section.title} style={{ marginBottom: 18 }}>
+                  <h3 style={{
+                    fontSize: 14,
+                    fontWeight: 700,
+                    color: "var(--text-primary)",
+                    margin: "0 0 8px",
                   }}>
-                    {item}
-                  </li>
-                ))}
-              </ul>
-            </div>
-          ))}
+                    {section.title}
+                  </h3>
+                  <ul style={{
+                    margin: 0,
+                    paddingLeft: 18,
+                    listStyle: "disc",
+                  }}>
+                    {section.items.map((item, i) => (
+                      <li key={i} style={{
+                        fontSize: 12,
+                        color: "var(--text-secondary)",
+                        lineHeight: 1.6,
+                        marginBottom: 2,
+                      }}>
+                        {item}
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              ))}
+            </>
+          )}
+
+          {tab === "feedback" && (
+            <>
+              <p style={{
+                color: "var(--text-secondary)",
+                fontSize: 13,
+                lineHeight: 1.5,
+                margin: "0 0 16px",
+              }}>
+                Have a question, found a bug, or want to request a feature?
+                Fill out the form below. Your feedback will be saved and an email
+                draft will open in your mail client.
+              </p>
+
+              {fbStatus === "saved" ? (
+                <div style={{
+                  textAlign: "center",
+                  padding: "40px 20px",
+                }}>
+                  <div style={{ fontSize: 28, marginBottom: 12 }}>&#10003;</div>
+                  <div style={{ fontSize: 15, fontWeight: 700, color: "var(--text-bright)", marginBottom: 8 }}>
+                    Thank you for your feedback!
+                  </div>
+                  <div style={{ fontSize: 12, color: "var(--text-muted)", marginBottom: 20 }}>
+                    Your feedback has been recorded. If your email client opened,
+                    please review and send the message.
+                  </div>
+                  <button
+                    className="zyra-btn"
+                    onClick={() => {
+                      setFbName("");
+                      setFbEmail("");
+                      setFbType("question");
+                      setFbMessage("");
+                      setFbStatus("idle");
+                    }}
+                    style={{ fontSize: 12 }}
+                  >
+                    Submit another
+                  </button>
+                </div>
+              ) : (
+                <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+                  <div style={{ display: "flex", gap: 12 }}>
+                    <div style={{ flex: 1 }}>
+                      <label style={fieldLabel}>Name (optional)</label>
+                      <input
+                        style={fieldInput}
+                        value={fbName}
+                        onChange={(e) => setFbName(e.target.value)}
+                        placeholder="Your name"
+                      />
+                    </div>
+                    <div style={{ flex: 1 }}>
+                      <label style={fieldLabel}>Email (optional)</label>
+                      <input
+                        type="email"
+                        style={fieldInput}
+                        value={fbEmail}
+                        onChange={(e) => setFbEmail(e.target.value)}
+                        placeholder="you@example.com"
+                      />
+                    </div>
+                  </div>
+
+                  <div>
+                    <label style={fieldLabel}>Type</label>
+                    <div style={{ display: "flex", gap: 8 }}>
+                      {(["question", "bug", "feature", "other"] as const).map((t) => (
+                        <button
+                          key={t}
+                          onClick={() => setFbType(t)}
+                          style={{
+                            padding: "4px 12px",
+                            fontSize: 11,
+                            fontWeight: fbType === t ? 700 : 500,
+                            border: `1px solid ${fbType === t ? "var(--accent-blue)" : "var(--border-default)"}`,
+                            borderRadius: 4,
+                            background: fbType === t ? "rgba(88,166,255,0.12)" : "transparent",
+                            color: fbType === t ? "var(--accent-blue)" : "var(--text-secondary)",
+                            cursor: "pointer",
+                            fontFamily: "var(--font-sans)",
+                            textTransform: "capitalize",
+                          }}
+                        >
+                          {t}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+
+                  <div>
+                    <label style={fieldLabel}>Message *</label>
+                    <textarea
+                      style={{
+                        ...fieldInput,
+                        minHeight: 100,
+                        resize: "vertical",
+                        fontFamily: "var(--font-sans)",
+                      }}
+                      value={fbMessage}
+                      onChange={(e) => setFbMessage(e.target.value)}
+                      placeholder="Describe your question, issue, or idea..."
+                    />
+                  </div>
+
+                  <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, marginTop: 4 }}>
+                    <button
+                      className="zyra-btn zyra-btn--primary"
+                      disabled={!fbMessage.trim() || fbStatus === "saving"}
+                      onClick={submitFeedback}
+                      style={{ fontSize: 12, opacity: fbMessage.trim() ? 1 : 0.5 }}
+                    >
+                      {fbStatus === "saving" ? "Sending..." : "Submit Feedback"}
+                    </button>
+                  </div>
+                </div>
+              )}
+            </>
+          )}
         </div>
 
         {/* Footer */}
@@ -617,7 +839,7 @@ function HelpModal({ onClose }: { onClose: () => void }) {
             onClick={onClose}
             autoFocus
           >
-            Got it
+            {tab === "guide" ? "Got it" : "Close"}
           </button>
         </div>
       </div>
