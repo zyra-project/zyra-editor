@@ -549,12 +549,18 @@ _CLARIFICATION_CONFIRM_RE = re.compile(
 
 # Regex to extract arg key and agent/command from question text
 # e.g. "Could you please provide the 'path' for the FTP command?"
+# e.g. "[fetch_sst_data — acquire ftp] Provide value for 'path':"
 _QUESTION_ARG_RE = re.compile(
-    r"the\s+'(?P<arg>[^']+)'"  # 'arg' in single quotes
+    r"(?:the|for)\s+'(?P<arg>[^']+)'"  # 'arg' in single quotes after "the" or "for"
 )
 _QUESTION_AGENT_RE = re.compile(
     r"for\s+(?:the\s+)?(?P<agent>\w+)\s+(?:command|step|stage|agent)",
     re.IGNORECASE,
+)
+# Regex to extract agent_id and command from the bracketed prefix of
+# input() prompts: "[fetch_sst_data — acquire ftp] Provide value for 'path':"
+_INPUT_BRACKET_RE = re.compile(
+    r"^\[(?P<agent_id>[^\]—]+?)(?:\s*[—–-]\s*(?P<command>[^\]]+))?\]",
 )
 # Regex to parse hint lines: "hint: description (default: value)"
 _HINT_RE = re.compile(
@@ -695,9 +701,14 @@ def _enrich_question(
 
     # Try to extract agent/command name
     agent_id = ""
-    m = _QUESTION_AGENT_RE.search(question_text)
+    # First try the bracketed prefix: [agent_id — command]
+    m = _INPUT_BRACKET_RE.match(question_text.strip())
     if m:
-        agent_id = m.group("agent").lower()
+        agent_id = m.group("agent_id").strip()
+    if not agent_id:
+        m = _QUESTION_AGENT_RE.search(question_text)
+        if m:
+            agent_id = m.group("agent").lower()
 
     # Parse hint lines for description and default value
     hint_desc = ""
@@ -1382,26 +1393,42 @@ async def ws_plan(websocket: WebSocket):
                         # often asks for the same arg twice (once in
                         # the clarification round, once via input()
                         # after FTP listing, etc.).
-                        prev_answers: dict[tuple[str, str], str] = {}
+                        # Build lookup tables: exact (agent, key) and
+                        # fallback by arg_key alone.  The planner may
+                        # use different agent_ids across rounds (e.g.
+                        # "acquire_ftp" vs "fetch_sst_data").
+                        prev_exact: dict[tuple[str, str], str] = {}
+                        prev_by_arg: dict[str, str] = {}
                         for a in collected_answers:
-                            key = (a.get("agent_id", ""), a.get("arg_key", ""))
-                            if key[0] or key[1]:  # at least one must be set
-                                prev_answers[key] = a.get("value", "")
+                            aid = a.get("agent_id", "")
+                            akey = a.get("arg_key", "")
+                            val = a.get("value", "")
+                            if aid and akey:
+                                prev_exact[(aid, akey)] = val
+                            if akey:
+                                prev_by_arg[akey] = val
 
                         auto_replayed: list[dict] = []
                         remaining_items: list[dict] = []
                         for item in items:
-                            key = (item.get("agent_id", ""), item.get("arg_key", ""))
-                            prev_val = prev_answers.get(key) if (key[0] or key[1]) else None
+                            aid = item.get("agent_id", "")
+                            akey = item.get("arg_key", "")
+                            prev_val = (
+                                prev_exact.get((aid, akey))
+                                if aid and akey else None
+                            ) or (
+                                prev_by_arg.get(akey)
+                                if akey else None
+                            )
                             if prev_val:
                                 logger.info(
                                     "ws/plan: auto-replaying answer for "
                                     "%s.%s = %s",
-                                    key[0], key[1], prev_val,
+                                    aid, akey, prev_val,
                                 )
                                 auto_replayed.append({
-                                    "agent_id": key[0],
-                                    "arg_key": key[1],
+                                    "agent_id": aid,
+                                    "arg_key": akey,
                                     "value": prev_val,
                                 })
                             else:
