@@ -24,11 +24,30 @@ if _env_file.exists():
             line = line.strip()
             if not line or line.startswith("#"):
                 continue
+            # Allow optional leading 'export'
+            if line.startswith("export"):
+                parts = line.split(None, 1)
+                if len(parts) < 2:
+                    continue
+                line = parts[1].lstrip()
             if "=" not in line:
                 continue
-            key, _, val = line.partition("=")
+            key, _, raw_val = line.partition("=")
             key = key.strip()
-            val = val.strip().strip("'\"")
+            raw_val = raw_val.strip()
+            # Strip inline comments when not inside quotes
+            in_single = False
+            in_double = False
+            val_chars: list[str] = []
+            for ch in raw_val:
+                if ch == "'" and not in_double:
+                    in_single = not in_single
+                elif ch == '"' and not in_single:
+                    in_double = not in_double
+                if ch == "#" and not in_single and not in_double:
+                    break
+                val_chars.append(ch)
+            val = "".join(val_chars).strip().strip("'\"")
             if key:
                 os.environ.setdefault(key, val)
 
@@ -64,6 +83,9 @@ _ENV_VAR_RE = re.compile(r"\$\{([A-Za-z_][A-Za-z0-9_]*)\}")
 _log = logging.getLogger("zyra-editor")
 
 
+_warned_env_vars: set[str] = set()
+
+
 def _resolve_env_vars(value: str) -> str:
     """Replace ${VAR_NAME} references with values from os.environ.
 
@@ -74,11 +96,13 @@ def _resolve_env_vars(value: str) -> str:
         name = m.group(1)
         resolved = os.environ.get(name)
         if resolved is None:
-            _log.warning(
-                "Secret variable ${%s} is not set in the environment. "
-                "Add it to server/.env or export it before starting the server.",
-                name,
-            )
+            if name not in _warned_env_vars:
+                _warned_env_vars.add(name)
+                _log.warning(
+                    "Secret variable ${%s} is not set in the environment. "
+                    "Add it to server/.env or export it before starting the server.",
+                    name,
+                )
             return m.group(0)
         return resolved
     return _ENV_VAR_RE.sub(_replace, value)

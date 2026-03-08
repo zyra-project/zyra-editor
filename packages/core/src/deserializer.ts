@@ -148,14 +148,18 @@ export function pipelineToGraph(
       stageCommand: "control/delay",
       argValues: { duration, unit },
     });
-    // Wire the delay node to the target step's first arg port
+    // Wire the delay node to the target step: prefer first arg port, fall back to first input
     const targetInfo = nodeMap.get(step.name);
-    if (targetInfo?.stage && targetInfo.stage.args.length > 0) {
+    if (targetInfo) {
+      let targetPort = targetInfo.stage?.inputs[0]?.id ?? "in";
+      if (targetInfo.stage && targetInfo.stage.args.length > 0) {
+        targetPort = `arg:${targetInfo.stage.args[0].key}`;
+      }
       edges.push({
         sourceNode: delayId,
         sourcePort: "delay",
         targetNode: step.name,
-        targetPort: `arg:${targetInfo.stage.args[0].key}`,
+        targetPort,
       });
     }
   }

@@ -374,7 +374,9 @@ export function ZyraNode({ id, data, selected }: NodeProps) {
           const jitter = argValues.jitter;
           const hasDur = dur !== undefined && dur !== "";
           if (!hasDur) return null;
-          const display = `${dur} ${unit}${jitter && jitter !== "" && jitter !== 0 ? ` \u00b1${jitter}s` : ""}`;
+          const jitterValue = Number(jitter);
+          const hasJitter = Number.isFinite(jitterValue) && jitterValue !== 0;
+          const display = `${dur} ${unit}${hasJitter ? ` \u00b1${jitterValue}s` : ""}`;
           return (
             <div
               style={{
@@ -437,10 +439,11 @@ export function ZyraNode({ id, data, selected }: NodeProps) {
             const rs = argValues.range_start ?? "0";
             const re = argValues.range_end ?? "?";
             const step = argValues.range_step;
-            detail = `range(${rs}..${re}${step && step !== "" && step !== 1 ? `, step ${step}` : ""})`;
+            const showStep = step !== undefined && step !== "" && Number(step) !== 1;
+            detail = `range(${rs}..${re}${showStep ? `, step ${step}` : ""})`;
           }
           const mp = argValues.max_parallel;
-          const parallel = mp !== undefined && mp !== "" && mp !== 1 ? ` \u00d7${mp}` : "";
+          const parallel = mp !== undefined && mp !== "" && Number(mp) !== 1 ? ` \u00d7${mp}` : "";
           const display = `${detail}${parallel}`;
           return (
             <div

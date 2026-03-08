@@ -281,7 +281,7 @@ export const MOCK_MANIFEST: Manifest = {
           type: "number",
           required: false,
           placeholder: "0",
-          description: "Add random jitter up to this many seconds to avoid thundering herd",
+          description: "Add random jitter up to this many seconds to avoid thundering herd (not yet implemented — ignored at execution time)",
         },
       ],
     },
