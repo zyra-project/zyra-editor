@@ -177,6 +177,45 @@ def _opt_to_arg(flag: str, info) -> dict | None:
     return arg
 
 
+def _positional_to_arg(pos: dict) -> dict | None:
+    """Convert a zyra CLI positional arg to an ArgDef."""
+    name = pos.get("name", "")
+    if not name:
+        return None
+
+    help_text = pos.get("help", "")
+    typ = pos.get("type", "str")
+    required = pos.get("required", False)
+    default = pos.get("default")
+    choices = pos.get("choices")
+
+    if choices:
+        arg_type = "enum"
+    elif typ in ("int", "float"):
+        arg_type = "number"
+    elif typ == "bool":
+        arg_type = "boolean"
+    elif typ == "path":
+        arg_type = "filepath"
+    else:
+        arg_type = "string"
+
+    arg: dict = {
+        "key": name,
+        "label": name.replace("_", " ").replace("-", " ").title(),
+        "type": arg_type,
+        "required": bool(required),
+        "description": help_text,
+    }
+    if default is not None:
+        arg["default"] = default
+    if help_text:
+        arg["placeholder"] = help_text
+    if choices:
+        arg["options"] = choices
+    return arg
+
+
 # Stages that should not appear as editor nodes (handled by the editor UI itself)
 HIDDEN_STAGES: set[str] = {"run"}
 
@@ -222,6 +261,13 @@ def _commands_to_manifest(commands: dict) -> dict:
         seen.add(key)
 
         args = []
+        # Positional arguments (name, help, type, required)
+        for pos in (cmd_info.get("positionals") or []):
+            if isinstance(pos, dict):
+                arg = _positional_to_arg(pos)
+                if arg:
+                    args.append(arg)
+        # Named options / flags
         for flag, info in (cmd_info.get("options") or {}).items():
             arg = _opt_to_arg(flag, info)
             if arg:
