@@ -488,7 +488,10 @@ WS_KEEPALIVE_INTERVAL = 15  # seconds
 _QUESTION_SUFFIXES = ("?", "> ", "[y/n]", "[Y/n]", "[y/N]", "]: ", "): ")
 _QUESTION_PATTERNS = re.compile(
     r"(?:^(?:Q\d|Question|\d+[\.\)]))"  # "Q1:", "Question:", "1." or "1)"
-    r"|(?:please\s+(?:provide|specify|enter|choose|select))",  # polite prompts
+    r"|(?:please\s+(?:provide|specify|enter|choose|select|confirm|set|indicate))"  # polite prompts
+    r"|(?:could\s+you\s+(?:please\s+)?(?:provide|specify|enter|choose|select|confirm))"  # "could you ..."
+    r"|(?:what\s+(?:is|should|would)\b)"  # "what is/should/would ..."
+    r"|(?:which\s+\w+\s+(?:do|would|should)\b)",  # "which X do/would/should ..."
     re.IGNORECASE,
 )
 
@@ -635,6 +638,10 @@ def _classify_stdout_line(line: str) -> tuple[str, str]:
     if any(stripped.endswith(s) for s in _QUESTION_SUFFIXES):
         return ("question", stripped)
     if _QUESTION_PATTERNS.search(stripped):
+        return ("question", stripped)
+    # Lines containing '?' are likely questions even if the '?' is mid-sentence
+    # (e.g. "Could you confirm X? This ensures Y.")
+    if "?" in stripped and not stripped.startswith(("DEBUG", "INFO", "WARNING", "ERROR", "http")):
         return ("question", stripped)
     return ("log", stripped)
 
