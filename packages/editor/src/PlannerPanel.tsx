@@ -961,6 +961,13 @@ export function PlannerPanel({
                     prev === agent.id ? null : agent.id,
                   )
                 }
+                onUpdateArgs={(args) =>
+                  setEditableAgents((prev) =>
+                    prev.map((a) =>
+                      a.id === agent.id ? { ...a, args } : a,
+                    ),
+                  )
+                }
                 onRemove={() => handleRemoveAgent(agent.id)}
                 onMoveUp={() => handleMoveAgent(idx, -1)}
                 onMoveDown={() => handleMoveAgent(idx, 1)}
@@ -1097,12 +1104,236 @@ function StageBadge({ stage }: { stage: string }) {
   );
 }
 
+/** Inline editable row for a single arg key-value pair. */
+function ArgRow({
+  argKey,
+  value,
+  onChangeValue,
+  onRemove,
+}: {
+  argKey: string;
+  value: string;
+  onChangeValue: (v: string) => void;
+  onRemove: () => void;
+}) {
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState(value);
+  const inputRef = useRef<HTMLInputElement>(null);
+  const displayKey = argKey.replace(/^-+/, "");
+
+  useEffect(() => {
+    if (editing) inputRef.current?.focus();
+  }, [editing]);
+
+  const commit = () => {
+    setEditing(false);
+    if (draft.trim() !== value) onChangeValue(draft.trim());
+  };
+
+  return (
+    <tr>
+      <td
+        style={{
+          fontSize: 10,
+          color: "var(--accent-blue)",
+          fontFamily: "var(--font-mono)",
+          padding: "2px 6px 2px 0",
+          verticalAlign: "top",
+          whiteSpace: "nowrap",
+          userSelect: "all",
+        }}
+      >
+        {displayKey}
+      </td>
+      <td style={{ fontSize: 10, padding: "1px 0" }}>
+        {editing ? (
+          <input
+            ref={inputRef}
+            className="zyra-input"
+            value={draft}
+            onChange={(e) => setDraft(e.target.value)}
+            onBlur={commit}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") commit();
+              if (e.key === "Escape") { setDraft(value); setEditing(false); }
+            }}
+            style={{
+              width: "100%",
+              fontSize: 10,
+              fontFamily: "var(--font-mono)",
+              padding: "1px 4px",
+              background: "var(--bg-primary)",
+              border: "1px solid var(--accent-blue)",
+              borderRadius: 3,
+              color: "var(--text-primary)",
+              outline: "none",
+              boxSizing: "border-box",
+            }}
+          />
+        ) : (
+          <span
+            onClick={(e) => { e.stopPropagation(); setEditing(true); }}
+            title="Click to edit"
+            style={{
+              color: "var(--text-primary)",
+              fontFamily: "var(--font-mono)",
+              cursor: "text",
+              wordBreak: value.length > 40 ? "break-all" : "normal",
+              borderBottom: "1px dashed var(--border-default)",
+              paddingBottom: 1,
+            }}
+          >
+            {value || <em style={{ color: "var(--text-muted)" }}>empty</em>}
+          </span>
+        )}
+      </td>
+      <td style={{ width: 16, padding: 0, verticalAlign: "top" }}>
+        <button
+          onClick={(e) => { e.stopPropagation(); onRemove(); }}
+          title="Remove argument"
+          style={{
+            background: "none",
+            border: "none",
+            color: "var(--text-muted)",
+            fontSize: 10,
+            cursor: "pointer",
+            padding: "2px 2px",
+            lineHeight: 1,
+            opacity: 0.5,
+          }}
+          onMouseEnter={(e) => { (e.target as HTMLElement).style.opacity = "1"; (e.target as HTMLElement).style.color = "var(--accent-red)"; }}
+          onMouseLeave={(e) => { (e.target as HTMLElement).style.opacity = "0.5"; (e.target as HTMLElement).style.color = "var(--text-muted)"; }}
+        >
+          {"\u00D7"}
+        </button>
+      </td>
+    </tr>
+  );
+}
+
+/** Inline form to add a new arg key-value pair. */
+function AddArgRow({ onAdd }: { onAdd: (key: string, value: string) => void }) {
+  const [active, setActive] = useState(false);
+  const [key, setKey] = useState("");
+  const [val, setVal] = useState("");
+  const keyRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    if (active) keyRef.current?.focus();
+  }, [active]);
+
+  const commit = () => {
+    const k = key.trim();
+    const v = val.trim();
+    if (k) {
+      onAdd(k, v);
+      setKey("");
+      setVal("");
+      setActive(false);
+    }
+  };
+
+  if (!active) {
+    return (
+      <div
+        onClick={(e) => { e.stopPropagation(); setActive(true); }}
+        style={{
+          fontSize: 10,
+          color: "var(--accent-blue)",
+          cursor: "pointer",
+          padding: "3px 0 0",
+          opacity: 0.7,
+        }}
+        onMouseEnter={(e) => { (e.target as HTMLElement).style.opacity = "1"; }}
+        onMouseLeave={(e) => { (e.target as HTMLElement).style.opacity = "0.7"; }}
+      >
+        + add argument
+      </div>
+    );
+  }
+
+  const inputStyle: React.CSSProperties = {
+    fontSize: 10,
+    fontFamily: "var(--font-mono)",
+    padding: "1px 4px",
+    background: "var(--bg-primary)",
+    border: "1px solid var(--border-default)",
+    borderRadius: 3,
+    color: "var(--text-primary)",
+    outline: "none",
+    boxSizing: "border-box",
+  };
+
+  return (
+    <div
+      style={{ display: "flex", gap: 4, alignItems: "center", paddingTop: 3 }}
+      onClick={(e) => e.stopPropagation()}
+    >
+      <input
+        ref={keyRef}
+        className="zyra-input"
+        placeholder="key"
+        value={key}
+        onChange={(e) => setKey(e.target.value)}
+        onKeyDown={(e) => {
+          if (e.key === "Enter") commit();
+          if (e.key === "Escape") { setKey(""); setVal(""); setActive(false); }
+        }}
+        style={{ ...inputStyle, width: 70 }}
+      />
+      <input
+        className="zyra-input"
+        placeholder="value"
+        value={val}
+        onChange={(e) => setVal(e.target.value)}
+        onKeyDown={(e) => {
+          if (e.key === "Enter") commit();
+          if (e.key === "Escape") { setKey(""); setVal(""); setActive(false); }
+        }}
+        style={{ ...inputStyle, flex: 1 }}
+      />
+      <button
+        onClick={commit}
+        disabled={!key.trim()}
+        style={{
+          background: "none",
+          border: "none",
+          color: key.trim() ? "var(--accent-green)" : "var(--text-muted)",
+          fontSize: 12,
+          cursor: key.trim() ? "pointer" : "default",
+          padding: "0 2px",
+          lineHeight: 1,
+        }}
+        title="Add"
+      >
+        {"\u2713"}
+      </button>
+      <button
+        onClick={() => { setKey(""); setVal(""); setActive(false); }}
+        style={{
+          background: "none",
+          border: "none",
+          color: "var(--text-muted)",
+          fontSize: 12,
+          cursor: "pointer",
+          padding: "0 2px",
+          lineHeight: 1,
+        }}
+        title="Cancel"
+      >
+        {"\u00D7"}
+      </button>
+    </div>
+  );
+}
+
 function AgentCard({
   agent,
   index,
   total,
   expanded,
   onToggle,
+  onUpdateArgs,
   onRemove,
   onMoveUp,
   onMoveDown,
@@ -1112,6 +1343,7 @@ function AgentCard({
   total: number;
   expanded: boolean;
   onToggle: () => void;
+  onUpdateArgs: (args: Record<string, string>) => void;
   onRemove: () => void;
   onMoveUp: () => void;
   onMoveDown: () => void;
@@ -1120,7 +1352,20 @@ function AgentCard({
   const argEntries = Object.entries(agent.args).filter(
     ([, v]) => v !== "" && v !== undefined && v !== null,
   );
-  const hasArgs = argEntries.length > 0;
+
+  const handleArgChange = (key: string, newVal: string) => {
+    onUpdateArgs({ ...agent.args, [key]: newVal });
+  };
+
+  const handleArgRemove = (key: string) => {
+    const next = { ...agent.args };
+    delete next[key];
+    onUpdateArgs(next);
+  };
+
+  const handleArgAdd = (key: string, val: string) => {
+    onUpdateArgs({ ...agent.args, [key]: val });
+  };
 
   return (
     <div
@@ -1232,58 +1477,31 @@ function AgentCard({
         </div>
       )}
 
-      {/* Expanded args detail */}
+      {/* Expanded args detail — editable */}
       {expanded && (
         <div
           style={{
             borderTop: "1px solid var(--border-default)",
             padding: "6px 10px 8px 26px",
           }}
+          onClick={(e) => e.stopPropagation()}
         >
-          {hasArgs ? (
+          {argEntries.length > 0 && (
             <table style={{ width: "100%", borderCollapse: "collapse" }}>
               <tbody>
-                {argEntries.map(([key, val]) => {
-                  // Strip leading dashes from flag-style keys
-                  const displayKey = key.replace(/^-+/, "");
-                  const isLong = typeof val === "string" && val.length > 40;
-                  return (
-                    <tr key={key}>
-                      <td
-                        style={{
-                          fontSize: 10,
-                          color: "var(--accent-blue)",
-                          fontFamily: "var(--font-mono)",
-                          padding: "2px 8px 2px 0",
-                          verticalAlign: "top",
-                          whiteSpace: "nowrap",
-                          userSelect: "all",
-                        }}
-                      >
-                        {displayKey}
-                      </td>
-                      <td
-                        style={{
-                          fontSize: 10,
-                          color: "var(--text-primary)",
-                          fontFamily: "var(--font-mono)",
-                          padding: "2px 0",
-                          wordBreak: isLong ? "break-all" : "normal",
-                          userSelect: "all",
-                        }}
-                      >
-                        {val}
-                      </td>
-                    </tr>
-                  );
-                })}
+                {argEntries.map(([key, val]) => (
+                  <ArgRow
+                    key={key}
+                    argKey={key}
+                    value={val}
+                    onChangeValue={(v) => handleArgChange(key, v)}
+                    onRemove={() => handleArgRemove(key)}
+                  />
+                ))}
               </tbody>
             </table>
-          ) : (
-            <div style={{ fontSize: 10, color: "var(--text-muted)", fontStyle: "italic" }}>
-              No arguments configured
-            </div>
           )}
+          <AddArgRow onAdd={handleArgAdd} />
         </div>
       )}
     </div>
