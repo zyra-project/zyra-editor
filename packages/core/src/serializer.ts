@@ -185,7 +185,15 @@ export function graphToPipeline(
     if (isNaN(dur) || dur <= 0) continue;
     const unit = srcNode.argValues.unit ?? "seconds";
     const multiplier = unit === "hours" ? 3600 : unit === "minutes" ? 60 : 1;
-    delayMap.set(e.targetNode, dur * multiplier);
+    const delaySecs = dur * multiplier;
+    const existing = delayMap.get(e.targetNode);
+    if (existing !== undefined && existing !== delaySecs) {
+      diagnostics?.push({
+        level: "warn",
+        message: `Multiple delay nodes target step "${e.targetNode}" — later delay of ${delaySecs}s will override earlier delay of ${existing}s.`,
+      });
+    }
+    delayMap.set(e.targetNode, delaySecs);
   }
 
   // ── Extract conditions from conditional nodes ───────────────────
@@ -215,6 +223,12 @@ export function graphToPipeline(
         message: `Conditional node "${e.sourceNode}" has an invalid operator "${String(operator)}" — defaulting to "==".`,
       });
     }
+    if (conditionMap.has(e.targetNode)) {
+      diagnostics?.push({
+        level: "warn",
+        message: `Multiple conditions target step "${e.targetNode}" — later condition from "${e.sourceNode}" will override the earlier one.`,
+      });
+    }
     conditionMap.set(e.targetNode, {
       field,
       operator: op ?? "==",
@@ -224,6 +238,13 @@ export function graphToPipeline(
   }
 
   // ── Extract loops from loop nodes ─────────────────────────────
+  // Precompute an index of edges by (targetNode, targetPort) for O(1) lookup
+  // when finding what provides items to a loop node.
+  const edgesByTarget = new Map<string, string>();
+  for (const e of graph.edges) {
+    edgesByTarget.set(`${e.targetNode}:${e.targetPort}`, e.sourceNode);
+  }
+
   // Map from target step node ID → StepLoop
   const loopMap = new Map<string, StepLoop>();
   for (const e of graph.edges) {
@@ -246,14 +267,8 @@ export function graphToPipeline(
       continue;
     }
 
-    // Find what provides items to the loop node (edge into the loop's "items" input)
-    let over: string | undefined;
-    for (const itemEdge of graph.edges) {
-      if (itemEdge.targetNode === srcNode.id && itemEdge.targetPort === "items") {
-        over = itemEdge.sourceNode;
-        break;
-      }
-    }
+    // Find what provides items to the loop node (O(1) lookup)
+    const over = edgesByTarget.get(`${srcNode.id}:items`);
 
     const loop: StepLoop = {
       mode: mode as StepLoop["mode"],

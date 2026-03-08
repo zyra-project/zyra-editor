@@ -128,6 +128,20 @@ export function pipelineToGraph(
     }
   }
 
+  // Collect all existing node IDs for deduplication of generated control nodes.
+  const existingIds = new Set(nodes.map((n) => n.id));
+
+  /** Generate a unique ID with the given prefix, avoiding collisions. */
+  function uniqueId(prefix: string): string {
+    let id = prefix;
+    let i = 0;
+    while (existingIds.has(id)) {
+      id = `${prefix}_${++i}`;
+    }
+    existingIds.add(id);
+    return id;
+  }
+
   // Reconstruct delay control nodes from steps with delay_seconds
   // when no matching delay control already targets this step.
   for (const step of pipeline.steps) {
@@ -142,19 +156,17 @@ export function pipelineToGraph(
       duration = duration / 60;
       unit = "minutes";
     }
-    const delayId = `_delay_${step.name}`;
+    const delayId = uniqueId(`_delay_${step.name}`);
     nodes.push({
       id: delayId,
       stageCommand: "control/delay",
       argValues: { duration, unit },
     });
-    // Wire the delay node to the target step: prefer first arg port, fall back to first input
+    // Wire the delay node to the target step's first input port (not arg-port,
+    // which would make the arg appear linked/readonly in the editor).
     const targetInfo = nodeMap.get(step.name);
     if (targetInfo) {
-      let targetPort = targetInfo.stage?.inputs[0]?.id ?? "in";
-      if (targetInfo.stage && targetInfo.stage.args.length > 0) {
-        targetPort = `arg:${targetInfo.stage.args[0].key}`;
-      }
+      const targetPort = targetInfo.stage?.inputs[0]?.id ?? "in";
       edges.push({
         sourceNode: delayId,
         sourcePort: "delay",
@@ -179,8 +191,8 @@ export function pipelineToGraph(
     condGroups.get(key)!.steps.push(step.name);
   }
   let condIdx = 0;
-  for (const [key, group] of condGroups) {
-    const condId = `_cond_${condIdx++}_${key.replace(/[^A-Za-z0-9_]/g, "_")}`;
+  for (const [, group] of condGroups) {
+    const condId = uniqueId(`_cond_${condIdx++}`);
     nodes.push({
       id: condId,
       stageCommand: "control/conditional",
@@ -210,7 +222,7 @@ export function pipelineToGraph(
   for (const step of pipeline.steps) {
     if (!step.loop) continue;
     if (stepsWithLoopControl.has(step.name)) continue;
-    const loopId = `_loop_${step.name}`;
+    const loopId = uniqueId(`_loop_${step.name}`);
     const loopArgs: Record<string, string | number | boolean> = {
       mode: step.loop.mode,
     };
