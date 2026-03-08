@@ -527,46 +527,81 @@ def _parse_clarification(detail: str) -> dict | None:
 
 
 def _get_cached_manifest() -> dict:
-    """Fetch the manifest (cached for the process lifetime)."""
-    if not hasattr(_get_cached_manifest, "_cache"):
+    """Fetch the manifest, trying the local HTTP endpoint then CLI fallback."""
+    if not hasattr(_get_cached_manifest, "_cache") or not _get_cached_manifest._cache.get("stages"):
+        _get_cached_manifest._cache = {"version": "1.0", "stages": []}
+
+        # Strategy 1: call our own /v1/commands endpoint
+        port = int(os.environ.get("PORT", "8765"))
         try:
-            from zyra.api.server import create_app as _ca
-            _app = _ca()
-            # Get commands from the zyra app
-            import httpx
-            # Use the internal function directly
+            resp = http_requests.get(
+                f"http://127.0.0.1:{port}/v1/commands",
+                timeout=10,
+            )
+            resp.raise_for_status()
+            data = resp.json()
+            manifest = _commands_to_manifest(data.get("commands", {}))
+            if manifest.get("stages"):
+                _get_cached_manifest._cache = manifest
+                logger.debug("Cached manifest from /v1/commands (%d stages)",
+                             len(manifest["stages"]))
+                return _get_cached_manifest._cache
+        except Exception as exc:
+            logger.debug("Failed to fetch /v1/commands: %s", exc)
+
+        # Strategy 2: call zyra CLI directly
+        try:
             result = subprocess.run(
-                ["zyra", "manifest", "--json"],
+                ["zyra", "commands", "--json"],
                 capture_output=True, text=True, timeout=30,
             )
             if result.returncode == 0:
                 data = json.loads(result.stdout)
-                _get_cached_manifest._cache = _commands_to_manifest(
-                    data.get("commands", {})
-                )
-            else:
-                _get_cached_manifest._cache = {"version": "1.0", "stages": []}
-        except Exception:
-            _get_cached_manifest._cache = {"version": "1.0", "stages": []}
+                manifest = _commands_to_manifest(data.get("commands", {}))
+                if manifest.get("stages"):
+                    _get_cached_manifest._cache = manifest
+                    logger.debug("Cached manifest from zyra CLI (%d stages)",
+                                 len(manifest["stages"]))
+        except Exception as exc:
+            logger.debug("Failed to run zyra commands --json: %s", exc)
+
     return _get_cached_manifest._cache
 
 
-def _lookup_arg_meta(manifest: dict, stage_command: str, arg_key: str) -> dict:
+def _lookup_arg_meta(manifest: dict, agent_id: str, arg_key: str) -> dict:
     """Look up ArgDef metadata from the manifest for a given arg key.
 
-    stage_command can be the agent_id (e.g. 'fetch_frames') — we try to
-    match by command name, falling back to fuzzy prefix matching.
+    agent_id comes from the plan (e.g. 'fetch_frames') and may not
+    directly match manifest command names (e.g. 'ftp').  We try several
+    strategies in order of specificity.
     """
-    # Normalize: agent IDs often look like "stage_command_N"
-    # Try to find a matching stage by command name
+    normalized = agent_id.lower().replace("-", "_")
+
+    def _match_arg(stage_def: dict) -> dict | None:
+        for arg in stage_def.get("args", []):
+            if (arg.get("key") == arg_key
+                    or arg.get("flag", "").lstrip("-").replace("-", "_") == arg_key):
+                return arg
+        return None
+
+    # Pass 1: exact command match
     for stage_def in manifest.get("stages", []):
-        cmd = stage_def.get("command", "")
-        # Match if the agent_id starts with or contains the command name
-        if cmd and (stage_command == cmd or stage_command.startswith(cmd)):
-            for arg in stage_def.get("args", []):
-                if arg.get("key") == arg_key or arg.get("flag", "").lstrip("-").replace("-", "_") == arg_key:
-                    return arg
-    # Fuzzy: search all stages for the arg key
+        cmd = stage_def.get("command", "").lower().replace("-", "_")
+        if cmd and cmd == normalized:
+            found = _match_arg(stage_def)
+            if found:
+                return found
+
+    # Pass 2: agent_id contains the command name (e.g. "fetch_ftp_data" contains "ftp")
+    # Only match command names of 3+ chars to avoid spurious hits
+    for stage_def in manifest.get("stages", []):
+        cmd = stage_def.get("command", "").lower().replace("-", "_")
+        if cmd and len(cmd) >= 3 and cmd in normalized:
+            found = _match_arg(stage_def)
+            if found:
+                return found
+
+    # Pass 3: search all stages for the arg key (common args like "path")
     for stage_def in manifest.get("stages", []):
         for arg in stage_def.get("args", []):
             if arg.get("key") == arg_key:
