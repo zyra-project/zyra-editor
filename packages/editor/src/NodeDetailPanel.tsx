@@ -310,7 +310,7 @@ function InputTab({
       {visiblePorts.map((port) => {
         const connections = connectedInputs.filter((c) => c.portId === port.id);
         const argDef = port.argKey ? stageDef.args?.find((a) => a.key === port.argKey) : undefined;
-        const sensitive = argDef ? isSensitive(argDef) : false;
+        const portSensitive = argDef ? isSensitive(argDef) : false;
         return (
           <div key={port.id} style={{ marginBottom: 16 }}>
             <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 4 }}>
@@ -327,7 +327,9 @@ function InputTab({
               </span>
             </div>
             {connections.length > 0 ? (
-              connections.map((conn, i) => (
+              connections.map((conn, i) => {
+                const sensitive = portSensitive || !!conn.peerSensitive;
+                return (
                 <div
                   key={i}
                   onClick={() => onSelectNode(conn.peerNodeId)}
@@ -366,7 +368,8 @@ function InputTab({
                     <StatusBadge status={conn.peerStatus} />
                   )}
                 </div>
-              ))
+                );
+              })
             ) : (
               <div style={{ marginLeft: 18, fontSize: 12, color: "var(--text-muted)" }}>
                 Not connected
