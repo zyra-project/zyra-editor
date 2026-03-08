@@ -1746,9 +1746,10 @@ function ClarificationCard({
   const displayValue = isConfirm ? item.current_value ?? "" : "";
 
   const handleSubmit = () => {
-    const val = value.trim() || (isConfirm ? displayValue : "");
+    const val = value.trim() || (isConfirm ? displayValue : (item.default != null ? String(item.default) : ""));
     if (val) onSubmit(val);
   };
+  const hasValue = !!value.trim() || isConfirm || item.default != null;
 
   return (
     <div style={{
@@ -1907,14 +1908,14 @@ function ClarificationCard({
         <button
           className="zyra-btn zyra-btn--primary"
           onClick={handleSubmit}
-          disabled={!isConfirm && !value.trim()}
+          disabled={!hasValue}
           style={{
             flex: 1,
             fontSize: 12,
-            opacity: (!isConfirm && !value.trim()) ? 0.5 : 1,
+            opacity: !hasValue ? 0.5 : 1,
           }}
         >
-          {isConfirm && !value.trim() ? "Keep Current" : "Next"}
+          {isConfirm && !value.trim() ? "Keep Current" : !value.trim() && item.default != null ? "Use Default" : "Next"}
         </button>
         <button
           onClick={onCancel}

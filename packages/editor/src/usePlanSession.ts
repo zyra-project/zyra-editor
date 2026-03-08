@@ -52,7 +52,12 @@ export function usePlanSession(): PlanSession {
   const [clarification, setClarification] = useState<ClarificationItem | null>(null);
   const wsRef = useRef<WebSocket | null>(null);
   const phaseRef = useRef<PlanPhase>(phase);
-  phaseRef.current = phase;
+  // Synchronously update phaseRef so ws.onclose sees the latest phase
+  // even before React re-renders (avoids race with immediate socket close).
+  const setPhaseSync = useCallback((p: PlanPhase) => {
+    phaseRef.current = p;
+    setPhase(p);
+  }, []);
 
   const appendChat = useCallback((role: ChatEntry["role"], text: string) => {
     setChat((prev) => [...prev, { role, text, timestamp: Date.now() }]);
@@ -74,7 +79,7 @@ export function usePlanSession(): PlanSession {
     setPlan(null);
     setError(null);
     setClarification(null);
-    setPhase("thinking");
+    setPhaseSync("thinking");
 
     const ws = connectPlanWs();
     wsRef.current = ws;
@@ -92,17 +97,17 @@ export function usePlanSession(): PlanSession {
 
         switch (msg.type) {
           case "question":
-            setPhase("asking");
+            setPhaseSync("asking");
             appendChat("assistant", msg.text);
             break;
           case "clarification":
             setClarification(msg as ClarificationItem);
-            setPhase("clarifying");
+            setPhaseSync("clarifying");
             break;
           case "plan":
             setClarification(null);
             setPlan(msg.data as PlanResponse);
-            setPhase("done");
+            setPhaseSync("done");
             appendChat("status", "Plan generated.");
             break;
           case "status":
@@ -116,7 +121,7 @@ export function usePlanSession(): PlanSession {
             break;
           case "error":
             setError(msg.text);
-            setPhase("error");
+            setPhaseSync("error");
             break;
         }
       } catch {
@@ -127,7 +132,7 @@ export function usePlanSession(): PlanSession {
     ws.onerror = () => {
       if (wsRef.current !== ws) return; // stale socket
       setError("WebSocket connection failed");
-      setPhase("error");
+      setPhaseSync("error");
       wsRef.current = null;
     };
 
@@ -138,7 +143,7 @@ export function usePlanSession(): PlanSession {
       const p = phaseRef.current;
       if (p !== "done" && p !== "idle" && p !== "error") {
         setError("WebSocket connection closed unexpectedly");
-        setPhase("error");
+        setPhaseSync("error");
       }
       wsRef.current = null;
     };
@@ -154,7 +159,7 @@ export function usePlanSession(): PlanSession {
       appendChat("user", text);
     }
     setClarification(null);
-    setPhase("thinking");
+    setPhaseSync("thinking");
   }, [appendChat, clarification]);
 
   const cancel = useCallback(() => {
@@ -163,7 +168,7 @@ export function usePlanSession(): PlanSession {
     }
     cleanup();
     setClarification(null);
-    setPhase("idle");
+    setPhaseSync("idle");
     appendChat("status", "Cancelled.");
   }, [cleanup, appendChat]);
 
@@ -172,7 +177,7 @@ export function usePlanSession(): PlanSession {
     setChat([]);
     setPlan(null);
     setClarification(null);
-    setPhase("idle");
+    setPhaseSync("idle");
     setError(null);
   }, [cleanup]);
 

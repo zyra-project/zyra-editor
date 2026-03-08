@@ -222,7 +222,7 @@ When the planner exits without producing a plan, the server:
 1. **Logs detailed diagnostics** at INFO/WARNING level:
    - Exit code, `plan_sent` status, number of collected answers
    - Last 10 stdout lines and last 10 stderr lines
-   - All stdin writes (answers sent to the planner)
+   - Non-sensitive stdin metadata (which argument was answered); sensitive values such as passwords, tokens, and API keys should be redacted before logging
 
 2. **Shows diagnostics to the user** in the error message:
    - Last few non-DEBUG stderr/stdout lines

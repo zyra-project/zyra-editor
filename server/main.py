@@ -1350,10 +1350,12 @@ async def ws_plan(websocket: WebSocket):
                             proc.kill()
                         await _safe_send({"type": "error", "text": "Planning timed out"})
                         cancel_task.cancel()
+                        await asyncio.gather(cancel_task, return_exceptions=True)
                         return
 
                     if cancelled:
                         cancel_task.cancel()
+                        await asyncio.gather(cancel_task, return_exceptions=True)
                         return
 
                     # ── Priority: handle pending questions/clarifications
@@ -1715,9 +1717,11 @@ async def ws_plan(websocket: WebSocket):
                     proc.returncode, cancelled, plan_sent,
                 )
                 cancel_task.cancel()
+                await asyncio.gather(cancel_task, return_exceptions=True)
 
             except asyncio.CancelledError:
                 cancel_task.cancel()
+                await asyncio.gather(cancel_task, return_exceptions=True)
                 return
 
             # Let stdout/stderr finish draining
