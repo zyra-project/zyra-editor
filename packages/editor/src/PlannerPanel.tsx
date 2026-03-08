@@ -601,6 +601,61 @@ export function PlannerPanel({
           </div>
         )}
 
+        {/* Follow-up refinement — placed near top for visibility */}
+        {plan && !loading && (
+          <div style={{ marginBottom: 12 }}>
+            <textarea
+              placeholder="Refine this plan... e.g. &quot;Add a verification step&quot; or &quot;Use GeoTIFF instead of NetCDF&quot;"
+              value={feedback}
+              onChange={(e) => setFeedback(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter" && (e.metaKey || e.ctrlKey) && feedback.trim()) {
+                  e.preventDefault();
+                  handleRefine();
+                }
+              }}
+              rows={2}
+              style={{
+                width: "100%",
+                background: "var(--bg-tertiary)",
+                border: "1px solid var(--border-default)",
+                borderRadius: "var(--radius-md)",
+                color: "var(--text-primary)",
+                padding: "8px 10px",
+                fontSize: 12,
+                fontFamily: "var(--font-sans)",
+                resize: "vertical",
+                outline: "none",
+                boxSizing: "border-box",
+              }}
+            />
+            <button
+              className="zyra-btn zyra-btn--primary"
+              onClick={handleRefine}
+              disabled={!feedback.trim() || !canGenerate}
+              style={{
+                width: "100%",
+                marginTop: 6,
+                opacity: feedback.trim() ? 1 : 0.5,
+              }}
+              title={
+                statusNotReady
+                  ? "Backend not ready — check AI status"
+                  : !feedback.trim()
+                    ? "Enter refinement feedback"
+                    : "Refine Plan (Ctrl+Enter)"
+              }
+            >
+              Refine Plan (Ctrl+Enter)
+            </button>
+            {statusNotReady && (
+              <div style={{ fontSize: 10, color: "var(--accent-yellow)", marginTop: 4 }}>
+                Backend not ready — check the AI status indicator in the toolbar.
+              </div>
+            )}
+          </div>
+        )}
+
         {/* Loading indicator */}
         {loading && (
           <div style={{
@@ -860,51 +915,6 @@ export function PlannerPanel({
               </div>
             )}
 
-            {/* Follow-up refinement */}
-            {!loading && (
-              <div style={{ marginTop: 14 }}>
-                <div style={{ fontSize: 11, color: "var(--text-muted)", marginBottom: 6, textTransform: "uppercase", letterSpacing: "0.06em" }}>
-                  Refine this plan
-                </div>
-                <textarea
-                  placeholder="e.g. &quot;I wanted GeoTIFF output, not a video animation&quot;"
-                  value={feedback}
-                  onChange={(e) => setFeedback(e.target.value)}
-                  onKeyDown={(e) => {
-                    if (e.key === "Enter" && (e.metaKey || e.ctrlKey) && feedback.trim()) {
-                      e.preventDefault();
-                      handleRefine();
-                    }
-                  }}
-                  rows={2}
-                  style={{
-                    width: "100%",
-                    background: "var(--bg-tertiary)",
-                    border: "1px solid var(--border-default)",
-                    borderRadius: "var(--radius-md)",
-                    color: "var(--text-primary)",
-                    padding: "8px 10px",
-                    fontSize: 12,
-                    fontFamily: "var(--font-sans)",
-                    resize: "vertical",
-                    outline: "none",
-                    boxSizing: "border-box",
-                  }}
-                />
-                <button
-                  className="zyra-btn zyra-btn--primary"
-                  onClick={handleRefine}
-                  disabled={!feedback.trim() || !canGenerate}
-                  style={{
-                    width: "100%",
-                    marginTop: 6,
-                    opacity: feedback.trim() ? 1 : 0.5,
-                  }}
-                >
-                  Refine Plan (Ctrl+Enter)
-                </button>
-              </div>
-            )}
           </div>
         )}
 
