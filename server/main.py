@@ -874,7 +874,7 @@ async def ws_plan(websocket: WebSocket):
                     try:
                         data = json.loads(json_buffer)
                         if "agents" in data:
-                            await websocket.send_json({"type": "plan", "data": data})
+                            await websocket.send_json({"type": "plan", "data": _merge_answers_into_plan(data)})
                             json_buffer = ""
                             continue
                     except json.JSONDecodeError:
@@ -895,7 +895,7 @@ async def ws_plan(websocket: WebSocket):
                         if "agents" in data:
                             if prefix:
                                 await websocket.send_json({"type": "log", "text": prefix})
-                            await websocket.send_json({"type": "plan", "data": data})
+                            await websocket.send_json({"type": "plan", "data": _merge_answers_into_plan(data)})
                             continue
                     except json.JSONDecodeError:
                         pass
@@ -910,7 +910,7 @@ async def ws_plan(websocket: WebSocket):
                 kind, text = _classify_stdout_line(line)
                 if kind == "plan":
                     data = json.loads(text)
-                    await websocket.send_json({"type": "plan", "data": data})
+                    await websocket.send_json({"type": "plan", "data": _merge_answers_into_plan(data)})
                 elif kind == "question":
                     # Buffer for main loop to enrich with manifest metadata
                     pending_questions.append(text)
@@ -981,6 +981,52 @@ async def ws_plan(websocket: WebSocket):
 
             clarifications.clear()
             clarification_event.clear()
+
+            # Accumulate all clarification answers across rounds so we can
+            # merge them into the final plan if the CLI omits them.
+            collected_answers: list[dict] = []
+
+            def _merge_answers_into_plan(plan_data: dict) -> dict:
+                """Patch agent args with clarification answers the CLI missed."""
+                if not collected_answers:
+                    return plan_data
+                agents = plan_data.get("agents")
+                if not agents or not isinstance(agents, list):
+                    return plan_data
+                # Build lookup: agent_id -> {arg_key: value}
+                answer_map: dict[str, dict[str, str]] = {}
+                for a in collected_answers:
+                    aid = a.get("agent_id", "")
+                    key = a.get("arg_key", "")
+                    val = a.get("value", "")
+                    if aid and key and val:
+                        answer_map.setdefault(aid, {})[key] = val
+                if not answer_map:
+                    return plan_data
+                for agent in agents:
+                    aid = agent.get("id", "")
+                    cmd_name = agent.get("command", "")
+                    stage = agent.get("stage", "")
+                    args = agent.get("args", {})
+                    # Try matching by agent id, command name, or stage/command combo
+                    patches = (
+                        answer_map.get(aid)
+                        or answer_map.get(cmd_name)
+                        or answer_map.get(f"{stage}_{cmd_name}")
+                        or answer_map.get(cmd_name.lower())
+                        or answer_map.get(aid.lower())
+                    )
+                    if patches:
+                        for k, v in patches.items():
+                            # Only fill in missing or empty args
+                            if k not in args or not args[k]:
+                                args[k] = v
+                            # Also try matching by flag-style key (--key -> key)
+                            bare_key = k.lstrip("-")
+                            if bare_key != k and (bare_key not in args or not args[bare_key]):
+                                args[bare_key] = v
+                        agent["args"] = args
+                return plan_data
 
             try:
                 # ZYRA_FORCE_PLAN_PROMPT makes the planner use input()
@@ -1195,6 +1241,7 @@ async def ws_plan(websocket: WebSocket):
                                     asyncio.CancelledError):
                                 return
 
+                        collected_answers.extend(answers)
                         if proc.stdin and proc.returncode is None:
                             for a in answers:
                                 value = a["value"]
@@ -1307,6 +1354,7 @@ async def ws_plan(websocket: WebSocket):
 
                         # Write answers to the process's stdin so the
                         # planner can update its session state.
+                        collected_answers.extend(answers)
                         if proc.stdin and proc.returncode is None:
                             for a in answers:
                                 value = a["value"]

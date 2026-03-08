@@ -131,6 +131,17 @@ export function planToGraph(
         argValues[byFlag.key] = v;
         continue;
       }
+      // Case-insensitive key/label match (clarification answers may differ in casing)
+      const kLower = k.toLowerCase();
+      const byLower = stageDef.args.find(
+        (ad) =>
+          ad.key.toLowerCase() === kLower ||
+          (ad.flag && ad.flag.replace(/^-+/, "").toLowerCase() === kLower),
+      );
+      if (byLower) {
+        argValues[byLower.key] = v;
+        continue;
+      }
       // Fallback: use raw key
       argValues[k] = v;
     }
