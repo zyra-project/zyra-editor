@@ -27,7 +27,7 @@ Frontend                    Server                      CLI
    │─────────────────────────>│ Popen(zyra plan)          │
    │                          │──────────────────────────>│
    │                          │                           │
-   │<── {type:"question"} ────│<─── question on stdout ──│
+   │<── {type:"clarification"}│<─── question on stdout ──│
    │── {type:"answer"} ──────>│──── answer on stdin ────>│
    │                          │                           │
    │<── {type:"plan"} ────────│<─── JSON on stdout ──────│
@@ -54,8 +54,12 @@ Frontend                    Server                      CLI
 ### Server → Client
 
 ```jsonc
-// Clarification question from zyra
-{ "type": "question", "text": "Which data source would you like to use?" }
+// Clarification question from zyra (enriched with manifest metadata)
+{ "type": "clarification", "index": 0, "total": 1, "agent_id": "fetch_ftp",
+  "arg_key": "path", "kind": "missing", "label": "Path",
+  "description": "Which data source would you like to use?",
+  "arg_type": "string", "options": null, "default": null,
+  "importance": "required" }
 
 // Status update (zyra is thinking)
 { "type": "status", "text": "Generating plan..." }
@@ -70,6 +74,8 @@ Frontend                    Server                      CLI
 { "type": "error", "text": "zyra plan timed out" }
 ```
 
+> **Note:** All questions (whether detected from structured stderr `"clarification needed:"` lines or from stdout/stderr heuristics) are enriched with manifest metadata and sent as `"clarification"` messages. The `"question"` type is intentionally unused — see `docs/PLANNER_DATA_FLOW.md` for full details.
+
 ---
 
 ## Implementation Steps
@@ -82,7 +88,7 @@ Add a new WebSocket endpoint that manages an interactive subprocess:
 2. Spawn `zyra plan --intent <intent>` (no `--no-clarify`) via `asyncio.create_subprocess_exec` with `stdin=PIPE, stdout=PIPE, stderr=PIPE`
 3. Read stdout line-by-line in an async task:
    - Lines starting with `{` that parse as JSON containing `"agents"` → send `{"type": "plan", "data": ...}`
-   - Lines ending with `?` or containing prompt markers (`>`, `[y/n]`) → send `{"type": "question", "text": ...}`
+   - Lines ending with `?` or containing prompt markers (`>`, `[y/n]`) → enrich with manifest metadata, send `{"type": "clarification", ...}`
    - Other lines → send `{"type": "log", "text": ...}`
 4. Read stderr in a parallel async task → send `{"type": "log", ...}`
 5. Listen for client messages:

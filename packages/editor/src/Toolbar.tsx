@@ -150,7 +150,7 @@ export function Toolbar({
       </button>
 
       {/* AI Status indicator */}
-      <div style={{ position: "relative" }}>
+      <div style={{ position: "relative" }} data-status-toggle>
         <button
           onClick={() => setStatusPopoverOpen((v) => !v)}
           title={`AI Status: ${backendStatus.status}`}
@@ -387,8 +387,15 @@ function StatusPopover({
   // Close on outside click
   useEffect(() => {
     const handler = (e: MouseEvent) => {
-      const target = e.target as HTMLElement;
-      if (!target.closest("[data-status-popover]")) onClose();
+      const target = e.target as HTMLElement | null;
+      if (!target) return;
+      if (
+        target.closest("[data-status-popover]") ||
+        target.closest("[data-status-toggle]")
+      ) {
+        return;
+      }
+      onClose();
     };
     document.addEventListener("mousedown", handler);
     return () => document.removeEventListener("mousedown", handler);

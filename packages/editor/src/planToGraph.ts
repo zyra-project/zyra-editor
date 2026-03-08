@@ -69,16 +69,20 @@ export function planToGraph(
 
   function getDepth(id: string, visited: Set<string>): number {
     if (depthMap.has(id)) return depthMap.get(id)!;
-    if (visited.has(id)) return 0;
+    if (visited.has(id)) return 0; // cycle detected
     visited.add(id);
-    const agent = agentById.get(id);
-    if (!agent || agent.depends_on.length === 0) {
-      depthMap.set(id, 0);
-      return 0;
+    try {
+      const agent = agentById.get(id);
+      if (!agent || agent.depends_on.length === 0) {
+        depthMap.set(id, 0);
+        return 0;
+      }
+      const d = Math.max(...agent.depends_on.map((dep) => getDepth(dep, visited))) + 1;
+      depthMap.set(id, d);
+      return d;
+    } finally {
+      visited.delete(id);
     }
-    const d = Math.max(...agent.depends_on.map((dep) => getDepth(dep, visited))) + 1;
-    depthMap.set(id, d);
-    return d;
   }
   for (const a of agents) getDepth(a.id, new Set());
 

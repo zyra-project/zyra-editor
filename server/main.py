@@ -421,9 +421,19 @@ def _run_zyra_plan(intent: str, guardrails: str = "") -> dict:
     return data
 
 
+_DEBUG_ENABLED = os.environ.get("ZYRA_DEBUG_ENDPOINTS", "").lower() in ("1", "true", "yes")
+
+
 @app.get("/v1/plan/debug")
 async def plan_debug():
-    """Diagnostic endpoint — reports zyra CLI version and LLM configuration."""
+    """Diagnostic endpoint — reports zyra CLI version and LLM configuration.
+
+    Gated behind ZYRA_DEBUG_ENDPOINTS=1 env var to prevent exposure of
+    runtime configuration and costly LLM calls in production.
+    """
+    if not _DEBUG_ENABLED:
+        raise HTTPException(status_code=404, detail="Debug endpoint disabled")
+
     info: dict = {
         "openai_api_key": "set" if os.environ.get("OPENAI_API_KEY") else "missing",
         "ollama_host": os.environ.get("OLLAMA_HOST", "not set"),
