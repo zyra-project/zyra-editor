@@ -437,38 +437,41 @@ async def plan_debug():
     if not _DEBUG_ENABLED:
         raise HTTPException(status_code=404, detail="Debug endpoint disabled")
 
-    info: dict = {
-        "openai_api_key": "set" if os.environ.get("OPENAI_API_KEY") else "missing",
-        "ollama_host": os.environ.get("OLLAMA_HOST", "not set"),
-        "zyra_verbosity": os.environ.get("ZYRA_VERBOSITY", "default"),
-    }
-
-    # zyra version
-    try:
-        ver = subprocess.run(
-            ["zyra", "--version"], capture_output=True, text=True, timeout=10
-        )
-        info["zyra_version"] = ver.stdout.strip() or ver.stderr.strip()
-    except FileNotFoundError:
-        info["zyra_version"] = "NOT INSTALLED"
-    except Exception as exc:
-        info["zyra_version"] = f"error: {exc}"
-
-    # Quick dry-run: ask zyra plan for a trivial intent to see what happens
-    try:
-        test = subprocess.run(
-            ["zyra", "plan", "--intent", "test", "--no-clarify"],
-            capture_output=True, text=True, timeout=30,
-        )
-        info["test_plan"] = {
-            "exit_code": test.returncode,
-            "stdout_preview": test.stdout[:500],
-            "stderr_preview": test.stderr[:500],
+    def _collect_debug_info() -> dict:
+        info: dict = {
+            "openai_api_key": "set" if os.environ.get("OPENAI_API_KEY") else "missing",
+            "ollama_host": os.environ.get("OLLAMA_HOST", "not set"),
+            "zyra_verbosity": os.environ.get("ZYRA_VERBOSITY", "default"),
         }
-    except Exception as exc:
-        info["test_plan"] = {"error": str(exc)}
 
-    return info
+        # zyra version
+        try:
+            ver = subprocess.run(
+                ["zyra", "--version"], capture_output=True, text=True, timeout=10
+            )
+            info["zyra_version"] = ver.stdout.strip() or ver.stderr.strip()
+        except FileNotFoundError:
+            info["zyra_version"] = "NOT INSTALLED"
+        except Exception as exc:
+            info["zyra_version"] = f"error: {exc}"
+
+        # Quick dry-run: ask zyra plan for a trivial intent to see what happens
+        try:
+            test = subprocess.run(
+                ["zyra", "plan", "--intent", "test", "--no-clarify"],
+                capture_output=True, text=True, timeout=30,
+            )
+            info["test_plan"] = {
+                "exit_code": test.returncode,
+                "stdout_preview": test.stdout[:500],
+                "stderr_preview": test.stderr[:500],
+            }
+        except Exception as exc:
+            info["test_plan"] = {"error": str(exc)}
+
+        return info
+
+    return await asyncio.to_thread(_collect_debug_info)
 
 
 @app.post("/v1/plan")

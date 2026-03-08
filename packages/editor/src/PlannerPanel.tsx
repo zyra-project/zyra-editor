@@ -1226,13 +1226,27 @@ function AddArgRow({
   const [key, setKey] = useState("");
   const [val, setVal] = useState("");
   const [customKey, setCustomKey] = useState(false);
+  const [dropdownOpen, setDropdownOpen] = useState(false);
   const valRef = useRef<HTMLInputElement>(null);
   const keyInputRef = useRef<HTMLInputElement>(null);
+  const dropdownRef = useRef<HTMLDivElement>(null);
 
   // When switching to custom mode, focus the text input
   useEffect(() => {
     if (customKey && active) keyInputRef.current?.focus();
   }, [customKey, active]);
+
+  // Close dropdown when clicking outside
+  useEffect(() => {
+    if (!dropdownOpen) return;
+    const handler = (e: MouseEvent) => {
+      if (dropdownRef.current && !dropdownRef.current.contains(e.target as HTMLElement)) {
+        setDropdownOpen(false);
+      }
+    };
+    document.addEventListener("mousedown", handler);
+    return () => document.removeEventListener("mousedown", handler);
+  }, [dropdownOpen]);
 
   // Find the selected ArgDef to show placeholder/default
   const selectedDef = availableArgs.find((a) => a.key === key);
@@ -1288,20 +1302,6 @@ function AddArgRow({
   };
 
   const hasDropdownArgs = availableArgs.length > 0 && !customKey;
-  const [dropdownOpen, setDropdownOpen] = useState(false);
-  const dropdownRef = useRef<HTMLDivElement>(null);
-
-  // Close dropdown when clicking outside
-  useEffect(() => {
-    if (!dropdownOpen) return;
-    const handler = (e: MouseEvent) => {
-      if (dropdownRef.current && !dropdownRef.current.contains(e.target as HTMLElement)) {
-        setDropdownOpen(false);
-      }
-    };
-    document.addEventListener("mousedown", handler);
-    return () => document.removeEventListener("mousedown", handler);
-  }, [dropdownOpen]);
 
   const selectArg = (argKey: string) => {
     if (argKey === "__custom__") {
