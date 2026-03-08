@@ -717,6 +717,25 @@ async def ws_plan(websocket: WebSocket):
                         # Still incomplete — keep buffering
                         continue
 
+                # The planner's input() prompts are written to stdout
+                # without a trailing newline.  When PYTHONUNBUFFERED=1 is
+                # set, the prompt text may be prepended to the next real
+                # output line (e.g. a JSON plan blob).  Extract any JSON
+                # that starts with '{' from the end of the line.
+                json_start = stripped.find("{")
+                if json_start > 0:
+                    prefix = stripped[:json_start].strip()
+                    maybe_json = stripped[json_start:]
+                    try:
+                        data = json.loads(maybe_json)
+                        if "agents" in data:
+                            if prefix:
+                                await websocket.send_json({"type": "log", "text": prefix})
+                            await websocket.send_json({"type": "plan", "data": data})
+                            continue
+                    except json.JSONDecodeError:
+                        pass
+
                 kind, text = _classify_stdout_line(line)
                 if kind == "plan":
                     data = json.loads(text)
@@ -727,6 +746,12 @@ async def ws_plan(websocket: WebSocket):
                     # Check if this starts a multi-line JSON blob
                     if stripped.startswith("{"):
                         json_buffer = line
+                    elif json_start > 0 and stripped[json_start:].startswith("{"):
+                        # Prompt text followed by start of multi-line JSON
+                        prefix = stripped[:json_start].strip()
+                        if prefix:
+                            await websocket.send_json({"type": "log", "text": prefix})
+                        json_buffer = stripped[json_start:]
                     else:
                         await websocket.send_json({"type": "log", "text": text})
         except Exception:
@@ -783,11 +808,22 @@ async def ws_plan(websocket: WebSocket):
             clarification_event.clear()
 
             try:
+                # ZYRA_FORCE_PLAN_PROMPT makes the planner use input()
+                # even when stdin is a pipe (not a TTY).  This lets us
+                # feed clarification answers via proc.stdin.
+                # PYTHONUNBUFFERED ensures prompt text is flushed
+                # immediately so we can read it on stdout.
+                plan_env = {
+                    **os.environ,
+                    "ZYRA_FORCE_PLAN_PROMPT": "1",
+                    "PYTHONUNBUFFERED": "1",
+                }
                 proc = await asyncio.create_subprocess_exec(
                     *cmd,
                     stdin=asyncio.subprocess.PIPE,
                     stdout=asyncio.subprocess.PIPE,
                     stderr=asyncio.subprocess.PIPE,
+                    env=plan_env,
                 )
             except FileNotFoundError:
                 await websocket.send_json({"type": "error", "text": "zyra CLI is not installed"})
