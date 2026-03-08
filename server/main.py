@@ -378,7 +378,7 @@ def _run_zyra_plan(intent: str, guardrails: str = "") -> dict:
     logger.info(
         "Running zyra plan — OPENAI_API_KEY=%s, OLLAMA_HOST=%s",
         "set" if has_openai else "MISSING",
-        os.environ.get("OLLAMA_HOST", "MISSING"),
+        "set" if has_ollama else "MISSING",
     )
     logger.info("zyra plan intent: %.200s", intent)
     if guardrails:
@@ -787,7 +787,8 @@ async def ws_plan(websocket: WebSocket):
 
     Protocol:
       Client sends: {"type": "start", "intent": "...", "guardrails": "..."}
-      Server sends: {"type": "question"|"log"|"status"|"plan"|"error", ...}
+      Server sends: {"type": "clarification"|"log"|"status"|"plan"|"error", ...}
+                    Periodic keepalives: {"keepalive": true}
       Client sends: {"type": "answer", "text": "..."} or {"type": "cancel"}
     """
     await websocket.accept()
@@ -934,6 +935,7 @@ async def ws_plan(websocket: WebSocket):
     keepalive_task: asyncio.Task | None = None
     stderr_task: asyncio.Task | None = None
     stdout_task: asyncio.Task | None = None
+    proc: asyncio.subprocess.Process | None = None
 
     try:
         # Wait for the start message
@@ -952,8 +954,6 @@ async def ws_plan(websocket: WebSocket):
             cmd += ["--guardrails", guardrails]
 
         logger.info("ws/plan: starting interactive session — intent=%.200s", intent)
-
-        proc: asyncio.subprocess.Process | None = None
 
         MAX_CLARIFICATION_ROUNDS = 3
 
