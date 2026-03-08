@@ -15,15 +15,22 @@ _env_file = Path(__file__).parent / ".env"
 if not _env_file.exists():
     _env_file = Path(__file__).parent.parent / ".env"
 if _env_file.exists():
-    for line in _env_file.read_text(encoding="utf-8").splitlines():
-        line = line.strip()
-        if not line or line.startswith("#"):
-            continue
-        key, _, val = line.partition("=")
-        key = key.strip()
-        val = val.strip().strip("'\"")
-        if key:
-            os.environ.setdefault(key, val)
+    try:
+        _env_content = _env_file.read_text(encoding="utf-8")
+    except (OSError, UnicodeError):
+        _env_content = None
+    if _env_content is not None:
+        for line in _env_content.splitlines():
+            line = line.strip()
+            if not line or line.startswith("#"):
+                continue
+            if "=" not in line:
+                continue
+            key, _, val = line.partition("=")
+            key = key.strip()
+            val = val.strip().strip("'\"")
+            if key:
+                os.environ.setdefault(key, val)
 
 # Ensure a sane default logging verbosity for CLI jobs so the editor can
 # still stream useful log messages through the WebSocket log panel, while

@@ -226,8 +226,9 @@ export function graphToPipeline(
   for (const e of graph.edges) {
     const srcNode = nodeMap.get(e.sourceNode);
     if (!srcNode || srcNode.stageCommand !== "control/loop") continue;
-    // Only process data-flow edges from "item", "index", or "done" output ports
-    if (e.sourcePort !== "item" && e.sourcePort !== "index" && e.sourcePort !== "done") continue;
+    // Only process data-flow edges from "item" or "index" output ports (per-iteration values).
+    // "done" represents post-loop flow and is preserved via _controls edges, not step.loop.
+    if (e.sourcePort !== "item" && e.sourcePort !== "index") continue;
 
     // Only build the loop definition once per target, from the first edge
     if (loopMap.has(e.targetNode)) continue;

@@ -100,7 +100,7 @@ export function pipelineToGraph(
     (c) => c.stageCommand === "control/cron",
   );
   if (pipeline.schedule && !hasCronControl) {
-    const cronId = `_cron_${Date.now().toString(36)}`;
+    const cronId = "_cron";
     const cronArgs: Record<string, string | number | boolean> = {
       expression: pipeline.schedule.cron,
     };
@@ -175,8 +175,8 @@ export function pipelineToGraph(
     condGroups.get(key)!.steps.push(step.name);
   }
   let condIdx = 0;
-  for (const [, group] of condGroups) {
-    const condId = `_cond_${Date.now().toString(36)}_${condIdx++}`;
+  for (const [key, group] of condGroups) {
+    const condId = `_cond_${condIdx++}_${key.replace(/[^A-Za-z0-9_]/g, "_")}`;
     nodes.push({
       id: condId,
       stageCommand: "control/conditional",
@@ -242,7 +242,8 @@ export function pipelineToGraph(
     }
   }
 
-  // Reconstruct control nodes from _controls metadata
+  // Reconstruct control nodes from _controls metadata.
+  // First pass: add all control nodes so IDs are available for edge wiring.
   if (pipeline._controls) {
     for (const ctrl of pipeline._controls) {
       const ctrlArgs = { ...ctrl.argValues };
@@ -265,12 +266,18 @@ export function pipelineToGraph(
             : undefined,
       };
       nodes.push(node);
+    }
+  }
 
-      // Reconstruct edges from control node to downstream nodes
+  // Second pass: reconstruct edges from control nodes.
+  // All node IDs (steps + control nodes) are now available.
+  const allNodeIds = new Set(nodes.map((n) => n.id));
+  if (pipeline._controls) {
+    for (const ctrl of pipeline._controls) {
       const stage = findStage(ctrl.stageCommand) ?? byKey.get(ctrl.stageCommand);
       const defaultSourcePort = stage?.outputs[0]?.id ?? "value";
       for (const ce of ctrl.edges) {
-        if (!nodeMap.has(ce.targetNode) && !nodes.some((n) => n.id === ce.targetNode)) continue;
+        if (!allNodeIds.has(ce.targetNode)) continue;
 
         if (ce.targetPort.startsWith("arg:")) {
           // Validate that the target node's stage actually has this arg key

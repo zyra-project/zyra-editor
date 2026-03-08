@@ -351,14 +351,21 @@ export function useExecution(): ExecutionControls {
             return;
           }
 
-          // Respect delay/throttle before executing
+          // Respect delay/throttle before executing.
+          // Sleep in short intervals so cancellation is responsive.
           if (delaySecs && delaySecs > 0) {
             updateNode(nodeId, { status: "queued", submittedRequest: req });
-            await new Promise((r) => setTimeout(r, delaySecs * 1000));
-            if (cancelledRef.current || runGenRef.current !== gen) {
-              updateNode(nodeId, { status: "canceled" });
-              resolved.set(nodeId, "canceled");
-              return;
+            const totalMs = delaySecs * 1000;
+            const pollMs = 200;
+            const start = Date.now();
+            while (Date.now() - start < totalMs) {
+              if (cancelledRef.current || runGenRef.current !== gen) {
+                updateNode(nodeId, { status: "canceled" });
+                resolved.set(nodeId, "canceled");
+                return;
+              }
+              const remaining = totalMs - (Date.now() - start);
+              await new Promise((r) => setTimeout(r, Math.min(remaining, pollMs)));
             }
           }
 
