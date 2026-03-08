@@ -1,4 +1,4 @@
-import { useState, useRef, useCallback } from "react";
+import { useState, useRef, useCallback, useEffect } from "react";
 import type { PlanResponse } from "./planToGraph";
 
 export interface ChatEntry {
@@ -62,6 +62,9 @@ export function usePlanSession(): PlanSession {
       wsRef.current = null;
     }
   }, []);
+
+  // Close WebSocket on unmount to prevent leaked connections
+  useEffect(() => cleanup, [cleanup]);
 
   const start = useCallback((intent: string, guardrails?: string) => {
     cleanup();

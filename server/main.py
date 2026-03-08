@@ -1388,7 +1388,11 @@ async def ws_plan(websocket: WebSocket):
         if stdout_task:
             stdout_task.cancel()
         if proc and proc.returncode is None:
-            proc.kill()
+            try:
+                proc.kill()
+                await asyncio.wait_for(proc.wait(), timeout=5)
+            except (asyncio.TimeoutError, ProcessLookupError, Exception):
+                pass
 
 
 @app.get("/v1/manifest")

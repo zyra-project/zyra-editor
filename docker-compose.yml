@@ -10,9 +10,7 @@ services:
     environment:
       - ZYRA_VERBOSITY=debug
       - ZYRA_DATA_DIR=/data
-      # LLM provider keys — set in .env or host environment
-      - OPENAI_API_KEY=${OPENAI_API_KEY:-}
-      - OLLAMA_HOST=${OLLAMA_HOST:-}
+      # LLM provider keys — configured via .env
 
   zyra-editor:
     build:
