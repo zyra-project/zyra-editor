@@ -876,86 +876,142 @@ async def ws_plan(websocket: WebSocket):
     async def _read_stdout(proc: asyncio.subprocess.Process):
         """Read stdout, classify lines, and send appropriate messages.
 
+        Uses a byte-level reader with a short timeout so that input()
+        prompts (which lack a trailing newline) are detected promptly
+        instead of waiting for the pipe to close.
+
         Buffers partial JSON across multiple lines so multi-line plan
         output is still detected.
         """
         nonlocal plan_sent
         assert proc.stdout is not None
         json_buffer = ""
-        try:
-            async for raw in proc.stdout:
-                line = raw.decode("utf-8", errors="replace").rstrip("\n")
-                stripped = line.strip()
-                if not stripped:
+        line_buffer = b""
+        PARTIAL_TIMEOUT = 0.5  # seconds to wait before flushing a partial line
+
+        async def _read_chunk() -> bytes:
+            """Read available bytes from stdout."""
+            assert proc.stdout is not None
+            return await proc.stdout.read(8192)
+
+        async def _next_lines() -> list[str]:
+            """Yield complete lines, flushing partial lines after a timeout.
+
+            Returns a list of lines (without trailing newline).
+            An empty list means EOF.
+            """
+            nonlocal line_buffer
+            while True:
+                # Check if we already have complete lines buffered
+                if b"\n" in line_buffer:
+                    parts = line_buffer.split(b"\n")
+                    # Last element is the remainder (possibly empty)
+                    line_buffer = parts[-1]
+                    return [p.decode("utf-8", errors="replace") for p in parts[:-1]]
+
+                # If there's a partial line, wait briefly then flush it
+                # (this catches input() prompts without trailing newlines)
+                if line_buffer:
+                    try:
+                        chunk = await asyncio.wait_for(
+                            _read_chunk(), timeout=PARTIAL_TIMEOUT
+                        )
+                    except asyncio.TimeoutError:
+                        # Flush the partial line as-is
+                        partial = line_buffer.decode("utf-8", errors="replace")
+                        line_buffer = b""
+                        return [partial]
+                    if not chunk:
+                        # EOF — flush remaining buffer
+                        remaining = line_buffer.decode("utf-8", errors="replace")
+                        line_buffer = b""
+                        return [remaining] if remaining.strip() else []
+                    line_buffer += chunk
                     continue
 
-                # If we're buffering a multi-line JSON blob, keep accumulating
-                if json_buffer:
-                    json_buffer += "\n" + line
-                    try:
-                        data = json.loads(json_buffer)
-                        if "agents" in data:
-                            await _safe_send({"type": "plan", "data": _merge_answers_into_plan(data)})
-                            plan_sent = True
-                            json_buffer = ""
-                            continue
-                    except json.JSONDecodeError:
-                        # Still incomplete — keep buffering
+                # No buffered data — do a blocking read
+                chunk = await _read_chunk()
+                if not chunk:
+                    return []  # EOF
+                line_buffer += chunk
+
+        try:
+            while True:
+                lines = await _next_lines()
+                if not lines:
+                    break  # EOF
+                for line in lines:
+                    stripped = line.strip()
+                    if not stripped:
                         continue
 
-                # The planner's input() prompts are written to stdout
-                # without a trailing newline.  When PYTHONUNBUFFERED=1 is
-                # set, the prompt text may be prepended to the next real
-                # output line (e.g. a JSON plan blob).  Extract any JSON
-                # that starts with '{' from the end of the line.
-                json_start = stripped.find("{")
-                if json_start > 0:
-                    prefix = stripped[:json_start].strip()
-                    maybe_json = stripped[json_start:]
-                    try:
-                        data = json.loads(maybe_json)
-                        if "agents" in data:
+                    # If we're buffering a multi-line JSON blob, keep accumulating
+                    if json_buffer:
+                        json_buffer += "\n" + line
+                        try:
+                            data = json.loads(json_buffer)
+                            if "agents" in data:
+                                await _safe_send({"type": "plan", "data": _merge_answers_into_plan(data)})
+                                plan_sent = True
+                                json_buffer = ""
+                                continue
+                        except json.JSONDecodeError:
+                            # Still incomplete — keep buffering
+                            continue
+
+                    # The planner's input() prompts are written to stdout
+                    # without a trailing newline.  When PYTHONUNBUFFERED=1 is
+                    # set, the prompt text may be prepended to the next real
+                    # output line (e.g. a JSON plan blob).  Extract any JSON
+                    # that starts with '{' from the end of the line.
+                    json_start = stripped.find("{")
+                    if json_start > 0:
+                        prefix = stripped[:json_start].strip()
+                        maybe_json = stripped[json_start:]
+                        try:
+                            data = json.loads(maybe_json)
+                            if "agents" in data:
+                                if prefix:
+                                    await _safe_send({"type": "log", "text": prefix})
+                                await _safe_send({"type": "plan", "data": _merge_answers_into_plan(data)})
+                                plan_sent = True
+                                continue
+                        except json.JSONDecodeError:
+                            # Incomplete JSON (multi-line plan) — the prompt
+                            # text (e.g. "Provide value for 'path': ") is
+                            # glued to the start of the JSON blob because
+                            # input() doesn't write a newline.  Start the
+                            # json_buffer and skip question classification
+                            # to avoid a spurious duplicate question.
                             if prefix:
                                 await _safe_send({"type": "log", "text": prefix})
-                            await _safe_send({"type": "plan", "data": _merge_answers_into_plan(data)})
-                            plan_sent = True
+                            json_buffer = maybe_json
                             continue
-                    except json.JSONDecodeError:
-                        # Incomplete JSON (multi-line plan) — the prompt
-                        # text (e.g. "Provide value for 'path': ") is
-                        # glued to the start of the JSON blob because
-                        # input() doesn't write a newline.  Start the
-                        # json_buffer and skip question classification
-                        # to avoid a spurious duplicate question.
-                        if prefix:
-                            await _safe_send({"type": "log", "text": prefix})
-                        json_buffer = maybe_json
+
+                    # Detect hint lines and buffer them
+                    hint_m = _HINT_RE.match(stripped)
+                    if hint_m:
+                        recent_hints.append(stripped)
+                        await _safe_send({"type": "log", "text": stripped})
                         continue
 
-                # Detect hint lines and buffer them
-                hint_m = _HINT_RE.match(stripped)
-                if hint_m:
-                    recent_hints.append(stripped)
-                    await _safe_send({"type": "log", "text": stripped})
-                    continue
-
-                kind, text = _classify_stdout_line(line)
-                if kind == "plan":
-                    data = json.loads(text)
-                    await _safe_send({"type": "plan", "data": _merge_answers_into_plan(data)})
-                    plan_sent = True
-                elif kind == "question":
-                    # Buffer for main loop to enrich with manifest metadata
-                    pending_questions.append(text)
-                    if not question_event.is_set():
-                        question_event.set()
-                    await _safe_send({"type": "log", "text": text})
-                else:
-                    # Check if this starts a multi-line JSON blob
-                    if stripped.startswith("{"):
-                        json_buffer = line
-                    else:
+                    kind, text = _classify_stdout_line(line)
+                    if kind == "plan":
+                        data = json.loads(text)
+                        await _safe_send({"type": "plan", "data": _merge_answers_into_plan(data)})
+                        plan_sent = True
+                    elif kind == "question":
+                        # Buffer for main loop to enrich with manifest metadata
+                        pending_questions.append(text)
+                        if not question_event.is_set():
+                            question_event.set()
                         await _safe_send({"type": "log", "text": text})
+                    else:
+                        # Check if this starts a multi-line JSON blob
+                        if stripped.startswith("{"):
+                            json_buffer = line
+                        else:
+                            await _safe_send({"type": "log", "text": text})
         except Exception:
             logger.debug("ws/plan: stdout reader stopped", exc_info=True)
 
@@ -1254,6 +1310,9 @@ async def ws_plan(websocket: WebSocket):
                             except Exception:
                                 pass
 
+                        # Clear answer_ready so the next iteration doesn't
+                        # spuriously enter the answer_wait branch.
+                        answer_ready_event.clear()
                         await _safe_send({
                             "type": "status",
                             "text": "Continuing with your answers...",
@@ -1366,6 +1425,9 @@ async def ws_plan(websocket: WebSocket):
                             except Exception:
                                 pass
 
+                        # Clear answer_ready so the next iteration doesn't
+                        # spuriously enter the answer_wait branch.
+                        answer_ready_event.clear()
                         await _safe_send({
                             "type": "status",
                             "text": "Continuing with your answers...",
