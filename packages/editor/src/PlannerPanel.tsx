@@ -115,7 +115,9 @@ export function PlannerPanel({
         // Automatically retry with sync
         handleSyncGenerate();
       } else {
-        setError({ message: session.error });
+        // Map known WS error messages to status codes for correct guidance
+        const status = session.error.toLowerCase().includes("timed out") ? 504 : undefined;
+        setError({ message: session.error, status });
         setLoading(false);
       }
     }

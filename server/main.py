@@ -662,6 +662,9 @@ async def ws_plan(websocket: WebSocket):
     # Shared state for clarification interception
     clarifications: list[str] = []
     clarification_event = asyncio.Event()
+    # Signalled when an answer arrives (so the main loop can write it to
+    # stdin even when no structured "clarification needed:" was detected).
+    answer_ready_event = asyncio.Event()
 
     async def _read_stderr(proc: asyncio.subprocess.Process):
         """Forward stderr lines as log messages, intercepting clarification notices."""
@@ -858,6 +861,7 @@ async def ws_plan(websocket: WebSocket):
                         # by storing them in a shared queue.
                         if msg.get("type") == "answer":
                             answer_queue.put_nowait(msg)
+                            answer_ready_event.set()
                 except (WebSocketDisconnect, Exception):
                     cancelled = True
                     if proc.returncode is None:
@@ -869,14 +873,19 @@ async def ws_plan(websocket: WebSocket):
             rounds = 0
             try:
                 while proc.returncode is None and not cancelled:
-                    # Race: process finishes vs clarification detected
+                    # Race: process finishes vs clarification detected vs
+                    # answer arrives (for stdout questions with no
+                    # corresponding "clarification needed:" on stderr).
                     proc_done = asyncio.ensure_future(proc.wait())
                     clarification_wait = asyncio.ensure_future(
                         clarification_event.wait()
                     )
+                    answer_wait = asyncio.ensure_future(
+                        answer_ready_event.wait()
+                    )
 
                     done, _pending = await asyncio.wait(
-                        [proc_done, clarification_wait, cancel_task],
+                        [proc_done, clarification_wait, answer_wait, cancel_task],
                         timeout=WS_PLAN_TIMEOUT,
                         return_when=asyncio.FIRST_COMPLETED,
                     )
@@ -898,7 +907,42 @@ async def ws_plan(websocket: WebSocket):
                         # drain and deliver the final output.
                         break
 
+                    # An answer arrived for a stdout/stderr question that
+                    # had no matching "clarification needed:" on stderr.
+                    # Write the answer directly to stdin so the subprocess
+                    # can continue.
+                    if (answer_wait in done
+                            and clarification_wait not in done
+                            and proc.returncode is None):
+                        answer_ready_event.clear()
+                        while not answer_queue.empty():
+                            msg = answer_queue.get_nowait()
+                            if msg.get("type") == "answer":
+                                value = msg.get("text", "")
+                                logger.debug(
+                                    "ws/plan: writing stdout-question "
+                                    "answer to stdin: %s",
+                                    value,
+                                )
+                                if proc.stdin and proc.returncode is None:
+                                    proc.stdin.write(
+                                        (value + "\n").encode("utf-8")
+                                    )
+                        if proc.stdin and proc.returncode is None:
+                            try:
+                                await proc.stdin.drain()
+                            except Exception:
+                                pass
+                        await websocket.send_json({
+                            "type": "status",
+                            "text": "Continuing with your answer...",
+                        })
+                        continue
+
                     if clarification_wait in done and proc.returncode is None:
+                        # Also clear answer_ready_event — any queued answers
+                        # will be consumed by the clarification loop below.
+                        answer_ready_event.clear()
                         rounds += 1
                         # Wait briefly for more clarification lines to arrive
                         await asyncio.sleep(0.5)
