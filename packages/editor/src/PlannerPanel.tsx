@@ -8,7 +8,7 @@ import {
   type PlanResponse,
 } from "./planToGraph";
 import type { BackendStatus } from "./useBackendStatus";
-import { usePlanSession, type ChatEntry } from "./usePlanSession";
+import { usePlanSession, type ChatEntry, type ClarificationItem } from "./usePlanSession";
 
 /** Stage header colours — mirrors server/main.py STAGE_COLORS. */
 const STAGE_COLORS: Record<string, string> = {
@@ -815,6 +815,23 @@ export function PlannerPanel({
           </div>
         )}
 
+        {/* Structured clarification Q&A — one question at a time */}
+        {session.phase === "clarifying" && session.clarification && (
+          <ClarificationCard
+            item={session.clarification}
+            value={answerText}
+            onChange={setAnswerText}
+            onSubmit={(val) => {
+              session.answer(val);
+              setAnswerText("");
+            }}
+            onCancel={() => {
+              session.cancel();
+              setAnswerText("");
+            }}
+          />
+        )}
+
         {/* Sync fallback indicator */}
         {!wsMode && !plan && !loading && (
           <div style={{ fontSize: 10, color: "var(--text-muted)", marginTop: 4, fontStyle: "italic" }}>
@@ -823,7 +840,7 @@ export function PlannerPanel({
         )}
 
         {/* Generate button — only when no plan */}
-        {!loading && !plan && session.phase !== "asking" && (
+        {!loading && !plan && session.phase !== "asking" && session.phase !== "clarifying" && (
           <>
             <button
               className="zyra-btn zyra-btn--primary"
@@ -1280,6 +1297,215 @@ function SuggestionCard({
           }}
         >
           Dismiss
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function ClarificationCard({
+  item,
+  value,
+  onChange,
+  onSubmit,
+  onCancel,
+}: {
+  item: ClarificationItem;
+  value: string;
+  onChange: (v: string) => void;
+  onSubmit: (v: string) => void;
+  onCancel: () => void;
+}) {
+  const isEnum = item.arg_type === "enum" && item.options && item.options.length > 0;
+  const hasDefault = item.default != null && item.default !== "";
+  const isConfirm = item.kind === "confirm";
+  const displayValue = isConfirm ? item.current_value ?? "" : "";
+
+  const handleSubmit = () => {
+    const val = value.trim() || (isConfirm ? displayValue : "");
+    if (val) onSubmit(val);
+  };
+
+  return (
+    <div style={{
+      marginTop: 8,
+      padding: "12px",
+      background: "var(--bg-tertiary)",
+      border: "1px solid var(--accent-blue, #58a6ff)",
+      borderRadius: "var(--radius-md)",
+      fontSize: 12,
+    }}>
+      {/* Progress indicator */}
+      <div style={{
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "space-between",
+        marginBottom: 8,
+      }}>
+        <span style={{
+          fontSize: 10,
+          color: "var(--text-muted)",
+          textTransform: "uppercase",
+          letterSpacing: "0.06em",
+        }}>
+          Question {item.index + 1} of {item.total}
+        </span>
+        {item.importance && (
+          <span style={{
+            fontSize: 9,
+            padding: "1px 6px",
+            borderRadius: 3,
+            background: item.importance === "required"
+              ? "rgba(248,81,73,0.15)"
+              : "rgba(210,153,34,0.15)",
+            color: item.importance === "required" ? "#f85149" : "#d29922",
+            fontWeight: 600,
+            textTransform: "uppercase",
+          }}>
+            {item.importance}
+          </span>
+        )}
+      </div>
+
+      {/* Agent context */}
+      {item.agent_id && (
+        <div style={{
+          fontSize: 10,
+          color: "var(--text-muted)",
+          marginBottom: 4,
+        }}>
+          for <span style={{ color: "var(--text-secondary)", fontWeight: 600 }}>{item.agent_id}</span>
+        </div>
+      )}
+
+      {/* Question label */}
+      <div style={{
+        fontWeight: 600,
+        color: "var(--text-bright)",
+        marginBottom: 4,
+        fontSize: 13,
+      }}>
+        {item.label || item.arg_key}
+      </div>
+
+      {/* Description / help text */}
+      {item.description && (
+        <div style={{
+          color: "var(--text-secondary)",
+          fontSize: 11,
+          lineHeight: 1.5,
+          marginBottom: 8,
+        }}>
+          {item.description}
+        </div>
+      )}
+
+      {/* Current value for confirm-type */}
+      {isConfirm && displayValue && (
+        <div style={{
+          fontSize: 11,
+          color: "var(--text-muted)",
+          marginBottom: 6,
+          fontStyle: "italic",
+        }}>
+          Current value: <span style={{ color: "var(--text-secondary)" }}>{displayValue}</span>
+          {" "}— press Enter to keep, or type a new value
+        </div>
+      )}
+
+      {/* Default hint */}
+      {!isConfirm && hasDefault && (
+        <div style={{
+          fontSize: 11,
+          color: "var(--text-muted)",
+          marginBottom: 6,
+        }}>
+          Default: <span style={{ color: "var(--text-secondary)" }}>{String(item.default)}</span>
+        </div>
+      )}
+
+      {/* Input: enum select or text field */}
+      {isEnum ? (
+        <select
+          value={value}
+          onChange={(e) => onChange(e.target.value)}
+          autoFocus
+          style={{
+            width: "100%",
+            background: "var(--bg-secondary)",
+            border: "1px solid var(--border-default)",
+            borderRadius: "var(--radius-sm)",
+            color: "var(--text-primary)",
+            padding: "6px 10px",
+            fontSize: 12,
+            fontFamily: "var(--font-sans)",
+            outline: "none",
+            boxSizing: "border-box",
+            marginBottom: 8,
+          }}
+        >
+          <option value="">Select...</option>
+          {item.options!.map((opt) => (
+            <option key={opt} value={opt}>{opt}</option>
+          ))}
+        </select>
+      ) : (
+        <input
+          type={item.arg_type === "number" ? "number" : "text"}
+          value={value}
+          onChange={(e) => onChange(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === "Enter") {
+              e.preventDefault();
+              handleSubmit();
+            }
+          }}
+          placeholder={item.placeholder || (isConfirm ? displayValue : `Enter ${item.label || item.arg_key}...`)}
+          autoFocus
+          style={{
+            width: "100%",
+            background: "var(--bg-secondary)",
+            border: "1px solid var(--border-default)",
+            borderRadius: "var(--radius-sm)",
+            color: "var(--text-primary)",
+            padding: "6px 10px",
+            fontSize: 12,
+            fontFamily: "var(--font-sans)",
+            outline: "none",
+            boxSizing: "border-box",
+            marginBottom: 8,
+          }}
+        />
+      )}
+
+      {/* Action buttons */}
+      <div style={{ display: "flex", gap: 6 }}>
+        <button
+          className="zyra-btn zyra-btn--primary"
+          onClick={handleSubmit}
+          disabled={!isConfirm && !value.trim()}
+          style={{
+            flex: 1,
+            fontSize: 12,
+            opacity: (!isConfirm && !value.trim()) ? 0.5 : 1,
+          }}
+        >
+          {isConfirm && !value.trim() ? "Keep Current" : "Next"}
+        </button>
+        <button
+          onClick={onCancel}
+          style={{
+            background: "none",
+            border: "1px solid var(--border-default)",
+            borderRadius: "var(--radius-sm)",
+            color: "var(--text-muted)",
+            fontSize: 11,
+            cursor: "pointer",
+            padding: "4px 12px",
+            fontFamily: "var(--font-sans)",
+          }}
+        >
+          Cancel
         </button>
       </div>
     </div>

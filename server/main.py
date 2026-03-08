@@ -445,6 +445,87 @@ _QUESTION_PATTERNS = re.compile(
 )
 
 
+# Regex to extract structured info from "clarification needed:" lines
+# Examples:
+#   "Agent 'fetch_frames' is missing required argument 'path'"
+#   "Agent 'pad_missing' currently plans to use fill_mode='basemap'. Enter a value to confirm or override."
+_CLARIFICATION_RE = re.compile(
+    r"Agent '(?P<agent>[^']+)' is missing (?P<importance>required|recommended) argument '(?P<arg>[^']+)'"
+)
+_CLARIFICATION_CONFIRM_RE = re.compile(
+    r"Agent '(?P<agent>[^']+)' currently plans to use (?P<arg>[^=]+)='(?P<value>[^']*)'"
+)
+
+
+def _parse_clarification(detail: str) -> dict | None:
+    """Parse a clarification detail string into structured data."""
+    m = _CLARIFICATION_RE.search(detail)
+    if m:
+        return {
+            "agent_id": m.group("agent"),
+            "arg_key": m.group("arg"),
+            "kind": "missing",
+            "importance": m.group("importance"),
+        }
+    m = _CLARIFICATION_CONFIRM_RE.search(detail)
+    if m:
+        return {
+            "agent_id": m.group("agent"),
+            "arg_key": m.group("arg"),
+            "kind": "confirm",
+            "current_value": m.group("value"),
+        }
+    return None
+
+
+def _get_cached_manifest() -> dict:
+    """Fetch the manifest (cached for the process lifetime)."""
+    if not hasattr(_get_cached_manifest, "_cache"):
+        try:
+            from zyra.api.server import create_app as _ca
+            _app = _ca()
+            # Get commands from the zyra app
+            import httpx
+            # Use the internal function directly
+            result = subprocess.run(
+                ["zyra", "manifest", "--json"],
+                capture_output=True, text=True, timeout=30,
+            )
+            if result.returncode == 0:
+                data = json.loads(result.stdout)
+                _get_cached_manifest._cache = _commands_to_manifest(
+                    data.get("commands", {})
+                )
+            else:
+                _get_cached_manifest._cache = {"version": "1.0", "stages": []}
+        except Exception:
+            _get_cached_manifest._cache = {"version": "1.0", "stages": []}
+    return _get_cached_manifest._cache
+
+
+def _lookup_arg_meta(manifest: dict, stage_command: str, arg_key: str) -> dict:
+    """Look up ArgDef metadata from the manifest for a given arg key.
+
+    stage_command can be the agent_id (e.g. 'fetch_frames') — we try to
+    match by command name, falling back to fuzzy prefix matching.
+    """
+    # Normalize: agent IDs often look like "stage_command_N"
+    # Try to find a matching stage by command name
+    for stage_def in manifest.get("stages", []):
+        cmd = stage_def.get("command", "")
+        # Match if the agent_id starts with or contains the command name
+        if cmd and (stage_command == cmd or stage_command.startswith(cmd)):
+            for arg in stage_def.get("args", []):
+                if arg.get("key") == arg_key or arg.get("flag", "").lstrip("-").replace("-", "_") == arg_key:
+                    return arg
+    # Fuzzy: search all stages for the arg key
+    for stage_def in manifest.get("stages", []):
+        for arg in stage_def.get("args", []):
+            if arg.get("key") == arg_key:
+                return arg
+    return {}
+
+
 def _classify_stdout_line(line: str) -> tuple[str, str]:
     """Classify a stdout line as 'plan', 'question', or 'log'."""
     stripped = line.strip()
@@ -687,36 +768,94 @@ async def ws_plan(websocket: WebSocket):
                         except Exception:
                             pass
 
-                    # Send clarifications as a question to the client
-                    issues = list(clarifications)
-                    question_text = "Before I generate the plan, I need some details:\n\n" + \
-                        "\n".join(f"• {issue}" for issue in issues) + \
-                        "\n\nPlease provide the missing information."
-                    await websocket.send_json({
-                        "type": "question",
-                        "text": question_text,
-                    })
-
-                    # Wait for the user's answer
-                    try:
-                        while True:
-                            msg = await asyncio.wait_for(
-                                websocket.receive_json(),
-                                timeout=WS_PLAN_TIMEOUT,
+                    # Parse clarifications and enrich with manifest metadata
+                    manifest = _get_cached_manifest()
+                    parsed_items: list[dict] = []
+                    for detail in clarifications:
+                        parsed = _parse_clarification(detail)
+                        if parsed:
+                            # Look up arg metadata from manifest
+                            meta = _lookup_arg_meta(
+                                manifest,
+                                parsed["agent_id"],
+                                parsed["arg_key"],
                             )
-                            if msg.get("type") == "cancel":
-                                return
-                            if msg.get("type") == "answer":
-                                user_answer = msg.get("text", "")
-                                break
-                    except (asyncio.TimeoutError, WebSocketDisconnect):
-                        return
+                            parsed["label"] = meta.get("label", parsed["arg_key"])
+                            parsed["description"] = meta.get("description", "")
+                            parsed["type"] = meta.get("type", "string")
+                            parsed["placeholder"] = meta.get("placeholder", "")
+                            parsed["default"] = meta.get("default")
+                            parsed["options"] = meta.get("options")
+                        else:
+                            # Couldn't parse — fall back to plain text
+                            parsed_items.append({
+                                "agent_id": "",
+                                "arg_key": "",
+                                "kind": "unknown",
+                                "label": detail,
+                                "description": "",
+                                "type": "string",
+                                "placeholder": "",
+                                "default": None,
+                                "options": None,
+                                "raw": detail,
+                            })
+                            continue
+                        parsed_items.append(parsed)
 
-                    # Restart planning with the user's answers as guardrails
+                    # Ask one question at a time and collect answers
+                    answers: list[dict] = []
+                    for i, item in enumerate(parsed_items):
+                        await websocket.send_json({
+                            "type": "clarification",
+                            "index": i,
+                            "total": len(parsed_items),
+                            "agent_id": item.get("agent_id", ""),
+                            "arg_key": item.get("arg_key", ""),
+                            "kind": item.get("kind", "missing"),
+                            "label": item.get("label", ""),
+                            "description": item.get("description", ""),
+                            "arg_type": item.get("type", "string"),
+                            "placeholder": item.get("placeholder", ""),
+                            "default": item.get("default"),
+                            "options": item.get("options"),
+                            "current_value": item.get("current_value"),
+                            "importance": item.get("importance", ""),
+                        })
+
+                        # Wait for answer
+                        try:
+                            while True:
+                                msg = await asyncio.wait_for(
+                                    websocket.receive_json(),
+                                    timeout=WS_PLAN_TIMEOUT,
+                                )
+                                if msg.get("type") == "cancel":
+                                    return
+                                if msg.get("type") == "answer":
+                                    answers.append({
+                                        "agent_id": item.get("agent_id", ""),
+                                        "arg_key": item.get("arg_key", ""),
+                                        "value": msg.get("text", ""),
+                                    })
+                                    break
+                        except (asyncio.TimeoutError, WebSocketDisconnect):
+                            return
+
+                    # Build guardrails from collected answers
+                    answer_lines = []
+                    for a in answers:
+                        if a["agent_id"] and a["arg_key"]:
+                            answer_lines.append(
+                                f"Agent '{a['agent_id']}' argument '{a['arg_key']}' = {a['value']}"
+                            )
+                        else:
+                            answer_lines.append(a["value"])
+
                     new_guardrails = guardrails
                     if new_guardrails:
                         new_guardrails += "\n\n"
-                    new_guardrails += f"User clarifications: {user_answer}"
+                    new_guardrails += "User clarifications:\n" + "\n".join(answer_lines)
 
                     new_cmd = ["zyra", "plan", "--intent", intent]
                     if new_guardrails:

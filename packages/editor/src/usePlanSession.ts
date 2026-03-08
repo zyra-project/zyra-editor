@@ -7,13 +7,32 @@ export interface ChatEntry {
   timestamp: number;
 }
 
-export type PlanPhase = "idle" | "asking" | "thinking" | "done" | "error";
+/** Structured clarification question from the server. */
+export interface ClarificationItem {
+  index: number;
+  total: number;
+  agent_id: string;
+  arg_key: string;
+  kind: "missing" | "confirm" | "unknown";
+  label: string;
+  description: string;
+  arg_type: "string" | "number" | "boolean" | "filepath" | "enum";
+  placeholder: string;
+  default?: string | number | boolean | null;
+  options?: string[] | null;
+  current_value?: string | null;
+  importance: string; // "required" | "recommended" | ""
+}
+
+export type PlanPhase = "idle" | "asking" | "clarifying" | "thinking" | "done" | "error";
 
 export interface PlanSession {
   chat: ChatEntry[];
   plan: PlanResponse | null;
   phase: PlanPhase;
   error: string | null;
+  /** Current clarification question (when phase === "clarifying"). */
+  clarification: ClarificationItem | null;
   start: (intent: string, guardrails?: string) => void;
   answer: (text: string) => void;
   cancel: () => void;
@@ -30,6 +49,7 @@ export function usePlanSession(): PlanSession {
   const [plan, setPlan] = useState<PlanResponse | null>(null);
   const [phase, setPhase] = useState<PlanPhase>("idle");
   const [error, setError] = useState<string | null>(null);
+  const [clarification, setClarification] = useState<ClarificationItem | null>(null);
   const wsRef = useRef<WebSocket | null>(null);
 
   const appendChat = useCallback((role: ChatEntry["role"], text: string) => {
@@ -48,6 +68,7 @@ export function usePlanSession(): PlanSession {
     setChat([]);
     setPlan(null);
     setError(null);
+    setClarification(null);
     setPhase("thinking");
 
     const ws = connectPlanWs();
@@ -68,7 +89,12 @@ export function usePlanSession(): PlanSession {
             setPhase("asking");
             appendChat("assistant", msg.text);
             break;
+          case "clarification":
+            setClarification(msg as ClarificationItem);
+            setPhase("clarifying");
+            break;
           case "plan":
+            setClarification(null);
             setPlan(msg.data as PlanResponse);
             setPhase("done");
             appendChat("status", "Plan generated.");
@@ -106,15 +132,22 @@ export function usePlanSession(): PlanSession {
   const answer = useCallback((text: string) => {
     if (!wsRef.current || wsRef.current.readyState !== WebSocket.OPEN) return;
     wsRef.current.send(JSON.stringify({ type: "answer", text }));
-    appendChat("user", text);
+    // If we were clarifying, log the answer with context
+    if (clarification) {
+      appendChat("user", `${clarification.label}: ${text}`);
+    } else {
+      appendChat("user", text);
+    }
+    setClarification(null);
     setPhase("thinking");
-  }, [appendChat]);
+  }, [appendChat, clarification]);
 
   const cancel = useCallback(() => {
     if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
       wsRef.current.send(JSON.stringify({ type: "cancel" }));
     }
     cleanup();
+    setClarification(null);
     setPhase("idle");
     appendChat("status", "Cancelled.");
   }, [cleanup, appendChat]);
@@ -123,9 +156,10 @@ export function usePlanSession(): PlanSession {
     cleanup();
     setChat([]);
     setPlan(null);
+    setClarification(null);
     setPhase("idle");
     setError(null);
   }, [cleanup]);
 
-  return { chat, plan, phase, error, start, answer, cancel, reset };
+  return { chat, plan, phase, error, clarification, start, answer, cancel, reset };
 }
