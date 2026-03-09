@@ -626,10 +626,14 @@ function Editor() {
       // Only control nodes can wire into arg-ports (serialization can't
       // round-trip non-control → arg-port edges yet)
       if (tgtPort.argKey && srcDef.stage !== "control") return false;
+      // Control-flow nodes (delay, cron, conditional, loop) can wire to
+      // non-arg input ports but NOT to arg-ports (they don't inline values).
+      if (srcDef.stage === "control" && CONTROL_FLOW_COMMANDS.has(srcDef.command)) {
+        if (tgtPort.argKey) return false;
+      }
       // Value-inlining control nodes (string, number, boolean, choice, filepath,
       // date, secret) are only meaningful when targeting arg-ports.
-      // Control-flow nodes (delay, cron, conditional, loop) can wire to any port.
-      if (srcDef.stage === "control" && !tgtPort.argKey && !CONTROL_FLOW_COMMANDS.has(srcDef.command)) return false;
+      if (srcDef.stage === "control" && !CONTROL_FLOW_COMMANDS.has(srcDef.command) && !tgtPort.argKey) return false;
 
       return portsCompatible(srcPort, tgtPort);
     },

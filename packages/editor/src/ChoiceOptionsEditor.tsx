@@ -51,7 +51,8 @@ export function ChoiceOptionsEditor({
   selected: string;
   onSelectChange: (v: string) => void;
 }) {
-  const [editingIndex, setEditingIndex] = useState<number | null>(null);
+  // Track the option being edited by its value (stable across removals)
+  const [editingValue, setEditingValue] = useState<string | null>(null);
   const [editLabel, setEditLabel] = useState("");
   const [editValue, setEditValue] = useState("");
   const addLabelRef = useRef<HTMLInputElement>(null);
@@ -78,7 +79,7 @@ export function ChoiceOptionsEditor({
   const startEditing = (index: number) => {
     setEditLabel(options[index].label);
     setEditValue(options[index].value);
-    setEditingIndex(index);
+    setEditingValue(options[index].value);
   };
 
   const commitEdit = (index: number) => {
@@ -86,7 +87,7 @@ export function ChoiceOptionsEditor({
     const trimValue = editValue.trim();
     if (!trimValue && !trimLabel) {
       removeOption(index);
-      setEditingIndex(null);
+      setEditingValue(null);
       return;
     }
     const finalValue = trimValue || trimLabel;
@@ -97,7 +98,7 @@ export function ChoiceOptionsEditor({
     }
     next[index] = { label: finalLabel, value: finalValue };
     commit(next);
-    setEditingIndex(null);
+    setEditingValue(null);
   };
 
   const addOption = () => {
@@ -138,9 +139,10 @@ export function ChoiceOptionsEditor({
         {options.map((opt, i) => {
           const sel = selected === opt.value;
           const hasDistinctLabel = opt.label !== opt.value;
+          const isEditing = editingValue === opt.value;
           return (
             <div
-              key={i}
+              key={opt.value}
               style={{
                 display: "flex",
                 alignItems: "center",
@@ -155,7 +157,7 @@ export function ChoiceOptionsEditor({
                 minHeight: 28,
               }}
             >
-              {editingIndex === i ? (
+              {isEditing ? (
                 <div style={{ display: "flex", gap: 4, flex: 1, alignItems: "center" }}>
                   <input
                     className="zyra-input"
@@ -169,7 +171,7 @@ export function ChoiceOptionsEditor({
                     }}
                     onKeyDown={(e) => {
                       if (e.key === "Enter") commitEdit(i);
-                      if (e.key === "Escape") setEditingIndex(null);
+                      if (e.key === "Escape") setEditingValue(null);
                     }}
                   />
                   <input
@@ -184,7 +186,7 @@ export function ChoiceOptionsEditor({
                     }}
                     onKeyDown={(e) => {
                       if (e.key === "Enter") commitEdit(i);
-                      if (e.key === "Escape") setEditingIndex(null);
+                      if (e.key === "Escape") setEditingValue(null);
                     }}
                   />
                   <button
