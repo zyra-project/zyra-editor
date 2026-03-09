@@ -80,7 +80,7 @@ export const MOCK_MANIFEST: Manifest = {
         {
           key: "options",
           label: "Options",
-          type: "json",
+          type: "string",
           required: true,
           placeholder: "[]",
           description: "List of {label, value} choices (managed by visual editor)",

@@ -273,7 +273,9 @@ export function graphToPipeline(
     const loop: StepLoop = {
       mode: mode as StepLoop["mode"],
     };
-    if (over) loop.over = over;
+    // loop.over must reference a pipeline step name; omit it if items are
+    // driven by a control node (which won't appear as a step).
+    if (over && !controlNodeIds.has(over)) loop.over = over;
     if (mode === "batch") {
       const bs = Number(srcNode.argValues.batch_size);
       if (!isNaN(bs) && bs > 0) loop.batch_size = bs;

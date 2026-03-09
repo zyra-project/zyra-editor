@@ -171,7 +171,8 @@ export function pipelineToGraph(
     // which would make the arg appear linked/readonly in the editor).
     const targetInfo = nodeMap.get(step.name);
     if (targetInfo) {
-      const targetPort = targetInfo.stage?.inputs[0]?.id ?? "in";
+      const effectivePorts = targetInfo.stage ? getEffectivePorts(targetInfo.stage) : null;
+      const targetPort = effectivePorts?.inputs[0]?.id ?? "in";
       edges.push({
         sourceNode: delayId,
         sourcePort: "delay",
@@ -217,7 +218,8 @@ export function pipelineToGraph(
       const stepCond = stepCondMap.get(stepName);
       if (!stepCond) continue;
       const targetInfo = nodeMap.get(stepName);
-      const targetPort = targetInfo?.stage?.inputs[0]?.id ?? "in";
+      const effectivePorts = targetInfo?.stage ? getEffectivePorts(targetInfo.stage) : null;
+      const targetPort = effectivePorts?.inputs[0]?.id ?? "in";
       edges.push({
         sourceNode: condId,
         sourcePort: stepCond.branch,
@@ -248,7 +250,8 @@ export function pipelineToGraph(
     });
     // Wire loop's "item" output to the step's first input port
     const targetInfo = nodeMap.get(step.name);
-    const targetPort = targetInfo?.stage?.inputs[0]?.id ?? "in";
+    const effectivePorts = targetInfo?.stage ? getEffectivePorts(targetInfo.stage) : null;
+    const targetPort = effectivePorts?.inputs[0]?.id ?? "in";
     edges.push({
       sourceNode: loopId,
       sourcePort: "item",
