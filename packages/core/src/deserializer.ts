@@ -93,10 +93,11 @@ export function pipelineToGraph(
       // getEffectivePorts computes the full list (explicit + arg-ports +
       // implicit stdout/stderr/exitcode), so the chosen IDs always match a
       // rendered handle — making dependency edges visible on the canvas.
+      // Use firstExplicitInputPort to avoid selecting arg:* ports, which
+      // would make arguments appear "linked"/readonly in the UI.
       const srcPorts = source.stage ? getEffectivePorts(source.stage) : null;
-      const tgtPorts = target.stage ? getEffectivePorts(target.stage) : null;
       const sourcePort = srcPorts?.outputs[0]?.id ?? "out";
-      const targetPort = tgtPorts?.inputs[0]?.id ?? "in";
+      const targetPort = firstExplicitInputPort(target.stage);
 
       edges.push({
         sourceNode: depName,
@@ -119,13 +120,13 @@ export function pipelineToGraph(
 
   /**
    * Find the first explicit (non-arg:*) input port for a stage.
-   * Falls back to the first effective input (even arg:*) or "in".
+   * Falls back to "in" when no explicit port exists.
    */
   function firstExplicitInputPort(stage: StageDef | undefined): string {
     if (!stage) return "in";
     const effective = getEffectivePorts(stage);
     const explicit = effective.inputs.find((p) => !p.id.startsWith("arg:"));
-    return explicit?.id ?? effective.inputs[0]?.id ?? "in";
+    return explicit?.id ?? "in";
   }
 
   /** Generate a unique ID with the given prefix, avoiding collisions. */
