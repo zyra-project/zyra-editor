@@ -116,6 +116,25 @@ export function useExecution(): ExecutionControls {
 
       // Use async mode with WebSocket streaming for live log output
       const req: RunStepRequest = { ...requests[stepIndex], mode: "async" };
+
+      // Respect delay/throttle for single-node runs (consistent with full pipeline runs)
+      const delaySecs = step.delay_seconds;
+      if (delaySecs && delaySecs > 0) {
+        updateNode(nodeId, { ...emptyRunState(), status: "queued", submittedRequest: req });
+        const totalMs = delaySecs * 1000;
+        const pollMs = 200;
+        const start = Date.now();
+        while (Date.now() - start < totalMs) {
+          if (cancelledRef.current || runGenRef.current !== gen) {
+            updateNode(nodeId, { status: "canceled" });
+            setRunning(false);
+            return null;
+          }
+          const remaining = totalMs - (Date.now() - start);
+          await new Promise((r) => setTimeout(r, Math.min(remaining, pollMs)));
+        }
+      }
+
       updateNode(nodeId, { ...emptyRunState(), status: "running", submittedRequest: req });
 
       try {

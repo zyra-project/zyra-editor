@@ -32,6 +32,9 @@ import yaml from "js-yaml";
 import { useTheme } from "./useTheme";
 import { useBackendStatus } from "./useBackendStatus";
 
+/** Control-flow commands that can wire to non-arg input ports. */
+const CONTROL_FLOW_COMMANDS = new Set(["delay", "cron", "conditional", "loop"]);
+
 /**
  * Derive a display value string for a control node's output port.
  * Handles all control node types including control-flow nodes (delay, cron,
@@ -626,8 +629,7 @@ function Editor() {
       // Value-inlining control nodes (string, number, boolean, choice, filepath,
       // date, secret) are only meaningful when targeting arg-ports.
       // Control-flow nodes (delay, cron, conditional, loop) can wire to any port.
-      const controlFlowCommands = new Set(["delay", "cron", "conditional", "loop"]);
-      if (srcDef.stage === "control" && !tgtPort.argKey && !controlFlowCommands.has(srcDef.command)) return false;
+      if (srcDef.stage === "control" && !tgtPort.argKey && !CONTROL_FLOW_COMMANDS.has(srcDef.command)) return false;
 
       return portsCompatible(srcPort, tgtPort);
     },
