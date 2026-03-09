@@ -79,6 +79,15 @@ export function pipelineToGraph(
     nodeMap.set(step.name, { node, stage });
   }
 
+  // Build set of source→target pairs already covered by arg-wire edges.
+  // These should not produce redundant depends_on data-flow edges.
+  const argWirePairs = new Set<string>();
+  if (pipeline._argWires) {
+    for (const wire of pipeline._argWires) {
+      argWirePairs.add(`${wire.sourceNode}:${wire.targetNode}`);
+    }
+  }
+
   // Reconstruct edges from depends_on
   for (const step of pipeline.steps) {
     if (!step.depends_on) continue;
@@ -86,6 +95,9 @@ export function pipelineToGraph(
     if (!target) continue;
 
     for (const depName of step.depends_on) {
+      // Skip if this dependency is already represented by an arg wire
+      if (argWirePairs.has(`${depName}:${step.name}`)) continue;
+
       const source = nodeMap.get(depName);
       if (!source) continue;
 
@@ -357,6 +369,34 @@ export function pipelineToGraph(
           targetPort: ce.targetPort,
         });
       }
+    }
+  }
+
+  // Reconstruct arg-to-arg wire edges from _argWires metadata
+  if (pipeline._argWires) {
+    for (const wire of pipeline._argWires) {
+      if (!allNodeIds.has(wire.sourceNode) || !allNodeIds.has(wire.targetNode)) continue;
+
+      // Verify target arg exists
+      const targetInfo = nodeMap.get(wire.targetNode);
+      if (targetInfo?.stage) {
+        const hasArg = targetInfo.stage.args.some((a) => a.key === wire.targetArgKey);
+        if (!hasArg) continue;
+      }
+
+      // Verify source arg exists
+      const sourceInfo = nodeMap.get(wire.sourceNode);
+      if (sourceInfo?.stage) {
+        const hasArg = sourceInfo.stage.args.some((a) => a.key === wire.sourceArgKey);
+        if (!hasArg) continue;
+      }
+
+      edges.push({
+        sourceNode: wire.sourceNode,
+        sourcePort: `argout:${wire.sourceArgKey}`,
+        targetNode: wire.targetNode,
+        targetPort: `arg:${wire.targetArgKey}`,
+      });
     }
   }
 

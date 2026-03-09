@@ -4,7 +4,7 @@ export type {
   PortDef,
   ArgDef,
 } from "./manifest.js";
-export { portsCompatible, argToPort, getImplicitOutputs, getEffectivePorts } from "./manifest.js";
+export { portsCompatible, argToPort, argToOutputPort, getImplicitOutputs, getEffectivePorts } from "./manifest.js";
 
 export type {
   Graph,
@@ -15,6 +15,7 @@ export type {
   PipelineStep,
   PipelineGroup,
   PipelineControl,
+  PipelineArgWire,
   PipelineDiagnostic,
   StepCondition,
   StepLoop,

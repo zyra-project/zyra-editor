@@ -128,6 +128,14 @@ export interface PipelineSchedule {
   enabled?: boolean;
 }
 
+/** Editor-only arg-to-arg wire metadata — not used by the Zyra CLI. */
+export interface PipelineArgWire {
+  sourceNode: string;
+  sourceArgKey: string;
+  targetNode: string;
+  targetArgKey: string;
+}
+
 export interface Pipeline {
   version: string;
   /** Recurring execution schedule (from a control/cron node). */
@@ -137,6 +145,8 @@ export interface Pipeline {
   _groups?: PipelineGroup[];
   /** Editor-only control nodes — not used by the Zyra CLI. */
   _controls?: PipelineControl[];
+  /** Editor-only arg-to-arg wires — not used by the Zyra CLI. */
+  _argWires?: PipelineArgWire[];
 }
 
 /**
@@ -414,6 +424,41 @@ export function graphToPipeline(
     inlinedArgs.get(e.targetNode)!.set(argKey, val);
   }
 
+  // ── Process arg-to-arg edges ──────────────────────────────────────
+  // When a non-control node's argout:<key> port is wired to another
+  // non-control node's arg:<key> port, copy the source arg value into
+  // the target's args and record the edge for round-tripping.
+  const argWires: PipelineArgWire[] = [];
+  const argWireDeps = new Map<string, Set<string>>();
+
+  for (const e of graph.edges) {
+    if (controlNodeIds.has(e.sourceNode) || controlNodeIds.has(e.targetNode)) continue;
+    if (!e.sourcePort.startsWith("argout:") || !e.targetPort.startsWith("arg:")) continue;
+
+    const srcNode = nodeMap.get(e.sourceNode);
+    if (!srcNode) continue;
+
+    const srcArgKey = e.sourcePort.slice(7); // strip "argout:"
+    const tgtArgKey = e.targetPort.slice(4); // strip "arg:"
+    const val = srcNode.argValues[srcArgKey];
+
+    if (val !== undefined && val !== "") {
+      if (!inlinedArgs.has(e.targetNode)) inlinedArgs.set(e.targetNode, new Map());
+      inlinedArgs.get(e.targetNode)!.set(tgtArgKey, val);
+    }
+
+    // Record dependency
+    if (!argWireDeps.has(e.targetNode)) argWireDeps.set(e.targetNode, new Set());
+    argWireDeps.get(e.targetNode)!.add(e.sourceNode);
+
+    argWires.push({
+      sourceNode: e.sourceNode,
+      sourceArgKey: srcArgKey,
+      targetNode: e.targetNode,
+      targetArgKey: tgtArgKey,
+    });
+  }
+
   // ── Derive transitive dependencies through control nodes ────────
   // When step A → control node → step B, step B should depend on step A.
   // Build a map: control node ID → set of non-control source step IDs feeding into it.
@@ -439,9 +484,12 @@ export function graphToPipeline(
     }
   }
 
-  // Filter out control-node edges from the graph for topo sort and depends_on
+  // Filter out control-node edges and arg-wire edges from the graph for topo sort
+  // and depends_on.  Arg-wire edges (argout:→arg:) are value-wiring, not data-flow;
+  // their dependencies are injected separately via argWireDeps.
   const nonControlEdges = graph.edges.filter(
-    (e) => !controlNodeIds.has(e.sourceNode) && !controlNodeIds.has(e.targetNode),
+    (e) => !controlNodeIds.has(e.sourceNode) && !controlNodeIds.has(e.targetNode)
+      && !(e.sourcePort.startsWith("argout:") && e.targetPort.startsWith("arg:")),
   );
   const nonControlNodes = graph.nodes.filter((n) => !controlNodeIds.has(n.id));
 
@@ -464,6 +512,19 @@ export function graphToPipeline(
 
   // Inject transitive dependencies from control nodes (step A → cond/loop → step B)
   for (const [targetId, deps] of transitiveDeps) {
+    if (!parentMap.has(targetId)) continue;
+    const existing = new Set(parentMap.get(targetId));
+    for (const dep of deps) {
+      if (!existing.has(dep) && inDegree.has(dep)) {
+        parentMap.get(targetId)!.push(dep);
+        children.get(dep)!.push(targetId);
+        inDegree.set(targetId, (inDegree.get(targetId) ?? 0) + 1);
+      }
+    }
+  }
+
+  // Inject arg-wire dependencies (step A's arg → step B's arg creates A→B dep)
+  for (const [targetId, deps] of argWireDeps) {
     if (!parentMap.has(targetId)) continue;
     const existing = new Set(parentMap.get(targetId));
     for (const dep of deps) {
@@ -579,5 +640,6 @@ export function graphToPipeline(
   const result: Pipeline = { version: "1", steps };
   if (schedule) result.schedule = schedule;
   if (controls.length > 0) result._controls = controls;
+  if (argWires.length > 0) result._argWires = argWires;
   return result;
 }

@@ -81,6 +81,17 @@ export function argToPort(arg: ArgDef): PortDef {
   };
 }
 
+/** Convert an ArgDef into an implicit output PortDef for arg-to-arg wiring. */
+export function argToOutputPort(arg: ArgDef): PortDef {
+  return {
+    id: `argout:${arg.key}`,
+    label: arg.label,
+    types: ARG_TYPE_MAP[arg.type] ?? ["string"],
+    implicit: true,
+    argKey: arg.key,
+  };
+}
+
 /** Standard implicit output ports added to every node. */
 export function getImplicitOutputs(): PortDef[] {
   return [
@@ -90,17 +101,18 @@ export function getImplicitOutputs(): PortDef[] {
   ];
 }
 
-/** Full port list for a node: explicit manifest ports + arg-ports + implicit outputs. */
+/** Full port list for a node: explicit manifest ports + arg-ports + implicit outputs + arg-output ports. */
 export function getEffectivePorts(stageDef: StageDef): { inputs: PortDef[]; outputs: PortDef[] } {
   // Control nodes don't accept incoming arg-port connections (those edges aren't round-tripped)
   const includeArgPorts = stageDef.stage !== "control";
   const argPorts = includeArgPorts ? stageDef.args.map(argToPort) : [];
+  const argOutputPorts = includeArgPorts ? stageDef.args.map(argToOutputPort) : [];
   // Only executable stages (non-empty cli) produce implicit stdout/stderr/exitcode
   const hasExecutableCli = stageDef.cli != null && stageDef.cli.trim().length > 0;
   return {
     inputs: [...stageDef.inputs, ...argPorts],
     outputs: hasExecutableCli
-      ? [...stageDef.outputs, ...getImplicitOutputs()]
-      : [...stageDef.outputs],
+      ? [...stageDef.outputs, ...getImplicitOutputs(), ...argOutputPorts]
+      : [...stageDef.outputs, ...argOutputPorts],
   };
 }

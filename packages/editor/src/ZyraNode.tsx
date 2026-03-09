@@ -74,14 +74,18 @@ export function ZyraNode({ id, data, selected }: NodeProps) {
     });
   }, [allInputs, connIn, argValues, expanded]);
 
-  // Visible outputs: explicit ports always shown, implicit shown if connected or expanded
+  // Visible outputs: explicit ports always shown, implicit shown if connected/filled/expanded
   const visibleOutputs = useMemo(() => {
     return allOutputs.filter((port) => {
       if (!port.implicit) return true;
       if (connOut.has(port.id)) return true;
+      // Show arg-output ports when the corresponding arg has a value
+      if (port.id.startsWith("argout:") && port.argKey) {
+        if (argValues[port.argKey] !== undefined && argValues[port.argKey] !== "") return true;
+      }
       return expanded;
     });
-  }, [allOutputs, connOut, expanded]);
+  }, [allOutputs, connOut, argValues, expanded]);
 
   // Count hidden ports for the expand toggle
   const hiddenInputCount = allInputs.length - visibleInputs.length;
@@ -578,7 +582,12 @@ export function ZyraNode({ id, data, selected }: NodeProps) {
           borderTop: visibleOutputs.length > 0 ? "1px solid var(--border-default)" : undefined,
         }}>
           {visibleOutputs.map((port) => (
-            <OutputPortRow key={port.id} port={port} isImplicit={!!port.implicit} />
+            <OutputPortRow
+              key={port.id}
+              port={port}
+              isImplicit={!!port.implicit}
+              argValue={port.argKey ? argValues[port.argKey] : undefined}
+            />
           ))}
 
           {/* Dry-run resolved command */}
@@ -697,13 +706,22 @@ function InputPortRow({ port, isConnected, linkedValue, argDef, argValue }: {
   );
 }
 
-function OutputPortRow({ port, isImplicit }: { port: PortDef; isImplicit: boolean }) {
+function OutputPortRow({ port, isImplicit, argValue }: {
+  port: PortDef;
+  isImplicit: boolean;
+  argValue?: string | number | boolean;
+}) {
+  const isArgOut = port.id.startsWith("argout:");
   return (
     <div
       style={{
         position: "relative",
         textAlign: "right",
         marginBottom: 4,
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "flex-end",
+        gap: 6,
       }}
     >
       <Handle
@@ -717,7 +735,22 @@ function OutputPortRow({ port, isImplicit }: { port: PortDef; isImplicit: boolea
           borderStyle: isImplicit ? "dashed" : "solid",
         }}
       />
-      <span style={{ fontSize: 11, color: isImplicit ? "var(--text-muted)" : "var(--text-secondary)", marginRight: 8 }}>
+      {/* Show current arg value for argout ports */}
+      {isArgOut && argValue !== undefined && argValue !== "" && (
+        <span style={{
+          fontSize: 10,
+          color: "var(--accent-blue)",
+          fontFamily: "var(--font-mono)",
+          overflow: "hidden",
+          textOverflow: "ellipsis",
+          whiteSpace: "nowrap",
+          flex: 1,
+          minWidth: 0,
+        }} title={String(argValue)}>
+          {String(argValue)}
+        </span>
+      )}
+      <span style={{ fontSize: 11, color: isImplicit ? "var(--text-muted)" : "var(--text-secondary)", marginRight: 8, flexShrink: 0 }}>
         <span style={{ fontSize: 9, color: "var(--text-muted)", marginRight: 4 }}>
           [{port.types.join(", ")}]
         </span>

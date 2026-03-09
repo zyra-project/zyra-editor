@@ -356,6 +356,14 @@ function Editor() {
         if (srcData?.stageDef.stage === "control") {
           const resolved = resolveControlDisplayValue(srcData, e.sourceHandle);
           displayValue = resolved ?? "(unset)";
+        } else if (e.sourceHandle?.startsWith("argout:")) {
+          // Arg-to-arg wire: show source node label + arg value
+          const argKey = e.sourceHandle.slice(7);
+          const val = srcData?.argValues[argKey];
+          const nodeLabel = srcData?.nodeLabel || srcData?.stageDef.label || "";
+          displayValue = val !== undefined && val !== ""
+            ? `${nodeLabel}: ${String(val)}`
+            : `${nodeLabel}: (unset)`;
         }
         inMap.get(e.target)!.set(e.targetHandle, displayValue);
       }
@@ -623,9 +631,11 @@ function Editor() {
       const tgtPort = tgtPorts.inputs.find((p) => p.id === connection.targetHandle);
       if (!srcPort || !tgtPort) return false;
 
-      // Only control nodes can wire into arg-ports (serialization can't
-      // round-trip non-control → arg-port edges yet)
-      if (tgtPort.argKey && srcDef.stage !== "control") return false;
+      // Only control nodes and argout:* ports can wire into arg-ports.
+      // Regular output ports from non-control nodes cannot target arg-ports.
+      if (tgtPort.argKey && srcDef.stage !== "control") {
+        if (!connection.sourceHandle?.startsWith("argout:")) return false;
+      }
       // Control-flow nodes (delay, cron, conditional, loop) can wire to
       // non-arg input ports but NOT to arg-ports (they don't inline values).
       if (srcDef.stage === "control" && CONTROL_FLOW_COMMANDS.has(srcDef.command)) {
@@ -634,6 +644,8 @@ function Editor() {
       // Value-inlining control nodes (string, number, boolean, choice, filepath,
       // date, secret) are only meaningful when targeting arg-ports.
       if (srcDef.stage === "control" && !CONTROL_FLOW_COMMANDS.has(srcDef.command) && !tgtPort.argKey) return false;
+      // Arg-output ports are only meaningful when targeting arg-ports.
+      if (connection.sourceHandle?.startsWith("argout:") && !tgtPort.argKey) return false;
 
       return portsCompatible(srcPort, tgtPort);
     },
@@ -917,13 +929,22 @@ function Editor() {
         const srcData = srcNode?.data as ZyraNodeData | undefined;
         // For control nodes, extract the actual value (or placeholder/default) to show alongside the label
         let peerValue: string | undefined;
+        let peerLabel = srcData?.nodeLabel || srcData?.stageDef.label || e.source;
         if (srcData?.stageDef.stage === "control") {
           peerValue = resolveControlDisplayValue(srcData, e.sourceHandle) ?? undefined;
+        } else if (e.sourceHandle?.startsWith("argout:")) {
+          // Arg-to-arg wire: show source arg name in label and arg value as peerValue
+          const argKey = e.sourceHandle.slice(7);
+          const argDef = srcData?.stageDef.args.find((a: { key: string }) => a.key === argKey);
+          const argLabel = argDef?.label ?? argKey;
+          peerLabel = `${peerLabel} / ${argLabel}`;
+          const val = srcData?.argValues[argKey];
+          peerValue = val !== undefined && val !== "" ? String(val) : undefined;
         }
         return {
           portId: e.targetHandle ?? "",
           peerNodeId: e.source,
-          peerLabel: srcData?.nodeLabel || srcData?.stageDef.label || e.source,
+          peerLabel,
           peerValue,
           peerSensitive: srcData?.stageDef.command === "secret",
           peerStatus: exec.runState.get(e.source)?.status as NodeRunStatus | undefined,
