@@ -532,7 +532,14 @@ export function graphToPipeline(
     if (!controlNodeIds.has(n.id)) continue;
     const ctrlEdges = graph.edges
       .filter((e) => e.sourceNode === n.id)
-      .map((e) => ({ sourcePort: e.sourcePort, targetNode: e.targetNode, targetPort: e.targetPort }));
+      .map((e) => {
+        const edge: { targetNode: string; targetPort: string; sourcePort?: string } = {
+          targetNode: e.targetNode,
+          targetPort: e.targetPort,
+        };
+        if (e.sourcePort) edge.sourcePort = e.sourcePort;
+        return edge;
+      });
     // Strip plaintext secret values from the YAML — only keep the variable name
     const ctrlArgs = { ...n.argValues };
     if (n.stageCommand === "control/secret") {

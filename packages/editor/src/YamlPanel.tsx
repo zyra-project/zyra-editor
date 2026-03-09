@@ -85,9 +85,19 @@ export function normalizePipeline(raw: unknown): Pipeline | null {
       if (stepObj.condition && typeof stepObj.condition === "object" && !Array.isArray(stepObj.condition)) {
         const cond = stepObj.condition as Record<string, unknown>;
         if (typeof cond.field === "string" && typeof cond.value === "string") {
+          const operatorStr = typeof cond.operator === "string" ? cond.operator : "==";
+          const allowedOperators: StepCondition["operator"][] = [
+            "==", "!=", ">", "<", ">=", "<=", "contains", "matches",
+          ];
+          const operator: StepCondition["operator"] = allowedOperators.includes(
+            operatorStr as StepCondition["operator"],
+          )
+            ? (operatorStr as StepCondition["operator"])
+            : "==";
+
           step.condition = {
             field: cond.field,
-            operator: (typeof cond.operator === "string" ? cond.operator : "==") as StepCondition["operator"],
+            operator,
             value: cond.value,
             branch: cond.branch === "false" ? "false" : "true",
           };
@@ -147,7 +157,7 @@ export function normalizePipeline(raw: unknown): Pipeline | null {
             const eo = e as Record<string, unknown>;
             if (typeof eo.targetNode === "string" && typeof eo.targetPort === "string") {
               const edge: PipelineControl["edges"][number] = { targetNode: eo.targetNode, targetPort: eo.targetPort };
-              if (typeof eo.sourcePort === "string") edge.sourcePort = eo.sourcePort;
+              if (typeof eo.sourcePort === "string" && eo.sourcePort !== "") edge.sourcePort = eo.sourcePort;
               edges.push(edge);
             }
           }

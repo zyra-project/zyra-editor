@@ -333,7 +333,7 @@ export function pipelineToGraph(
 
         edges.push({
           sourceNode: ctrl.id,
-          sourcePort: ce.sourcePort ?? defaultSourcePort,
+          sourcePort: ce.sourcePort || defaultSourcePort,
           targetNode: ce.targetNode,
           targetPort: ce.targetPort,
         });
