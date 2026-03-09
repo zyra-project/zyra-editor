@@ -1,4 +1,4 @@
-import type { StageDef, ArgDef } from "./manifest.js";
+import { getEffectivePorts, type StageDef, type ArgDef } from "./manifest.js";
 import type { Graph, GraphNode, GraphEdge, Pipeline } from "./serializer.js";
 
 /**
@@ -81,9 +81,14 @@ export function pipelineToGraph(
       const source = nodeMap.get(depName);
       if (!source) continue;
 
-      // Pick first output port of source and first input port of target
-      const sourcePort = source.stage?.outputs[0]?.id ?? "out";
-      const targetPort = target.stage?.inputs[0]?.id ?? "in";
+      // Pick port IDs that will actually be rendered by the node component.
+      // getEffectivePorts computes the full list (explicit + arg-ports +
+      // implicit stdout/stderr/exitcode), so the chosen IDs always match a
+      // rendered handle — making dependency edges visible on the canvas.
+      const srcPorts = source.stage ? getEffectivePorts(source.stage) : null;
+      const tgtPorts = target.stage ? getEffectivePorts(target.stage) : null;
+      const sourcePort = srcPorts?.outputs[0]?.id ?? "out";
+      const targetPort = tgtPorts?.inputs[0]?.id ?? "in";
 
       edges.push({
         sourceNode: depName,

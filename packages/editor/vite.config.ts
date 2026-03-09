@@ -23,6 +23,7 @@ export default defineConfig({
         ws: true,
       },
       "/health": backend,
+      "/ready": backend,
     },
   },
 });

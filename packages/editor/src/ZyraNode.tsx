@@ -609,7 +609,7 @@ function InputPortRow({ port, isConnected, linkedValue, argDef, argValue }: {
         fontSize: 11,
         color: isConnected ? "var(--accent-blue)" : "var(--text-secondary)",
         marginLeft: 8,
-        flex: 1,
+        flexShrink: 1,
         minWidth: 0,
         overflow: "hidden",
         textOverflow: "ellipsis",
@@ -631,8 +631,8 @@ function InputPortRow({ port, isConnected, linkedValue, argDef, argValue }: {
           overflow: "hidden",
           textOverflow: "ellipsis",
           whiteSpace: "nowrap",
-          maxWidth: "55%",
-          flexShrink: 1,
+          flex: 1,
+          minWidth: 0,
           textAlign: "right",
         }} title={sensitive ? "Linked (sensitive)" : linkedValue}>
           {sensitive ? "••••••••" : linkedValue}
@@ -655,8 +655,8 @@ function InputPortRow({ port, isConnected, linkedValue, argDef, argValue }: {
           overflow: "hidden",
           textOverflow: "ellipsis",
           whiteSpace: "nowrap",
-          maxWidth: "50%",
-          flexShrink: 1,
+          flex: 1,
+          minWidth: 0,
           textAlign: "right",
         }} title={String(argValue)}>
           {sensitive ? "••••••••" : String(argValue)}
