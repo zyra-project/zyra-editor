@@ -261,7 +261,16 @@ export function graphToPipeline(
   // when finding what provides items to a loop node.
   const edgesByTarget = new Map<string, string>();
   for (const e of graph.edges) {
-    edgesByTarget.set(`${e.targetNode}:${e.targetPort}`, e.sourceNode);
+    const key = `${e.targetNode}:${e.targetPort}`;
+    if (!edgesByTarget.has(key)) {
+      edgesByTarget.set(key, e.sourceNode);
+    } else if (e.targetPort === "items") {
+      // Multiple providers for a loop's "items" input — keep first for determinism
+      diagnostics?.push({
+        level: "warn",
+        message: `Loop node "${e.targetNode}" has multiple sources for "items": "${edgesByTarget.get(key)}" and "${e.sourceNode}". Using "${edgesByTarget.get(key)}".`,
+      });
+    }
   }
 
   // Map from target step node ID → StepLoop

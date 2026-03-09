@@ -23,11 +23,19 @@ export function pipelineToGraph(
     byKey.set(`${s.stage}/${s.command}`, s);
   }
 
+  // Backward-compat aliases for renamed control nodes
+  const COMMAND_ALIASES: Record<string, string> = {
+    "control/variable": "control/string",
+  };
+
   function findStage(command: string): StageDef | undefined {
     // Try exact cli match first
     if (byCli.has(command)) return byCli.get(command);
     // Try "stage/command" shorthand
     if (byKey.has(command)) return byKey.get(command);
+    // Try alias
+    const alias = COMMAND_ALIASES[command];
+    if (alias && byKey.has(alias)) return byKey.get(alias);
     // Try stripping "zyra " prefix
     const stripped = command.replace(/^zyra\s+/, "");
     if (byCli.has(stripped)) return byCli.get(stripped);
@@ -44,8 +52,8 @@ export function pipelineToGraph(
   function normalizeCommand(cmd: string): string {
     const stripped = cmd.replace(/^zyra\s+/, "");
     const parts = stripped.split(/\s+/);
-    if (parts.length >= 2) return `${parts[0]}/${parts[1]}`;
-    return stripped;
+    const key = parts.length >= 2 ? `${parts[0]}/${parts[1]}` : stripped;
+    return COMMAND_ALIASES[key] ?? key;
   }
 
   const nodes: GraphNode[] = [];
@@ -288,18 +296,20 @@ export function pipelineToGraph(
   // First pass: add all control nodes so IDs are available for edge wiring.
   if (pipeline._controls) {
     for (const ctrl of pipeline._controls) {
+      // Apply backward-compat aliases to control node stageCommand
+      const stageCommand = COMMAND_ALIASES[ctrl.stageCommand] ?? ctrl.stageCommand;
       const ctrlArgs = { ...ctrl.argValues };
 
       // Secret nodes have their value stripped during serialization.
       // Set an empty value so the user is prompted to re-enter the secret.
-      if (ctrl.stageCommand === "control/secret" && !("value" in ctrlArgs)) {
+      if (stageCommand === "control/secret" && !("value" in ctrlArgs)) {
         ctrlArgs.value = "";
       }
 
       const node: GraphNode = {
         id: ctrl.id,
         label: ctrl.label,
-        stageCommand: ctrl.stageCommand,
+        stageCommand,
         argValues: ctrlArgs,
         position: ctrl._layout ? { x: ctrl._layout.x, y: ctrl._layout.y } : undefined,
         size:
@@ -321,13 +331,17 @@ export function pipelineToGraph(
       for (const ce of ctrl.edges) {
         if (!allNodeIds.has(ce.targetNode)) continue;
 
-        if (ce.targetPort.startsWith("arg:")) {
-          // Validate that the target node's stage actually has this arg key
-          const targetInfo = nodeMap.get(ce.targetNode);
-          if (targetInfo?.stage) {
+        // Validate that the target port actually exists on the target node
+        const targetInfo = nodeMap.get(ce.targetNode);
+        if (targetInfo?.stage) {
+          if (ce.targetPort.startsWith("arg:")) {
             const argKey = ce.targetPort.slice(4);
             const hasArg = targetInfo.stage.args.some((a) => a.key === argKey);
             if (!hasArg) continue; // skip edges to non-existent arg handles
+          } else {
+            const effectiveInputs = getEffectivePorts(targetInfo.stage).inputs;
+            const hasPort = effectiveInputs.some((p) => p.id === ce.targetPort);
+            if (!hasPort) continue; // skip edges to non-existent input handles
           }
         }
 
