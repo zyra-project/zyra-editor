@@ -1,6 +1,6 @@
 import { useState, useCallback, useEffect, useRef } from "react";
 import yaml from "js-yaml";
-import type { Pipeline, PipelineStep, PipelineGroup, PipelineControl } from "@zyra/core";
+import type { Pipeline, PipelineStep, PipelineGroup, PipelineControl, PipelineSchedule, StepCondition } from "@zyra/core";
 
 /** Zyra native YAML format: stages array with stage/command fields. */
 interface NativeStage {
@@ -76,13 +76,58 @@ export function normalizePipeline(raw: unknown): Pipeline | null {
         }
       }
 
+      // Preserve delay_seconds for delay node reconstruction
+      if (typeof stepObj.delay_seconds === "number" && stepObj.delay_seconds > 0) {
+        step.delay_seconds = stepObj.delay_seconds;
+      }
+
+      // Preserve condition for conditional node reconstruction
+      if (stepObj.condition && typeof stepObj.condition === "object" && !Array.isArray(stepObj.condition)) {
+        const cond = stepObj.condition as Record<string, unknown>;
+        if (typeof cond.field === "string" && typeof cond.value === "string") {
+          step.condition = {
+            field: cond.field,
+            operator: (typeof cond.operator === "string" ? cond.operator : "==") as StepCondition["operator"],
+            value: cond.value,
+            branch: cond.branch === "false" ? "false" : "true",
+          };
+        }
+      }
+
+      // Preserve loop for loop node reconstruction
+      if (stepObj.loop && typeof stepObj.loop === "object" && !Array.isArray(stepObj.loop)) {
+        const lp = stepObj.loop as Record<string, unknown>;
+        const mode = typeof lp.mode === "string" ? lp.mode : "each";
+        if (mode === "each" || mode === "batch" || mode === "range") {
+          const loop: PipelineStep["loop"] = { mode };
+          if (typeof lp.over === "string") loop.over = lp.over;
+          if (typeof lp.batch_size === "number") loop.batch_size = lp.batch_size;
+          if (typeof lp.range_start === "number") loop.range_start = lp.range_start;
+          if (typeof lp.range_end === "number") loop.range_end = lp.range_end;
+          if (typeof lp.range_step === "number") loop.range_step = lp.range_step;
+          if (typeof lp.max_parallel === "number") loop.max_parallel = lp.max_parallel;
+          step.loop = loop;
+        }
+      }
+
       steps.push(step);
     }
 
     if (steps.length === 0) return null;
 
-    // Pass through _controls if present
+    // Preserve top-level schedule for cron node reconstruction
     const pipeline: Pipeline = { version: "1", steps };
+    if (obj.schedule && typeof obj.schedule === "object" && !Array.isArray(obj.schedule)) {
+      const sched = obj.schedule as Record<string, unknown>;
+      if (typeof sched.cron === "string" && sched.cron.trim()) {
+        const s: PipelineSchedule = { cron: sched.cron.trim() };
+        if (typeof sched.timezone === "string" && sched.timezone.trim()) s.timezone = sched.timezone.trim();
+        if (sched.enabled === false) s.enabled = false;
+        pipeline.schedule = s;
+      }
+    }
+
+    // Pass through _controls if present
     const controls: PipelineControl[] = [];
     if (Array.isArray(obj._controls)) {
       for (const c of obj._controls as unknown[]) {
