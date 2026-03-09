@@ -101,7 +101,9 @@ export function normalizePipeline(raw: unknown): Pipeline | null {
             if (!e || typeof e !== "object") continue;
             const eo = e as Record<string, unknown>;
             if (typeof eo.targetNode === "string" && typeof eo.targetPort === "string") {
-              edges.push({ targetNode: eo.targetNode, targetPort: eo.targetPort });
+              const edge: PipelineControl["edges"][number] = { targetNode: eo.targetNode, targetPort: eo.targetPort };
+              if (typeof eo.sourcePort === "string") edge.sourcePort = eo.sourcePort;
+              edges.push(edge);
             }
           }
         }
