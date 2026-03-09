@@ -1,39 +1,42 @@
 import { useState, useRef, useCallback } from "react";
 
-/** A single choice option with an optional human-readable label. */
-interface ChoiceOption {
+/** A single choice option with a human-readable label and a machine value. */
+export interface ChoiceOption {
   label: string;
   value: string;
 }
 
-/**
- * Parse the serialized options string into label/value pairs.
- * Format: comma-separated entries, each either `label=value` or just `value`.
- */
-function parseOptions(raw: string): ChoiceOption[] {
+/** Parse the JSON options string. Returns [] on invalid/empty input. */
+export function parseOptions(raw: string): ChoiceOption[] {
   if (!raw) return [];
-  return raw.split(",").map((s) => {
-    const trimmed = s.trim();
-    if (!trimmed) return null;
-    const eqIdx = trimmed.indexOf("=");
-    if (eqIdx > 0) {
-      const label = trimmed.slice(0, eqIdx).trim();
-      const value = trimmed.slice(eqIdx + 1).trim();
-      return { label: label || value, value: value || label };
-    }
-    return { label: trimmed, value: trimmed };
-  }).filter((o): o is ChoiceOption => o !== null);
+  try {
+    const parsed = JSON.parse(raw);
+    if (!Array.isArray(parsed)) return [];
+    return parsed.filter(
+      (o): o is ChoiceOption =>
+        o !== null && typeof o === "object" && typeof o.value === "string",
+    ).map((o) => ({
+      label: typeof o.label === "string" && o.label ? o.label : o.value,
+      value: o.value,
+    }));
+  } catch {
+    return [];
+  }
 }
 
-/** Serialize label/value pairs back to the comma-separated format. */
+/** Serialize options to JSON. Omits label when it matches value. */
 function serializeOptions(opts: ChoiceOption[]): string {
-  return opts.map((o) => o.label === o.value ? o.value : `${o.label}=${o.value}`).join(",");
+  return JSON.stringify(
+    opts.map((o) =>
+      o.label === o.value ? { value: o.value } : { label: o.label, value: o.value },
+    ),
+  );
 }
 
 /**
  * Visual editor for the Choice node's options list.
- * Each option has an optional label (human-readable) and a value (machine-readable).
- * Format: "label=value" per entry, comma-separated. If label equals value, just "value".
+ * Each option has a label (human-readable) and a value (machine-readable).
+ * Stored as a JSON array of {label?, value} objects.
  */
 export function ChoiceOptionsEditor({
   value,
@@ -41,9 +44,9 @@ export function ChoiceOptionsEditor({
   selected,
   onSelectChange,
 }: {
-  /** Comma-separated options string (label=value or just value) */
+  /** JSON-encoded options array */
   value: string;
-  onChange: (csv: string) => void;
+  onChange: (json: string) => void;
   /** Currently selected value */
   selected: string;
   onSelectChange: (v: string) => void;
@@ -59,7 +62,6 @@ export function ChoiceOptionsEditor({
   const commit = useCallback(
     (opts: ChoiceOption[]) => {
       onChange(serializeOptions(opts));
-      // If the selected value was removed, clear it
       if (selected && !opts.some((o) => o.value === selected)) {
         onSelectChange("");
       }
@@ -88,9 +90,8 @@ export function ChoiceOptionsEditor({
       return;
     }
     const finalValue = trimValue || trimLabel;
-    const finalLabel = trimLabel || trimValue;
+    const finalLabel = trimLabel || finalValue;
     const next = [...options];
-    // If the selected value was this option, update it
     if (selected === next[index].value) {
       onSelectChange(finalValue);
     }
@@ -104,16 +105,13 @@ export function ChoiceOptionsEditor({
     const trimValue = addValueRef.current?.value.trim() ?? "";
     if (!trimValue && !trimLabel) return;
     const finalValue = trimValue || trimLabel;
-    const finalLabel = trimLabel || trimValue;
-    // Avoid duplicate values
+    const finalLabel = trimLabel || finalValue;
     if (options.some((o) => o.value === finalValue)) return;
     commit([...options, { label: finalLabel, value: finalValue }]);
     if (addLabelRef.current) addLabelRef.current.value = "";
     if (addValueRef.current) addValueRef.current.value = "";
     addLabelRef.current?.focus();
   };
-
-  const isSelected = (opt: ChoiceOption) => selected === opt.value;
 
   return (
     <div>
@@ -123,8 +121,8 @@ export function ChoiceOptionsEditor({
           display: "flex",
           gap: 6,
           marginBottom: 4,
-          paddingLeft: 26, // align with content after radio
-          paddingRight: 24, // space for x button
+          paddingLeft: 26,
+          paddingRight: 24,
           fontSize: 10,
           color: "var(--text-muted)",
           textTransform: "uppercase",
@@ -138,8 +136,8 @@ export function ChoiceOptionsEditor({
       {/* Option rows */}
       <div style={{ display: "flex", flexDirection: "column", gap: 4, marginBottom: 8 }}>
         {options.map((opt, i) => {
-          const sel = isSelected(opt);
-          const hasLabel = opt.label !== opt.value;
+          const sel = selected === opt.value;
+          const hasDistinctLabel = opt.label !== opt.value;
           return (
             <div
               key={i}
@@ -166,11 +164,8 @@ export function ChoiceOptionsEditor({
                     placeholder="Label"
                     autoFocus
                     style={{
-                      flex: 1,
-                      fontSize: 12,
-                      padding: "2px 4px",
-                      minWidth: 0,
-                      background: "var(--bg-secondary)",
+                      flex: 1, fontSize: 12, padding: "2px 4px",
+                      minWidth: 0, background: "var(--bg-secondary)",
                     }}
                     onKeyDown={(e) => {
                       if (e.key === "Enter") commitEdit(i);
@@ -183,11 +178,8 @@ export function ChoiceOptionsEditor({
                     onChange={(e) => setEditValue(e.target.value)}
                     placeholder="Value"
                     style={{
-                      flex: 1,
-                      fontSize: 12,
-                      padding: "2px 4px",
-                      minWidth: 0,
-                      background: "var(--bg-secondary)",
+                      flex: 1, fontSize: 12, padding: "2px 4px",
+                      minWidth: 0, background: "var(--bg-secondary)",
                       fontFamily: "var(--font-mono)",
                     }}
                     onKeyDown={(e) => {
@@ -199,13 +191,9 @@ export function ChoiceOptionsEditor({
                     type="button"
                     onClick={() => commitEdit(i)}
                     style={{
-                      background: "none",
-                      border: "none",
-                      color: "var(--accent-blue)",
-                      cursor: "pointer",
-                      fontSize: 12,
-                      padding: "0 4px",
-                      flexShrink: 0,
+                      background: "none", border: "none",
+                      color: "var(--accent-blue)", cursor: "pointer",
+                      fontSize: 12, padding: "0 4px", flexShrink: 0,
                     }}
                   >
                     &#10003;
@@ -218,81 +206,57 @@ export function ChoiceOptionsEditor({
                     onClick={() => onSelectChange(opt.value)}
                     title="Select this option"
                     style={{
-                      width: 14,
-                      height: 14,
-                      borderRadius: "50%",
+                      width: 14, height: 14, borderRadius: "50%",
                       border: `2px solid ${sel ? "#fff" : "var(--text-muted)"}`,
                       background: sel ? "#fff" : "transparent",
-                      flexShrink: 0,
-                      cursor: "pointer",
-                      display: "flex",
-                      alignItems: "center",
-                      justifyContent: "center",
+                      flexShrink: 0, cursor: "pointer",
+                      display: "flex", alignItems: "center", justifyContent: "center",
                     }}
                   >
                     {sel && (
                       <span style={{
-                        width: 6,
-                        height: 6,
-                        borderRadius: "50%",
+                        width: 6, height: 6, borderRadius: "50%",
                         background: "var(--accent-blue)",
                       }} />
                     )}
                   </span>
 
-                  {/* Label + value display — click to edit */}
+                  {/* Label + value display */}
                   <span
                     onClick={() => startEditing(i)}
                     title="Click to edit"
                     style={{
-                      flex: 1,
-                      display: "flex",
-                      gap: 6,
-                      alignItems: "baseline",
-                      overflow: "hidden",
-                      cursor: "text",
+                      flex: 1, display: "flex", gap: 6,
+                      alignItems: "baseline", overflow: "hidden", cursor: "text",
                     }}
                   >
                     <span style={{
-                      flex: 1,
-                      overflow: "hidden",
-                      textOverflow: "ellipsis",
-                      whiteSpace: "nowrap",
+                      flex: 1, overflow: "hidden",
+                      textOverflow: "ellipsis", whiteSpace: "nowrap",
                     }}>
                       {opt.label}
                     </span>
-                    {hasLabel && (
+                    {hasDistinctLabel && (
                       <span style={{
-                        flex: 1,
-                        fontFamily: "var(--font-mono)",
-                        fontSize: 10,
+                        flex: 1, fontFamily: "var(--font-mono)", fontSize: 10,
                         color: sel ? "rgba(255,255,255,0.7)" : "var(--text-muted)",
-                        overflow: "hidden",
-                        textOverflow: "ellipsis",
-                        whiteSpace: "nowrap",
+                        overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
                       }}>
                         {opt.value}
                       </span>
                     )}
                   </span>
 
-                  {/* Remove button */}
+                  {/* Remove */}
                   <button
                     type="button"
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      removeOption(i);
-                    }}
+                    onClick={(e) => { e.stopPropagation(); removeOption(i); }}
                     title="Remove option"
                     style={{
-                      background: "none",
-                      border: "none",
+                      background: "none", border: "none",
                       color: sel ? "rgba(255,255,255,0.7)" : "var(--text-muted)",
-                      cursor: "pointer",
-                      fontSize: 14,
-                      lineHeight: 1,
-                      padding: "0 2px",
-                      flexShrink: 0,
+                      cursor: "pointer", fontSize: 14, lineHeight: 1,
+                      padding: "0 2px", flexShrink: 0,
                     }}
                   >
                     &times;
@@ -304,7 +268,7 @@ export function ChoiceOptionsEditor({
         })}
       </div>
 
-      {/* Add new option row */}
+      {/* Add new option */}
       <div style={{ display: "flex", gap: 4, alignItems: "center" }}>
         <input
           ref={addLabelRef}
@@ -313,7 +277,6 @@ export function ChoiceOptionsEditor({
           style={{ flex: 1, fontSize: 12, padding: "4px 8px" }}
           onKeyDown={(e) => {
             if (e.key === "Enter") {
-              // If value field is empty, focus it first
               if (!addValueRef.current?.value.trim()) {
                 addValueRef.current?.focus();
               } else {
@@ -339,10 +302,8 @@ export function ChoiceOptionsEditor({
             border: "1px solid var(--border-default)",
             color: "var(--text-primary)",
             borderRadius: "var(--radius-sm)",
-            padding: "4px 10px",
-            fontSize: 12,
-            cursor: "pointer",
-            flexShrink: 0,
+            padding: "4px 10px", fontSize: 12,
+            cursor: "pointer", flexShrink: 0,
           }}
         >
           + Add
@@ -351,6 +312,3 @@ export function ChoiceOptionsEditor({
     </div>
   );
 }
-
-/** Export for use in ZyraNode canvas preview. */
-export { parseOptions };
