@@ -26,6 +26,7 @@ import { Toolbar } from "./Toolbar";
 import { LogPanel } from "./LogPanel";
 import { useExecution } from "./useExecution";
 import { YamlPanel, normalizePipeline } from "./YamlPanel";
+import { parseOptions } from "./ChoiceOptionsEditor";
 import { PlannerPanel, type PlanHistoryEntry, type PlanBatch } from "./PlannerPanel";
 import yaml from "js-yaml";
 import { useTheme } from "./useTheme";
@@ -284,6 +285,14 @@ function Editor() {
             } else {
               displayValue = "(unset)";
             }
+          }
+          // Choice "label" port: resolve the label of the selected option
+          if (srcData.stageDef.command === "choice" && e.sourceHandle === "label") {
+            try {
+              const opts = parseOptions(typeof srcData.argValues?.options === "string" ? srcData.argValues.options : "");
+              const sel = opts.find((o) => o.value === String(val ?? ""));
+              if (sel) displayValue = sel.label;
+            } catch { /* keep displayValue as-is */ }
           }
         }
         inMap.get(e.target)!.set(e.targetHandle, displayValue);
@@ -849,6 +858,14 @@ function Editor() {
             const valueDef = srcData.stageDef.args.find((a) => a.key === "value");
             const fallback = valueDef?.default ?? valueDef?.placeholder;
             if (fallback != null && fallback !== "") peerValue = String(fallback);
+          }
+          // Choice "label" port: resolve the label of the selected option
+          if (srcData.stageDef.command === "choice" && e.sourceHandle === "label") {
+            try {
+              const opts = parseOptions(typeof srcData.argValues?.options === "string" ? srcData.argValues.options : "");
+              const sel = opts.find((o) => o.value === String(val ?? ""));
+              if (sel) peerValue = sel.label;
+            } catch { /* keep peerValue as-is */ }
           }
         }
         return {
