@@ -173,6 +173,11 @@ html, body, #root {
   to { opacity: 1; }
 }
 
+@keyframes zyra-spin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+
 /* ── Editor Grid Layout ─────────────────────────────────── */
 
 .zyra-editor {
@@ -237,6 +242,23 @@ html, body, #root {
 }
 
 /* ── React Flow Overrides ────────────────────────────────── */
+
+/* Wider invisible hit area for edges (set via interactionWidth prop) */
+.react-flow__edge {
+  cursor: pointer;
+}
+
+/* Selected edge highlight */
+.react-flow__edge.selected .react-flow__edge-path {
+  stroke: #f97316 !important;
+  stroke-width: 3 !important;
+}
+
+/* Hover feedback */
+.react-flow__edge:hover .react-flow__edge-path {
+  stroke: #60a5fa !important;
+  stroke-width: 3 !important;
+}
 
 .react-flow__controls {
   background: var(--bg-tertiary) !important;

@@ -26,8 +26,10 @@ import { Toolbar } from "./Toolbar";
 import { LogPanel } from "./LogPanel";
 import { useExecution } from "./useExecution";
 import { YamlPanel, normalizePipeline } from "./YamlPanel";
+import { PlannerPanel, type PlanHistoryEntry, type PlanBatch } from "./PlannerPanel";
 import yaml from "js-yaml";
 import { useTheme } from "./useTheme";
+import { useBackendStatus } from "./useBackendStatus";
 
 let nodeIdCounter = 0;
 function nextId() {
@@ -183,7 +185,12 @@ function Editor() {
   const [edges, setEdges, onEdgesChange] = useEdgesState<Edge>([]);
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
   const [yamlOpen, setYamlOpen] = useState(false);
+  const [plannerOpen, setPlannerOpen] = useState(false);
   const [paletteCollapsed, setPaletteCollapsed] = useState(false);
+  const [plannerIntent, setPlannerIntent] = useState("");
+  const [plannerHistory, setPlannerHistory] = useState<PlanHistoryEntry[]>([]);
+  const [planBatches, setPlanBatches] = useState<PlanBatch[]>([]);
+  const backendStatus = useBackendStatus();
   const exec = useExecution();
   const reactFlowWrapper = useRef<HTMLDivElement>(null);
   const { screenToFlowPosition, setCenter } = useReactFlow();
@@ -726,13 +733,74 @@ function Editor() {
     input.click();
   }, [handlePipelineChange]);
 
+  // Apply AI-generated plan to the canvas
+  const handlePlanApply = useCallback(
+    (newNodes: Node[], newEdges: Edge[]) => {
+      // Offset so new nodes don't overlap existing ones
+      const maxX = nodes.reduce((mx, n) => {
+        if (n.type === "group") return mx;
+        const w = n.measured?.width ?? 260;
+        return Math.max(mx, n.position.x + w);
+      }, 0);
+      const offsetX = nodes.length > 0 ? maxX + 120 : 0;
+      const offsetNodes = newNodes.map((n) => ({
+        ...n,
+        position: { x: n.position.x + offsetX, y: n.position.y },
+      }));
+
+      // Update ID counter
+      const maxNum = offsetNodes.reduce((max, n) => {
+        const m = n.id.match(/^node-(\d+)$/);
+        return m ? Math.max(max, Number(m[1])) : max;
+      }, nodeIdCounter);
+      nodeIdCounter = maxNum;
+
+      setNodes((prev) => [...prev, ...offsetNodes]);
+      setEdges((prev) => [...prev, ...newEdges]);
+
+      // Record batch for undo
+      setPlanBatches((prev) => [
+        ...prev,
+        {
+          nodeIds: offsetNodes.map((n) => n.id),
+          edgeIds: newEdges.map((e) => e.id),
+          intent: plannerIntent,
+          timestamp: Date.now(),
+        },
+      ]);
+    },
+    [nodes, setNodes, setEdges, plannerIntent],
+  );
+
+  // Undo the most recent AI batch
+  const handleUndoLastBatch = useCallback(() => {
+    const last = planBatches[planBatches.length - 1];
+    if (!last) return;
+    const nodeSet = new Set(last.nodeIds);
+    const edgeSet = new Set(last.edgeIds);
+    setNodes((prev) => prev.filter((n) => !nodeSet.has(n.id)));
+    setEdges((prev) => prev.filter((e) => !edgeSet.has(e.id)));
+    setPlanBatches((prev) => prev.slice(0, -1));
+  }, [planBatches, setNodes, setEdges]);
+
+  // Planner history management
+  const handleHistoryAdd = useCallback((entry: PlanHistoryEntry) => {
+    setPlannerHistory((prev) => [entry, ...prev].slice(0, 10));
+  }, []);
+
+  const handleHistoryRemove = useCallback((idx: number) => {
+    setPlannerHistory((prev) => prev.filter((_, i) => i !== idx));
+  }, []);
+
   // Keyboard shortcuts
   useEffect(() => {
     function handleKeyDown(e: KeyboardEvent) {
-      // Escape: close detail panel / deselect
+      // Escape: close yaml → planner → detail panel → deselect
       if (e.key === "Escape") {
         if (yamlOpen) {
           setYamlOpen(false);
+        } else if (plannerOpen) {
+          setPlannerOpen(false);
         } else if (selectedNodeId) {
           setSelectedNodeId(null);
         }
@@ -750,10 +818,16 @@ function Editor() {
         setYamlOpen(true);
         return;
       }
+      // Cmd/Ctrl+P: toggle AI Planner
+      if ((e.metaKey || e.ctrlKey) && e.key === "p") {
+        e.preventDefault();
+        setPlannerOpen((v) => !v);
+        return;
+      }
     }
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [selectedNodeId, yamlOpen, handleOpenFile]);
+  }, [selectedNodeId, yamlOpen, plannerOpen, handleOpenFile]);
 
   const selectedNode = nodes.find((n) => n.id === selectedNodeId);
 
@@ -816,8 +890,11 @@ function Editor() {
         runState={exec.runState}
         yamlOpen={yamlOpen}
         onToggleYaml={() => setYamlOpen((v) => !v)}
+        plannerOpen={plannerOpen}
+        onTogglePlanner={() => setPlannerOpen((v) => !v)}
         theme={theme}
         onToggleTheme={toggleTheme}
+        backendStatus={backendStatus}
       />
 
       <NodePalette
@@ -836,6 +913,7 @@ function Editor() {
           onConnect={onConnect}
           onNodeDragStop={onNodeDragStop}
           onNodeClick={handleNodeClick}
+          onEdgeClick={() => setSelectedNodeId(null)}
           onPaneClick={() => setSelectedNodeId(null)}
           onDragOver={onDragOver}
           onDrop={onDrop}
@@ -845,10 +923,12 @@ function Editor() {
           panOnDrag
           selectionOnDrag={false}
           proOptions={{ hideAttribution: true }}
+          deleteKeyCode={["Backspace", "Delete"]}
           defaultEdgeOptions={{
             type: "smoothstep",
             style: { stroke: "var(--accent-blue)", strokeWidth: 2 },
             animated: exec.running,
+            interactionWidth: 20,
           }}
           style={{ width: "100%", height: "100%" }}
         >
@@ -876,6 +956,23 @@ function Editor() {
         onClearNode={exec.clearNode}
         onSelectNode={handleSelectNode}
       />
+
+      {/* AI Planner Panel */}
+      {plannerOpen && (
+        <PlannerPanel
+          manifest={manifest}
+          onApply={handlePlanApply}
+          onClose={() => setPlannerOpen(false)}
+          intent={plannerIntent}
+          onIntentChange={setPlannerIntent}
+          history={plannerHistory}
+          onHistoryAdd={handleHistoryAdd}
+          onHistoryRemove={handleHistoryRemove}
+          batches={planBatches}
+          onUndoBatch={handleUndoLastBatch}
+          backendStatus={backendStatus}
+        />
+      )}
 
       {/* YAML Drawer Overlay */}
       {yamlOpen && (
