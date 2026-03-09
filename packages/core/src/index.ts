@@ -19,7 +19,7 @@ export type {
   StepCondition,
   StepLoop,
 } from "./serializer.js";
-export { graphToPipeline } from "./serializer.js";
+export { graphToPipeline, resolvePeriodISO, PERIOD_TO_ISO } from "./serializer.js";
 
 export type {
   RunStepRequest,

@@ -16,7 +16,7 @@ import {
 } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
 import type { StageDef, Graph, GraphNode, GraphEdge, Pipeline, PipelineGroup, NodeRunStatus } from "@zyra/core";
-import { portsCompatible, getEffectivePorts, graphToPipeline, pipelineToGraph } from "@zyra/core";
+import { portsCompatible, getEffectivePorts, graphToPipeline, pipelineToGraph, resolvePeriodISO } from "@zyra/core";
 import { ManifestProvider, useManifest } from "./ManifestLoader";
 import { NodePalette } from "./NodePalette";
 import { ZyraNode, type ZyraNodeData } from "./ZyraNode";
@@ -280,11 +280,11 @@ function Editor() {
           const val = portKey !== "value" && srcData.argValues?.[portKey] !== undefined
             ? srcData.argValues[portKey]
             : srcData.argValues?.value;
-          // Date "period" port: resolve "custom" → custom_period ISO duration
+          // Date "period" port: resolve enum ("yearly") → ISO 8601 ("P1Y")
           let resolvedVal = val;
-          if (srcData.stageDef.command === "date" && portKey === "period"
-            && val === "custom" && srcData.argValues?.custom_period) {
-            resolvedVal = srcData.argValues.custom_period;
+          if (srcData.stageDef.command === "date" && portKey === "period") {
+            const iso = resolvePeriodISO(val, srcData.argValues?.custom_period);
+            if (iso !== undefined) resolvedVal = iso;
           }
           if (resolvedVal !== undefined && resolvedVal !== "") {
             displayValue = String(resolvedVal);
@@ -868,11 +868,11 @@ function Editor() {
           const val = portKey !== "value" && srcData.argValues?.[portKey] !== undefined
             ? srcData.argValues[portKey]
             : srcData.argValues?.value;
-          // Date "period" port: resolve "custom" → custom_period ISO duration
+          // Date "period" port: resolve enum ("yearly") → ISO 8601 ("P1Y")
           let resolvedVal = val;
-          if (srcData.stageDef.command === "date" && portKey === "period"
-            && val === "custom" && srcData.argValues?.custom_period) {
-            resolvedVal = srcData.argValues.custom_period;
+          if (srcData.stageDef.command === "date" && portKey === "period") {
+            const iso = resolvePeriodISO(val, srcData.argValues?.custom_period);
+            if (iso !== undefined) resolvedVal = iso;
           }
           if (resolvedVal !== undefined && resolvedVal !== "") {
             peerValue = String(resolvedVal);

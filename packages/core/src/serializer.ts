@@ -1,5 +1,24 @@
 import type { StageDef } from "./manifest.js";
 
+/** Map human-readable period enum values to ISO 8601 durations. */
+export const PERIOD_TO_ISO: Record<string, string> = {
+  daily: "P1D",
+  weekly: "P1W",
+  monthly: "P1M",
+  yearly: "P1Y",
+};
+
+/** Resolve a Date node period value to an ISO 8601 duration string. */
+export function resolvePeriodISO(
+  period: string | number | boolean | undefined,
+  customPeriod: string | number | boolean | undefined,
+): string | undefined {
+  if (period === undefined || period === "") return undefined;
+  const p = String(period);
+  if (p === "custom") return customPeriod ? String(customPeriod) : undefined;
+  return PERIOD_TO_ISO[p] ?? p;
+}
+
 /**
  * A placed node in the editor graph.
  * The editor populates `argValues` as the user fills in the config panel.
@@ -321,11 +340,10 @@ export function graphToPipeline(
       ? srcNode.argValues[e.sourcePort]
       : srcNode.argValues.value;
 
-    // Date "period" port: resolve "custom" → custom_period ISO duration
+    // Date "period" port: resolve enum value ("yearly") → ISO 8601 duration ("P1Y")
     if (srcNode.stageCommand === "control/date" && e.sourcePort === "period") {
-      if (val === "custom" && srcNode.argValues.custom_period) {
-        val = srcNode.argValues.custom_period;
-      }
+      const resolved = resolvePeriodISO(val, srcNode.argValues.custom_period);
+      if (resolved !== undefined) val = resolved;
     }
 
     // Choice "label" port: resolve the label of the currently selected option
