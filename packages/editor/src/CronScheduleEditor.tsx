@@ -249,10 +249,11 @@ export function CronScheduleEditor({ value, onChange }: Props) {
           }}>
             {fields.map((f, i) => (
               <div key={i}>
-                <div style={{ fontSize: 10, color: "var(--text-muted)", marginBottom: 2, textAlign: "center" }}>
+                <label htmlFor={`cron-field-${i}`} style={{ fontSize: 10, color: "var(--text-muted)", marginBottom: 2, textAlign: "center", display: "block" }}>
                   {FIELD_LABELS[i]}
-                </div>
+                </label>
                 <input
+                  id={`cron-field-${i}`}
                   className="zyra-input"
                   value={f}
                   onChange={(e) => updateField(i, e.target.value)}
@@ -274,10 +275,11 @@ export function CronScheduleEditor({ value, onChange }: Props) {
 
           {/* Raw expression */}
           <div style={{ marginTop: 6 }}>
-            <div style={{ fontSize: 10, color: "var(--text-muted)", marginBottom: 2 }}>
+            <label htmlFor="cron-raw-expression" style={{ fontSize: 10, color: "var(--text-muted)", marginBottom: 2, display: "block" }}>
               Raw cron expression
-            </div>
+            </label>
             <input
+              id="cron-raw-expression"
               className="zyra-input"
               value={value || ""}
               onChange={(e) => onChange(e.target.value)}

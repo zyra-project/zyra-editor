@@ -134,7 +134,7 @@ export function ChoiceOptionsEditor({
       )}
 
       {/* Option rows */}
-      <div style={{ display: "flex", flexDirection: "column", gap: 4, marginBottom: 8 }}>
+      <div role="radiogroup" aria-label="Choice options" style={{ display: "flex", flexDirection: "column", gap: 4, marginBottom: 8 }}>
         {options.map((opt, i) => {
           const sel = selected === opt.value;
           const hasDistinctLabel = opt.label !== opt.value;
@@ -202,7 +202,11 @@ export function ChoiceOptionsEditor({
               ) : (
                 <>
                   {/* Select radio */}
-                  <span
+                  <button
+                    type="button"
+                    role="radio"
+                    aria-checked={sel}
+                    aria-label={`Select ${opt.label}`}
                     onClick={() => onSelectChange(opt.value)}
                     title="Select this option"
                     style={{
@@ -211,6 +215,7 @@ export function ChoiceOptionsEditor({
                       background: sel ? "#fff" : "transparent",
                       flexShrink: 0, cursor: "pointer",
                       display: "flex", alignItems: "center", justifyContent: "center",
+                      padding: 0,
                     }}
                   >
                     {sel && (
@@ -219,15 +224,19 @@ export function ChoiceOptionsEditor({
                         background: "var(--accent-blue)",
                       }} />
                     )}
-                  </span>
+                  </button>
 
                   {/* Label + value display */}
-                  <span
+                  <button
+                    type="button"
                     onClick={() => startEditing(i)}
                     title="Click to edit"
+                    aria-label={`Edit option ${opt.label}`}
                     style={{
                       flex: 1, display: "flex", gap: 6,
                       alignItems: "baseline", overflow: "hidden", cursor: "text",
+                      background: "none", border: "none", padding: 0,
+                      color: "inherit", font: "inherit", textAlign: "left",
                     }}
                   >
                     <span style={{
@@ -245,7 +254,7 @@ export function ChoiceOptionsEditor({
                         {opt.value}
                       </span>
                     )}
-                  </span>
+                  </button>
 
                   {/* Remove */}
                   <button
