@@ -306,6 +306,7 @@ export function pipelineToGraph(
         ctrlArgs.value = "";
       }
 
+      const ctrlStage = findStage(stageCommand) ?? byKey.get(stageCommand);
       const node: GraphNode = {
         id: ctrl.id,
         label: ctrl.label,
@@ -318,6 +319,9 @@ export function pipelineToGraph(
             : undefined,
       };
       nodes.push(node);
+      // Register control nodes in nodeMap so edge validation can verify
+      // ports when a control edge targets another control node.
+      nodeMap.set(ctrl.id, { node, stage: ctrlStage });
     }
   }
 

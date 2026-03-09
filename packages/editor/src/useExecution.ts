@@ -32,6 +32,25 @@ export interface ExecutionControls {
 /** Max consecutive poll failures before marking a node as failed. */
 const MAX_POLL_FAILURES = 20;
 
+/**
+ * Sleep in short intervals for `totalMs` milliseconds, checking for
+ * cancellation between intervals.  Returns true if completed, false
+ * if cancelled early.
+ */
+async function cancellableSleep(
+  totalMs: number,
+  isCancelled: () => boolean,
+): Promise<boolean> {
+  const pollMs = 200;
+  const start = Date.now();
+  while (Date.now() - start < totalMs) {
+    if (isCancelled()) return false;
+    const remaining = totalMs - (Date.now() - start);
+    await new Promise((r) => setTimeout(r, Math.min(remaining, pollMs)));
+  }
+  return true;
+}
+
 export function useExecution(): ExecutionControls {
   const [runState, setRunState] = useState<RunStateMap>(new Map());
   const [running, setRunning] = useState(false);
@@ -121,17 +140,14 @@ export function useExecution(): ExecutionControls {
       const delaySecs = step.delay_seconds;
       if (delaySecs && delaySecs > 0) {
         updateNode(nodeId, { ...emptyRunState(), status: "queued", submittedRequest: req });
-        const totalMs = delaySecs * 1000;
-        const pollMs = 200;
-        const start = Date.now();
-        while (Date.now() - start < totalMs) {
-          if (cancelledRef.current || runGenRef.current !== gen) {
-            updateNode(nodeId, { status: "canceled" });
-            setRunning(false);
-            return null;
-          }
-          const remaining = totalMs - (Date.now() - start);
-          await new Promise((r) => setTimeout(r, Math.min(remaining, pollMs)));
+        const completed = await cancellableSleep(
+          delaySecs * 1000,
+          () => cancelledRef.current || runGenRef.current !== gen,
+        );
+        if (!completed) {
+          updateNode(nodeId, { status: "canceled" });
+          setRunning(false);
+          return null;
         }
       }
 
@@ -371,20 +387,16 @@ export function useExecution(): ExecutionControls {
           }
 
           // Respect delay/throttle before executing.
-          // Sleep in short intervals so cancellation is responsive.
           if (delaySecs && delaySecs > 0) {
             updateNode(nodeId, { status: "queued", submittedRequest: req });
-            const totalMs = delaySecs * 1000;
-            const pollMs = 200;
-            const start = Date.now();
-            while (Date.now() - start < totalMs) {
-              if (cancelledRef.current || runGenRef.current !== gen) {
-                updateNode(nodeId, { status: "canceled" });
-                resolved.set(nodeId, "canceled");
-                return;
-              }
-              const remaining = totalMs - (Date.now() - start);
-              await new Promise((r) => setTimeout(r, Math.min(remaining, pollMs)));
+            const completed = await cancellableSleep(
+              delaySecs * 1000,
+              () => cancelledRef.current || runGenRef.current !== gen,
+            );
+            if (!completed) {
+              updateNode(nodeId, { status: "canceled" });
+              resolved.set(nodeId, "canceled");
+              return;
             }
           }
 

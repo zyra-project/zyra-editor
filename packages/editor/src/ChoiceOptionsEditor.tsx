@@ -57,6 +57,7 @@ export function ChoiceOptionsEditor({
   const [editValue, setEditValue] = useState("");
   const addLabelRef = useRef<HTMLInputElement>(null);
   const addValueRef = useRef<HTMLInputElement>(null);
+  const radioGroupRef = useRef<HTMLDivElement>(null);
 
   const options = parseOptions(value);
 
@@ -92,6 +93,10 @@ export function ChoiceOptionsEditor({
     }
     const finalValue = trimValue || trimLabel;
     const finalLabel = trimLabel || finalValue;
+    // Reject edits that would create a duplicate value (skip the option being edited)
+    if (options.some((o, j) => j !== index && o.value === finalValue)) {
+      return;
+    }
     const next = [...options];
     if (selected === next[index].value) {
       onSelectChange(finalValue);
@@ -134,8 +139,37 @@ export function ChoiceOptionsEditor({
         </div>
       )}
 
-      {/* Option rows */}
-      <div role="radiogroup" aria-label="Choice options" style={{ display: "flex", flexDirection: "column", gap: 4, marginBottom: 8 }}>
+      {/* Option rows — roving tabindex with arrow key navigation (WAI-ARIA radio pattern) */}
+      <div
+        ref={radioGroupRef}
+        role="radiogroup"
+        aria-label="Choice options"
+        style={{ display: "flex", flexDirection: "column", gap: 4, marginBottom: 8 }}
+        onKeyDown={(e) => {
+          if (e.target instanceof HTMLElement && e.target.getAttribute("role") !== "radio") return;
+          const radios = radioGroupRef.current?.querySelectorAll<HTMLElement>("[role=radio]");
+          if (!radios || radios.length === 0) return;
+          const current = Array.from(radios).indexOf(e.target as HTMLElement);
+          if (current === -1) return;
+          let next = -1;
+          if (e.key === "ArrowDown" || e.key === "ArrowRight") {
+            next = (current + 1) % radios.length;
+          } else if (e.key === "ArrowUp" || e.key === "ArrowLeft") {
+            next = (current - 1 + radios.length) % radios.length;
+          } else if (e.key === "Home") {
+            next = 0;
+          } else if (e.key === "End") {
+            next = radios.length - 1;
+          }
+          if (next !== -1) {
+            e.preventDefault();
+            radios[next].focus();
+            // Select the focused option (standard WAI-ARIA radio behavior)
+            const val = radios[next].getAttribute("data-value");
+            if (val != null) onSelectChange(val);
+          }
+        }}
+      >
         {options.map((opt, i) => {
           const sel = selected === opt.value;
           const hasDistinctLabel = opt.label !== opt.value;
@@ -209,6 +243,8 @@ export function ChoiceOptionsEditor({
                     role="radio"
                     aria-checked={sel}
                     aria-label={`Select ${opt.label}`}
+                    tabIndex={sel || (!selected && i === 0) ? 0 : -1}
+                    data-value={opt.value}
                     onClick={() => onSelectChange(opt.value)}
                     title="Select this option"
                     style={{

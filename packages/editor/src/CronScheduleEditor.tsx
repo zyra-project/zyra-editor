@@ -70,9 +70,11 @@ function describeField(
 }
 
 export function describeCron(expr: string): string {
-  const parts = expr.trim().split(/\s+/);
-  if (parts.length < 5) return "Invalid cron expression";
+  const rawParts = expr.trim().split(/\s+/);
+  if (rawParts.length < 5) return "Invalid cron expression";
 
+  // Support 6-field cron (seconds prefix): drop the seconds field
+  const parts = rawParts.length >= 6 ? rawParts.slice(1) : rawParts;
   const [minute, hour, dayOfMonth, month, dayOfWeek] = parts;
 
   const pieces: string[] = [];
@@ -148,7 +150,8 @@ export function CronScheduleEditor({ value, onChange }: Props) {
   }, [value]);
 
   const description = useMemo(() => {
-    if (!value || value.trim().split(/\s+/).length < 5) return null;
+    const fieldCount = value ? value.trim().split(/\s+/).length : 0;
+    if (!value || fieldCount < 5) return null;
     return describeCron(value);
   }, [value]);
 
