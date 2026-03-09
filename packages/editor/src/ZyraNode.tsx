@@ -306,16 +306,14 @@ export function ZyraNode({ id, data, selected }: NodeProps) {
           );
         }
 
-        // Variable node: show name = value
-        if (stageDef.command === "variable") {
+        // Secret node: show name with masked value
+        if (stageDef.command === "secret") {
           const name = argValues.name;
           const val = argValues.value;
-          const varType = argValues.var_type;
           const hasName = name !== undefined && name !== "";
           const hasVal = val !== undefined && val !== "";
           if (!hasName && !hasVal) return null;
-          const displayVal = varType === "secret" && hasVal ? "\u2022\u2022\u2022\u2022\u2022\u2022" : String(val ?? "");
-          const display = hasName ? `${name}${hasVal ? " = " + displayVal : ""}` : displayVal;
+          const display = hasName ? `${name}${hasVal ? " = \u2022\u2022\u2022\u2022\u2022\u2022" : ""}` : "\u2022\u2022\u2022\u2022\u2022\u2022";
           return (
             <div
               style={{
@@ -330,7 +328,7 @@ export function ZyraNode({ id, data, selected }: NodeProps) {
                 borderBottom: "1px solid var(--border-default)",
                 flexShrink: 0,
               }}
-              title={varType === "secret" ? String(name ?? "") : display}
+              title={String(name ?? "secret")}
             >
               {display}
             </div>

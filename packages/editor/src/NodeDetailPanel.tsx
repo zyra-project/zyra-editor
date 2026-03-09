@@ -211,10 +211,9 @@ function SettingsTab({
       )}
       {stageDef.args.map((arg) => {
         const linkedFrom = linkedArgs.get(arg.key);
-        // Mask the value field when the Variable node type is "secret"
-        const isSecretVariable = stageDef.command === "variable"
-          && arg.key === "value"
-          && argValues.var_type === "secret";
+        // Mask the value field for Secret nodes
+        const isSecretVariable = stageDef.command === "secret"
+          && arg.key === "value";
 
         // Cron schedule: replace the expression field with the visual editor
         // (unless the arg is linked from another node — then fall through to ArgField)

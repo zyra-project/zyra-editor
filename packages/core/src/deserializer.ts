@@ -274,9 +274,9 @@ export function pipelineToGraph(
     for (const ctrl of pipeline._controls) {
       const ctrlArgs = { ...ctrl.argValues };
 
-      // Secret variable nodes have their value stripped during serialization.
+      // Secret nodes have their value stripped during serialization.
       // Set an empty value so the user is prompted to re-enter the secret.
-      if (ctrl.stageCommand === "control/variable" && ctrlArgs.var_type === "secret" && !("value" in ctrlArgs)) {
+      if (ctrl.stageCommand === "control/secret" && !("value" in ctrlArgs)) {
         ctrlArgs.value = "";
       }
 

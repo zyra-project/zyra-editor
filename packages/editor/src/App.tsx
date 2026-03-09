@@ -856,7 +856,7 @@ function Editor() {
           peerNodeId: e.source,
           peerLabel: srcData?.nodeLabel || srcData?.stageDef.label || e.source,
           peerValue,
-          peerSensitive: srcData?.stageDef.command === "variable" && srcData?.argValues?.var_type === "secret",
+          peerSensitive: srcData?.stageDef.command === "secret",
           peerStatus: exec.runState.get(e.source)?.status as NodeRunStatus | undefined,
         };
       });

@@ -311,15 +311,14 @@ export function graphToPipeline(
     const srcNode = nodeMap.get(e.sourceNode);
     if (!srcNode) continue;
 
-    // Secret variables emit an env-var reference instead of the plaintext value
-    const isSecretVar = srcNode.stageCommand === "control/variable"
-      && srcNode.argValues.var_type === "secret";
+    // Secret nodes emit an env-var reference instead of the plaintext value
+    const isSecretVar = srcNode.stageCommand === "control/secret";
 
     let val = srcNode.argValues.value;
     // Fall back to the ArgDef default so wired control nodes with
     // defaults (e.g., boolean false) still serialize correctly.
     // Treat empty string as unset for non-string control types (matches UI display).
-    // Secret variables are exempt — their value is intentionally empty in the editor;
+    // Secret nodes are exempt — their value is intentionally empty in the editor;
     // the real value comes from environment variables at runtime.
     if (!isSecretVar && (val === undefined || (val === "" && !srcNode.stageCommand.endsWith("/string")))) {
       const ctrlStage = stageMap.get(srcNode.stageCommand);
@@ -337,7 +336,7 @@ export function graphToPipeline(
         if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(varName)) {
           diagnostics?.push({
             level: "warn",
-            message: `Secret variable node "${e.sourceNode}" has an invalid name "${varName}" — environment variable names must match [A-Za-z_][A-Za-z0-9_]*. The secret value will be omitted.`,
+            message: `Secret node "${e.sourceNode}" has an invalid name "${varName}" — environment variable names must match [A-Za-z_][A-Za-z0-9_]*. The secret value will be omitted.`,
           });
           continue;
         }
@@ -345,7 +344,7 @@ export function graphToPipeline(
       } else {
         diagnostics?.push({
           level: "warn",
-          message: `Secret variable node "${e.sourceNode}" has no name — the secret value will be omitted.`,
+          message: `Secret node "${e.sourceNode}" has no name — the secret value will be omitted.`,
         });
         continue;
       }
@@ -484,9 +483,9 @@ export function graphToPipeline(
     const ctrlEdges = graph.edges
       .filter((e) => e.sourceNode === n.id)
       .map((e) => ({ sourcePort: e.sourcePort, targetNode: e.targetNode, targetPort: e.targetPort }));
-    // Strip plaintext secret values from the YAML — only keep the variable name and type
+    // Strip plaintext secret values from the YAML — only keep the variable name
     const ctrlArgs = { ...n.argValues };
-    if (n.stageCommand === "control/variable" && ctrlArgs.var_type === "secret") {
+    if (n.stageCommand === "control/secret") {
       delete ctrlArgs.value;
     }
 
