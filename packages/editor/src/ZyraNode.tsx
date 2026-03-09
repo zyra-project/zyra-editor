@@ -3,6 +3,7 @@ import { Handle, Position, NodeResizer, useReactFlow, useUpdateNodeInternals, ty
 import type { ArgDef, StageDef, NodeRunStatus, PortDef } from "@zyra/core";
 import { STATUS_COLORS, getEffectivePorts } from "@zyra/core";
 import { describeCron } from "./CronScheduleEditor";
+import { parseOptions } from "./ChoiceOptionsEditor";
 
 export const SENSITIVE_PATTERNS = /password|secret|token|credential|auth|api.?key/i;
 export function isSensitive(arg: ArgDef): boolean {
@@ -337,11 +338,15 @@ export function ZyraNode({ id, data, selected }: NodeProps) {
 
         // Choice node: show selected value and option count
         if (stageDef.command === "choice") {
-          const opts = typeof argValues.options === "string" ? argValues.options.split(",").map((s) => s.trim()).filter(Boolean) : [];
+          const opts = parseOptions(typeof argValues.options === "string" ? argValues.options : "");
           const sel = argValues.value;
           const hasSel = sel !== undefined && sel !== "";
           if (opts.length === 0 && !hasSel) return null;
-          const display = hasSel ? String(sel) : `${opts.length} option${opts.length !== 1 ? "s" : ""}`;
+          // Show label if the selected option has one, otherwise show the value
+          const selOpt = hasSel ? opts.find((o) => o.value === String(sel)) : undefined;
+          const display = selOpt
+            ? (selOpt.label !== selOpt.value ? `${selOpt.label} (${selOpt.value})` : selOpt.value)
+            : hasSel ? String(sel) : `${opts.length} option${opts.length !== 1 ? "s" : ""}`;
           return (
             <div
               style={{
@@ -356,7 +361,7 @@ export function ZyraNode({ id, data, selected }: NodeProps) {
                 borderBottom: "1px solid var(--border-default)",
                 flexShrink: 0,
               }}
-              title={hasSel ? `Selected: ${sel} (${opts.length} options)` : `${opts.length} options`}
+              title={hasSel ? `Selected: ${display} (${opts.length} options)` : `${opts.length} options`}
             >
               {display}
             </div>

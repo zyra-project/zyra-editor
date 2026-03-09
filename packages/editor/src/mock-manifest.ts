@@ -82,8 +82,8 @@ export const MOCK_MANIFEST: Manifest = {
           label: "Options",
           type: "string",
           required: true,
-          placeholder: "a,b,c",
-          description: "Comma-separated list of choices",
+          placeholder: "Label=value,Label=value",
+          description: "Comma-separated choices (label=value or just value)",
         },
         {
           key: "value",
