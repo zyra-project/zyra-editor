@@ -536,9 +536,9 @@ async def submit_feedback(body: FeedbackPayload):
     """Save user feedback as a JSON file in the feedback directory."""
     FEEDBACK_DIR.mkdir(parents=True, exist_ok=True)
     ts = body.timestamp or __import__("datetime").datetime.utcnow().isoformat()
-    # Use timestamp + short hash for unique filename
     safe_ts = re.sub(r"[^a-zA-Z0-9_-]", "_", ts)
-    path = FEEDBACK_DIR / f"feedback_{safe_ts}.json"
+    uid = __import__("uuid").uuid4().hex[:8]
+    path = FEEDBACK_DIR / f"feedback_{safe_ts}_{uid}.json"
     payload = body.model_dump()
     payload["timestamp"] = ts
     path.write_text(json.dumps(payload, indent=2))

@@ -535,15 +535,19 @@ function HelpModal({ onClose }: { onClose: () => void }) {
 
     setFbStatus("saving");
     try {
-      await fetch("/v1/feedback", {
+      const resp = await fetch("/v1/feedback", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(payload),
       });
-      setFbStatus("saved");
+      if (resp.ok) {
+        setFbStatus("saved");
+      } else {
+        setFbStatus("error");
+      }
     } catch {
       // Save failed (server may be offline) — still open mailto
-      setFbStatus("saved");
+      setFbStatus("error");
     }
 
     // Open mailto link
