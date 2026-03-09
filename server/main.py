@@ -6,10 +6,12 @@ Usage:
 """
 
 import asyncio
+import io
 import json
 import os
 import re
 import subprocess
+import sys
 from pathlib import Path
 
 # Load .env file from the server directory (or project root) so that
@@ -126,6 +128,47 @@ def _resolve_argv_env_vars(argv: list[str]) -> list[str]:
     return resolved
 
 
+class _BytesBridge(io.RawIOBase):
+    """Binary wrapper that encodes writes through a text-mode tee.
+
+    zyra's ``_LocalPubTee`` replaces ``sys.stdout``/``sys.stderr`` with a
+    ``StringIO``-based object that lacks the ``.buffer`` attribute real
+    ``TextIOWrapper`` objects expose.  CLI commands that write binary data
+    (e.g. ``process metadata``) access ``sys.stdout.buffer``, which fails
+    with ``AttributeError`` on the tee.
+
+    This bridge is attached as ``.buffer`` on each tee so those binary
+    writes are decoded and forwarded through the tee's normal text path.
+    """
+
+    def __init__(self, text_tee):
+        super().__init__()
+        self._tee = text_tee
+
+    def writable(self):
+        return True
+
+    def write(self, b):
+        if not b:
+            return 0
+        text = b.decode("utf-8", errors="replace") if isinstance(b, (bytes, bytearray)) else str(b)
+        self._tee.write(text)
+        return len(b)
+
+
+def _ensure_tee_has_buffer():
+    """Patch ``sys.stdout``/``sys.stderr`` with a ``.buffer`` attribute
+    if they are ``_LocalPubTee`` instances (``StringIO`` subclass) that
+    lack one.  This is a no-op when stdout/stderr are normal streams."""
+    for stream_name in ("stdout", "stderr"):
+        stream = getattr(sys, stream_name, None)
+        if stream is None:
+            continue
+        # Only patch StringIO-based tees that are missing .buffer
+        if isinstance(stream, io.StringIO) and not hasattr(stream, "buffer"):
+            stream.buffer = _BytesBridge(stream)
+
+
 def _cli_main_with_logging_reset(argv):
     """
     Wrapper around zyra.cli.main that clears and restores logging handlers
@@ -134,6 +177,8 @@ def _cli_main_with_logging_reset(argv):
     variable nodes work without embedding plaintext in the pipeline YAML.
     """
     argv = _resolve_argv_env_vars(argv)
+    # Ensure the _LocalPubTee streams have a .buffer for binary I/O
+    _ensure_tee_has_buffer()
     root = logging.getLogger()
     # Save existing handlers so we can restore them after the CLI run
     prev_handlers = list(root.handlers)
