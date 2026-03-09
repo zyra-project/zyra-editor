@@ -2,6 +2,8 @@ import { useState, useMemo, useEffect, useRef } from "react";
 import { Handle, Position, NodeResizer, useReactFlow, useUpdateNodeInternals, type NodeProps } from "@xyflow/react";
 import type { ArgDef, StageDef, NodeRunStatus, PortDef } from "@zyra/core";
 import { STATUS_COLORS, getEffectivePorts } from "@zyra/core";
+import { describeCron } from "./CronScheduleEditor";
+import { parseOptions } from "./ChoiceOptionsEditor";
 
 export const SENSITIVE_PATTERNS = /password|secret|token|credential|auth|api.?key/i;
 export function isSensitive(arg: ArgDef): boolean {
@@ -194,7 +196,7 @@ export function ZyraNode({ id, data, selected }: NodeProps) {
           </span>
         )}
         <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-          {hovered && onRunNode && runStatus !== "running" && (
+          {hovered && onRunNode && runStatus !== "running" && stageDef.stage !== "control" && (
             <button
               title="Run this step"
               aria-label="Run this step"
@@ -269,6 +271,232 @@ export function ZyraNode({ id, data, selected }: NodeProps) {
 
       {/* Value preview for control nodes */}
       {stageDef.stage === "control" && (() => {
+        // Date node: show compact date range preview
+        if (stageDef.command === "date") {
+          const start = argValues.start_date;
+          const end = argValues.end_date;
+          const period = argValues.period;
+          const hasStart = start !== undefined && start !== "";
+          const parts: string[] = [];
+          if (hasStart) parts.push(String(start));
+          if (end !== undefined && end !== "") parts.push(String(end));
+          const customPeriod = argValues.custom_period;
+          const effectivePeriod = period === "custom" && customPeriod ? String(customPeriod) : period;
+          const display = parts.length > 0
+            ? parts.join(" \u2192 ") + (effectivePeriod ? ` (${effectivePeriod})` : "")
+            : null;
+          if (!display) return null;
+          return (
+            <div
+              style={{
+                padding: "4px 12px",
+                fontSize: 11,
+                fontFamily: "var(--font-mono)",
+                color: "var(--accent-blue)",
+                background: "var(--bg-tertiary)",
+                overflow: "hidden",
+                textOverflow: "ellipsis",
+                whiteSpace: "nowrap",
+                borderBottom: "1px solid var(--border-default)",
+                flexShrink: 0,
+              }}
+              title={display}
+            >
+              {display}
+            </div>
+          );
+        }
+
+        // Secret node: show name with masked value
+        if (stageDef.command === "secret") {
+          const name = argValues.name;
+          const val = argValues.value;
+          const hasName = name !== undefined && name !== "";
+          const hasVal = val !== undefined && val !== "";
+          if (!hasName && !hasVal) return null;
+          const display = hasName ? `${name}${hasVal ? " = \u2022\u2022\u2022\u2022\u2022\u2022" : ""}` : "\u2022\u2022\u2022\u2022\u2022\u2022";
+          return (
+            <div
+              style={{
+                padding: "4px 12px",
+                fontSize: 11,
+                fontFamily: "var(--font-mono)",
+                color: "var(--accent-blue)",
+                background: "var(--bg-tertiary)",
+                overflow: "hidden",
+                textOverflow: "ellipsis",
+                whiteSpace: "nowrap",
+                borderBottom: "1px solid var(--border-default)",
+                flexShrink: 0,
+              }}
+              title={String(name ?? "secret")}
+            >
+              {display}
+            </div>
+          );
+        }
+
+        // Choice node: show selected value and option count
+        if (stageDef.command === "choice") {
+          const opts = parseOptions(typeof argValues.options === "string" ? argValues.options : "");
+          const sel = argValues.value;
+          const hasSel = sel !== undefined && sel !== "";
+          if (opts.length === 0 && !hasSel) return null;
+          // Show label if the selected option has one, otherwise show the value
+          const selOpt = hasSel ? opts.find((o) => o.value === String(sel)) : undefined;
+          const display = selOpt
+            ? (selOpt.label !== selOpt.value ? `${selOpt.label} (${selOpt.value})` : selOpt.value)
+            : hasSel ? String(sel) : `${opts.length} option${opts.length !== 1 ? "s" : ""}`;
+          return (
+            <div
+              style={{
+                padding: "4px 12px",
+                fontSize: 11,
+                fontFamily: "var(--font-mono)",
+                color: hasSel ? "var(--accent-blue)" : "var(--text-muted)",
+                background: "var(--bg-tertiary)",
+                overflow: "hidden",
+                textOverflow: "ellipsis",
+                whiteSpace: "nowrap",
+                borderBottom: "1px solid var(--border-default)",
+                flexShrink: 0,
+              }}
+              title={hasSel ? `Selected: ${display} (${opts.length} options)` : `${opts.length} options`}
+            >
+              {display}
+            </div>
+          );
+        }
+
+        // Cron schedule node: show human-readable description
+        if (stageDef.command === "cron") {
+          const expr = argValues.expression;
+          const tz = argValues.timezone;
+          const enabled = argValues.enabled;
+          const hasExpr = typeof expr === "string" && expr.trim().length > 0;
+          if (!hasExpr) return null;
+          const raw = `${expr}${tz ? ` (${tz})` : ""}`;
+          const readable = describeCron(String(expr));
+          return (
+            <div
+              style={{
+                padding: "4px 12px",
+                fontSize: 11,
+                color: enabled === false ? "var(--text-muted)" : "var(--accent-blue)",
+                textDecoration: enabled === false ? "line-through" : undefined,
+                background: "var(--bg-tertiary)",
+                overflow: "hidden",
+                textOverflow: "ellipsis",
+                whiteSpace: "nowrap",
+                borderBottom: "1px solid var(--border-default)",
+                flexShrink: 0,
+              }}
+              title={raw}
+            >
+              {readable}
+            </div>
+          );
+        }
+
+        // Delay/throttle node: show duration and unit
+        if (stageDef.command === "delay") {
+          const dur = argValues.duration;
+          const unit = argValues.unit ?? "seconds";
+          const jitter = argValues.jitter;
+          const hasDur = dur !== undefined && dur !== "";
+          if (!hasDur) return null;
+          const jitterValue = Number(jitter);
+          const hasJitter = Number.isFinite(jitterValue) && jitterValue !== 0;
+          const display = `${dur} ${unit}${hasJitter ? ` \u00b1${jitterValue}s` : ""}`;
+          return (
+            <div
+              style={{
+                padding: "4px 12px",
+                fontSize: 11,
+                fontFamily: "var(--font-mono)",
+                color: "var(--accent-yellow, #e3b341)",
+                background: "var(--bg-tertiary)",
+                overflow: "hidden",
+                textOverflow: "ellipsis",
+                whiteSpace: "nowrap",
+                borderBottom: "1px solid var(--border-default)",
+                flexShrink: 0,
+              }}
+              title={display}
+            >
+              {display}
+            </div>
+          );
+        }
+
+        // Conditional node: show field operator value
+        if (stageDef.command === "conditional") {
+          const field = argValues.field;
+          const op = argValues.operator;
+          const cmpVal = argValues.compare_value;
+          const hasField = field !== undefined && field !== "";
+          if (!hasField) return null;
+          const display = `${field} ${op ?? "=="} ${cmpVal ?? "?"}`;
+          return (
+            <div
+              style={{
+                padding: "4px 12px",
+                fontSize: 11,
+                fontFamily: "var(--font-mono)",
+                color: "var(--accent-yellow, #e3b341)",
+                background: "var(--bg-tertiary)",
+                overflow: "hidden",
+                textOverflow: "ellipsis",
+                whiteSpace: "nowrap",
+                borderBottom: "1px solid var(--border-default)",
+                flexShrink: 0,
+              }}
+              title={display}
+            >
+              if {display}
+            </div>
+          );
+        }
+
+        // Loop node: show mode and key details
+        if (stageDef.command === "loop") {
+          const mode = argValues.mode;
+          if (!mode) return null;
+          let detail = String(mode);
+          if (mode === "batch") {
+            const bs = argValues.batch_size;
+            if (bs !== undefined && bs !== "") detail = `batch(${bs})`;
+          } else if (mode === "range") {
+            const rs = argValues.range_start ?? "0";
+            const re = argValues.range_end ?? "?";
+            const step = argValues.range_step;
+            const showStep = step !== undefined && step !== "" && Number(step) !== 1;
+            detail = `range(${rs}..${re}${showStep ? `, step ${step}` : ""})`;
+          }
+          const mp = argValues.max_parallel;
+          const parallel = mp !== undefined && mp !== "" && Number(mp) !== 1 ? ` \u00d7${mp}` : "";
+          const display = `${detail}${parallel}`;
+          return (
+            <div
+              style={{
+                padding: "4px 12px",
+                fontSize: 11,
+                fontFamily: "var(--font-mono)",
+                color: "var(--accent-purple, #a371f7)",
+                background: "var(--bg-tertiary)",
+                overflow: "hidden",
+                textOverflow: "ellipsis",
+                whiteSpace: "nowrap",
+                borderBottom: "1px solid var(--border-default)",
+                flexShrink: 0,
+              }}
+              title={display}
+            >
+              {display}
+            </div>
+          );
+        }
+
         const val = argValues.value;
         const valueDef = stageDef.args.find((a) => a.key === "value");
         const hasValue = val !== undefined && val !== "";

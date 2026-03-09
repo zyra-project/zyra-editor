@@ -23,11 +23,19 @@ export function pipelineToGraph(
     byKey.set(`${s.stage}/${s.command}`, s);
   }
 
+  // Backward-compat aliases for renamed control nodes
+  const COMMAND_ALIASES: Record<string, string> = {
+    "control/variable": "control/string",
+  };
+
   function findStage(command: string): StageDef | undefined {
     // Try exact cli match first
     if (byCli.has(command)) return byCli.get(command);
     // Try "stage/command" shorthand
     if (byKey.has(command)) return byKey.get(command);
+    // Try alias
+    const alias = COMMAND_ALIASES[command];
+    if (alias && byKey.has(alias)) return byKey.get(alias);
     // Try stripping "zyra " prefix
     const stripped = command.replace(/^zyra\s+/, "");
     if (byCli.has(stripped)) return byCli.get(stripped);
@@ -44,8 +52,8 @@ export function pipelineToGraph(
   function normalizeCommand(cmd: string): string {
     const stripped = cmd.replace(/^zyra\s+/, "");
     const parts = stripped.split(/\s+/);
-    if (parts.length >= 2) return `${parts[0]}/${parts[1]}`;
-    return stripped;
+    const key = parts.length >= 2 ? `${parts[0]}/${parts[1]}` : stripped;
+    return COMMAND_ALIASES[key] ?? key;
   }
 
   const nodes: GraphNode[] = [];
@@ -85,10 +93,11 @@ export function pipelineToGraph(
       // getEffectivePorts computes the full list (explicit + arg-ports +
       // implicit stdout/stderr/exitcode), so the chosen IDs always match a
       // rendered handle — making dependency edges visible on the canvas.
+      // Use firstExplicitInputPort to avoid selecting arg:* ports, which
+      // would make arguments appear "linked"/readonly in the UI.
       const srcPorts = source.stage ? getEffectivePorts(source.stage) : null;
-      const tgtPorts = target.stage ? getEffectivePorts(target.stage) : null;
       const sourcePort = srcPorts?.outputs[0]?.id ?? "out";
-      const targetPort = tgtPorts?.inputs[0]?.id ?? "in";
+      const targetPort = firstExplicitInputPort(target.stage);
 
       edges.push({
         sourceNode: depName,
@@ -99,14 +108,211 @@ export function pipelineToGraph(
     }
   }
 
-  // Reconstruct control nodes from _controls metadata
+  // Collect all existing node IDs (steps + _controls) for deduplication
+  // of generated control nodes.  Including _controls IDs prevents
+  // collisions when the pipeline already has persisted control nodes.
+  const existingIds = new Set(nodes.map((n) => n.id));
   if (pipeline._controls) {
     for (const ctrl of pipeline._controls) {
+      existingIds.add(ctrl.id);
+    }
+  }
+
+  /**
+   * Find the first explicit (non-arg:*) input port for a stage.
+   * Falls back to "in" when no explicit port exists.
+   */
+  function firstExplicitInputPort(stage: StageDef | undefined): string {
+    if (!stage) return "in";
+    const effective = getEffectivePorts(stage);
+    const explicit = effective.inputs.find((p) => !p.id.startsWith("arg:"));
+    return explicit?.id ?? "in";
+  }
+
+  /** Generate a unique ID with the given prefix, avoiding collisions. */
+  function uniqueId(prefix: string): string {
+    let id = prefix;
+    let i = 0;
+    while (existingIds.has(id)) {
+      id = `${prefix}_${++i}`;
+    }
+    existingIds.add(id);
+    return id;
+  }
+
+  // Reconstruct a cron control node from pipeline.schedule if there
+  // is no matching control node already in _controls (i.e., imported YAML).
+  const hasCronControl = pipeline._controls?.some(
+    (c) => c.stageCommand === "control/cron",
+  );
+  if (pipeline.schedule && !hasCronControl) {
+    const cronId = uniqueId("_cron");
+    const cronArgs: Record<string, string | number | boolean> = {
+      expression: pipeline.schedule.cron,
+    };
+    if (pipeline.schedule.timezone) cronArgs.timezone = pipeline.schedule.timezone;
+    if (pipeline.schedule.enabled !== undefined) cronArgs.enabled = pipeline.schedule.enabled;
+    nodes.push({
+      id: cronId,
+      stageCommand: "control/cron",
+      argValues: cronArgs,
+    });
+  }
+
+  // Build a set of step names that already have a matching control node
+  // wired from _controls, so we only reconstruct missing ones per-step.
+  const stepsWithDelayControl = new Set<string>();
+  const stepsWithCondControl = new Set<string>();
+  const stepsWithLoopControl = new Set<string>();
+  if (pipeline._controls) {
+    for (const ctrl of pipeline._controls) {
+      for (const ce of ctrl.edges) {
+        if (ctrl.stageCommand === "control/delay") stepsWithDelayControl.add(ce.targetNode);
+        if (ctrl.stageCommand === "control/conditional") stepsWithCondControl.add(ce.targetNode);
+        if (ctrl.stageCommand === "control/loop") stepsWithLoopControl.add(ce.targetNode);
+      }
+    }
+  }
+
+  // Reconstruct delay control nodes from steps with delay_seconds
+  // when no matching delay control already targets this step.
+  for (const step of pipeline.steps) {
+    if (step.delay_seconds == null || step.delay_seconds <= 0) continue;
+    if (stepsWithDelayControl.has(step.name)) continue;
+    let duration = step.delay_seconds;
+    let unit: string = "seconds";
+    if (duration >= 3600 && duration % 3600 === 0) {
+      duration = duration / 3600;
+      unit = "hours";
+    } else if (duration >= 60 && duration % 60 === 0) {
+      duration = duration / 60;
+      unit = "minutes";
+    }
+    const delayId = uniqueId(`_delay_${step.name}`);
+    nodes.push({
+      id: delayId,
+      stageCommand: "control/delay",
+      argValues: { duration, unit },
+    });
+    // Wire the delay node to the target step's first explicit input port
+    // (not arg:*, which would make the arg appear linked/readonly in the editor).
+    const targetInfo = nodeMap.get(step.name);
+    if (targetInfo) {
+      edges.push({
+        sourceNode: delayId,
+        sourcePort: "delay",
+        targetNode: step.name,
+        targetPort: firstExplicitInputPort(targetInfo.stage),
+      });
+    }
+  }
+
+  // Reconstruct conditional control nodes from steps with condition
+  // when no matching conditional control already targets this step.
+  // Group steps by their condition signature (field+operator+value) to
+  // reconstruct a single conditional node per unique condition.
+  const condGroups = new Map<string, { condition: NonNullable<(typeof pipeline.steps)[0]["condition"]>; steps: string[] }>();
+  for (const step of pipeline.steps) {
+    if (!step.condition) continue;
+    if (stepsWithCondControl.has(step.name)) continue;
+    const key = `${step.condition.field}|${step.condition.operator}|${step.condition.value}`;
+    if (!condGroups.has(key)) {
+      condGroups.set(key, { condition: step.condition, steps: [] });
+    }
+    condGroups.get(key)!.steps.push(step.name);
+  }
+  // Precompute step name → condition for O(1) lookup during edge wiring
+  const stepCondMap = new Map(
+    pipeline.steps.filter((s) => s.condition).map((s) => [s.name, s.condition!]),
+  );
+
+  let condIdx = 0;
+  for (const [, group] of condGroups) {
+    const condId = uniqueId(`_cond_${condIdx++}`);
+    nodes.push({
+      id: condId,
+      stageCommand: "control/conditional",
+      argValues: {
+        field: group.condition.field,
+        operator: group.condition.operator,
+        compare_value: group.condition.value,
+      },
+    });
+    // Wire the conditional's true/false ports to the downstream steps
+    for (const stepName of group.steps) {
+      const stepCond = stepCondMap.get(stepName);
+      if (!stepCond) continue;
+      const targetInfo = nodeMap.get(stepName);
+      edges.push({
+        sourceNode: condId,
+        sourcePort: stepCond.branch,
+        targetNode: stepName,
+        targetPort: firstExplicitInputPort(targetInfo?.stage),
+      });
+    }
+  }
+
+  // Reconstruct loop control nodes from steps with loop
+  // when no matching loop control already targets this step.
+  for (const step of pipeline.steps) {
+    if (!step.loop) continue;
+    if (stepsWithLoopControl.has(step.name)) continue;
+    const loopId = uniqueId(`_loop_${step.name}`);
+    const loopArgs: Record<string, string | number | boolean> = {
+      mode: step.loop.mode,
+    };
+    if (step.loop.batch_size != null) loopArgs.batch_size = step.loop.batch_size;
+    if (step.loop.range_start != null) loopArgs.range_start = step.loop.range_start;
+    if (step.loop.range_end != null) loopArgs.range_end = step.loop.range_end;
+    if (step.loop.range_step != null) loopArgs.range_step = step.loop.range_step;
+    if (step.loop.max_parallel != null) loopArgs.max_parallel = step.loop.max_parallel;
+    nodes.push({
+      id: loopId,
+      stageCommand: "control/loop",
+      argValues: loopArgs,
+    });
+    // Wire loop's "item" output to the step's first explicit input port
+    const targetInfo = nodeMap.get(step.name);
+    edges.push({
+      sourceNode: loopId,
+      sourcePort: "item",
+      targetNode: step.name,
+      targetPort: firstExplicitInputPort(targetInfo?.stage),
+    });
+    // Wire the "over" source step's output to the loop's "items" input
+    if (step.loop.over && nodeMap.has(step.loop.over)) {
+      const overInfo = nodeMap.get(step.loop.over);
+      const overEffective = overInfo?.stage ? getEffectivePorts(overInfo.stage) : null;
+      const overPort = overEffective?.outputs[0]?.id ?? "out";
+      edges.push({
+        sourceNode: step.loop.over,
+        sourcePort: overPort,
+        targetNode: loopId,
+        targetPort: "items",
+      });
+    }
+  }
+
+  // Reconstruct control nodes from _controls metadata.
+  // First pass: add all control nodes so IDs are available for edge wiring.
+  if (pipeline._controls) {
+    for (const ctrl of pipeline._controls) {
+      // Apply backward-compat aliases to control node stageCommand
+      const stageCommand = COMMAND_ALIASES[ctrl.stageCommand] ?? ctrl.stageCommand;
+      const ctrlArgs = { ...ctrl.argValues };
+
+      // Secret nodes have their value stripped during serialization.
+      // Set an empty value so the user is prompted to re-enter the secret.
+      if (stageCommand === "control/secret" && !("value" in ctrlArgs)) {
+        ctrlArgs.value = "";
+      }
+
+      const ctrlStage = findStage(stageCommand) ?? byKey.get(stageCommand);
       const node: GraphNode = {
         id: ctrl.id,
         label: ctrl.label,
-        stageCommand: ctrl.stageCommand,
-        argValues: { ...ctrl.argValues },
+        stageCommand,
+        argValues: ctrlArgs,
         position: ctrl._layout ? { x: ctrl._layout.x, y: ctrl._layout.y } : undefined,
         size:
           ctrl._layout && ctrl._layout.w != null && ctrl._layout.h != null
@@ -114,26 +320,39 @@ export function pipelineToGraph(
             : undefined,
       };
       nodes.push(node);
+      // Register control nodes in nodeMap so edge validation can verify
+      // ports when a control edge targets another control node.
+      nodeMap.set(ctrl.id, { node, stage: ctrlStage });
+    }
+  }
 
-      // Reconstruct edges from control node to downstream arg-ports
+  // Second pass: reconstruct edges from control nodes.
+  // All node IDs (steps + control nodes) are now available.
+  const allNodeIds = new Set(nodes.map((n) => n.id));
+  if (pipeline._controls) {
+    for (const ctrl of pipeline._controls) {
       const stage = findStage(ctrl.stageCommand) ?? byKey.get(ctrl.stageCommand);
-      const sourcePort = stage?.outputs[0]?.id ?? "value";
+      const defaultSourcePort = stage?.outputs[0]?.id ?? "value";
       for (const ce of ctrl.edges) {
-        // Only reconstruct edges targeting valid arg-ports on existing nodes
-        if (!ce.targetPort.startsWith("arg:")) continue;
-        if (!nodeMap.has(ce.targetNode)) continue;
+        if (!allNodeIds.has(ce.targetNode)) continue;
 
-        // Validate that the target node's stage actually has this arg key
+        // Validate that the target port actually exists on the target node
         const targetInfo = nodeMap.get(ce.targetNode);
         if (targetInfo?.stage) {
-          const argKey = ce.targetPort.slice(4);
-          const hasArg = targetInfo.stage.args.some((a) => a.key === argKey);
-          if (!hasArg) continue; // skip edges to non-existent arg handles
+          if (ce.targetPort.startsWith("arg:")) {
+            const argKey = ce.targetPort.slice(4);
+            const hasArg = targetInfo.stage.args.some((a) => a.key === argKey);
+            if (!hasArg) continue; // skip edges to non-existent arg handles
+          } else {
+            const effectiveInputs = getEffectivePorts(targetInfo.stage).inputs;
+            const hasPort = effectiveInputs.some((p) => p.id === ce.targetPort);
+            if (!hasPort) continue; // skip edges to non-existent input handles
+          }
         }
 
         edges.push({
           sourceNode: ctrl.id,
-          sourcePort,
+          sourcePort: ce.sourcePort || defaultSourcePort,
           targetNode: ce.targetNode,
           targetPort: ce.targetPort,
         });

@@ -16,7 +16,7 @@ import {
 } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
 import type { StageDef, Graph, GraphNode, GraphEdge, Pipeline, PipelineGroup, NodeRunStatus } from "@zyra/core";
-import { portsCompatible, getEffectivePorts, graphToPipeline, pipelineToGraph } from "@zyra/core";
+import { portsCompatible, getEffectivePorts, graphToPipeline, pipelineToGraph, resolvePeriodISO } from "@zyra/core";
 import { ManifestProvider, useManifest } from "./ManifestLoader";
 import { NodePalette } from "./NodePalette";
 import { ZyraNode, type ZyraNodeData } from "./ZyraNode";
@@ -26,10 +26,90 @@ import { Toolbar } from "./Toolbar";
 import { LogPanel } from "./LogPanel";
 import { useExecution } from "./useExecution";
 import { YamlPanel, normalizePipeline } from "./YamlPanel";
+import { parseOptions } from "./ChoiceOptionsEditor";
 import { PlannerPanel, type PlanHistoryEntry, type PlanBatch } from "./PlannerPanel";
 import yaml from "js-yaml";
 import { useTheme } from "./useTheme";
 import { useBackendStatus } from "./useBackendStatus";
+
+/** Control-flow commands that can wire to non-arg input ports. */
+const CONTROL_FLOW_COMMANDS = new Set(["delay", "cron", "conditional", "loop"]);
+
+/**
+ * Derive a display value string for a control node's output port.
+ * Handles all control node types including control-flow nodes (delay, cron,
+ * conditional, loop) whose output port IDs don't map to arg keys.
+ */
+function resolveControlDisplayValue(
+  srcData: ZyraNodeData,
+  sourceHandle: string | null | undefined,
+): string | null {
+  const args = srcData.argValues ?? {};
+  const cmd = srcData.stageDef.command;
+  const portKey = sourceHandle ?? "value";
+
+  // Control-flow nodes: derive display from args, not port-to-arg mapping
+  if (cmd === "delay") {
+    const d = args.duration;
+    const u = args.unit ?? "seconds";
+    return d != null ? `${d} ${u}` : null;
+  }
+  if (cmd === "cron") {
+    const expr = args.expression;
+    return expr != null && expr !== "" ? String(expr) : null;
+  }
+  if (cmd === "conditional") {
+    const f = args.field ?? "";
+    const op = args.operator ?? "";
+    const v = args.compare_value ?? "";
+    const branch = portKey === "true" ? "true" : portKey === "false" ? "false" : "";
+    const summary = f || op || v ? `${f} ${op} ${v}`.trim() : null;
+    return branch && summary ? `${summary} → ${branch}` : summary;
+  }
+  if (cmd === "loop") {
+    const mode = args.mode ?? "";
+    if (portKey === "index") return "index";
+    if (portKey === "done") return "done";
+    return mode ? `${mode}` : null;
+  }
+
+  // Data-value control nodes: resolve from matching arg key
+  let val = portKey !== "value" && args[portKey] !== undefined
+    ? args[portKey]
+    : args.value;
+
+  // Date "period" port: resolve enum → ISO 8601
+  if (cmd === "date" && portKey === "period") {
+    const iso = resolvePeriodISO(val, args.custom_period);
+    if (iso !== undefined) {
+      val = iso;
+    } else if (val === "custom" && !args.custom_period) {
+      return null;  // Treat missing custom_period as unset
+    }
+  }
+
+  if (val !== undefined && val !== "") {
+    let result = String(val);
+    // Choice "label" port: resolve the label of the selected option
+    if (cmd === "choice" && sourceHandle === "label") {
+      try {
+        const opts = parseOptions(typeof args.options === "string" ? args.options : "");
+        const sel = opts.find((o) => o.value === String(args.value ?? ""));
+        if (sel) result = sel.label;
+      } catch { /* keep result as-is */ }
+    }
+    return result;
+  }
+
+  // Fall back to arg default/placeholder
+  const argKey = portKey !== "value" ? portKey : "value";
+  const valueDef = srcData.stageDef.args.find((a) => a.key === argKey)
+    ?? srcData.stageDef.args.find((a) => a.key === "value");
+  const fallback = valueDef?.default ?? valueDef?.placeholder;
+  if (fallback != null && fallback !== "") return String(fallback);
+
+  return null;
+}
 
 let nodeIdCounter = 0;
 function nextId() {
@@ -274,17 +354,8 @@ function Editor() {
         // For control nodes, show the actual explicitly set value or default;
         // otherwise mark as unset so the UI doesn't imply a value will be inlined
         if (srcData?.stageDef.stage === "control") {
-          const val = srcData.argValues?.value;
-          if (val !== undefined && val !== "") {
-            displayValue = String(val);
-          } else {
-            const valueDef = srcData.stageDef.args.find((a) => a.key === "value");
-            if (valueDef?.default !== undefined && valueDef.default !== "") {
-              displayValue = String(valueDef.default);
-            } else {
-              displayValue = "(unset)";
-            }
-          }
+          const resolved = resolveControlDisplayValue(srcData, e.sourceHandle);
+          displayValue = resolved ?? "(unset)";
         }
         inMap.get(e.target)!.set(e.targetHandle, displayValue);
       }
@@ -555,9 +626,14 @@ function Editor() {
       // Only control nodes can wire into arg-ports (serialization can't
       // round-trip non-control → arg-port edges yet)
       if (tgtPort.argKey && srcDef.stage !== "control") return false;
-      // Control-node connections are only meaningful/serializable when
-      // targeting arg-ports, so disallow control → non-arg edges.
-      if (srcDef.stage === "control" && !tgtPort.argKey) return false;
+      // Control-flow nodes (delay, cron, conditional, loop) can wire to
+      // non-arg input ports but NOT to arg-ports (they don't inline values).
+      if (srcDef.stage === "control" && CONTROL_FLOW_COMMANDS.has(srcDef.command)) {
+        if (tgtPort.argKey) return false;
+      }
+      // Value-inlining control nodes (string, number, boolean, choice, filepath,
+      // date, secret) are only meaningful when targeting arg-ports.
+      if (srcDef.stage === "control" && !CONTROL_FLOW_COMMANDS.has(srcDef.command) && !tgtPort.argKey) return false;
 
       return portsCompatible(srcPort, tgtPort);
     },
@@ -842,20 +918,14 @@ function Editor() {
         // For control nodes, extract the actual value (or placeholder/default) to show alongside the label
         let peerValue: string | undefined;
         if (srcData?.stageDef.stage === "control") {
-          const val = srcData.argValues?.value;
-          if (val !== undefined && val !== "") {
-            peerValue = String(val);
-          } else {
-            const valueDef = srcData.stageDef.args.find((a) => a.key === "value");
-            const fallback = valueDef?.default ?? valueDef?.placeholder;
-            if (fallback != null && fallback !== "") peerValue = String(fallback);
-          }
+          peerValue = resolveControlDisplayValue(srcData, e.sourceHandle) ?? undefined;
         }
         return {
           portId: e.targetHandle ?? "",
           peerNodeId: e.source,
           peerLabel: srcData?.nodeLabel || srcData?.stageDef.label || e.source,
           peerValue,
+          peerSensitive: srcData?.stageDef.command === "secret",
           peerStatus: exec.runState.get(e.source)?.status as NodeRunStatus | undefined,
         };
       });

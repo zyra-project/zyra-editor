@@ -4,6 +4,8 @@ import { STATUS_COLORS, getEffectivePorts } from "@zyra/core";
 import type { ZyraNodeData } from "./ZyraNode";
 import { isSensitive } from "./ZyraNode";
 import type { NodeRunState } from "@zyra/core";
+import { CronScheduleEditor } from "./CronScheduleEditor";
+import { ChoiceOptionsEditor } from "./ChoiceOptionsEditor";
 
 /** Scroll an element to its bottom. */
 function scrollToBottom(el: HTMLElement | null) {
@@ -16,7 +18,7 @@ interface Props {
   nodeId: string;
   data: ZyraNodeData;
   runState?: NodeRunState;
-  connectedInputs: { portId: string; peerNodeId: string; peerLabel: string; peerValue?: string; peerStatus?: NodeRunStatus }[];
+  connectedInputs: { portId: string; peerNodeId: string; peerLabel: string; peerValue?: string; peerSensitive?: boolean; peerStatus?: NodeRunStatus }[];
   connectedOutputs: { portId: string; peerNodeId: string; peerLabel: string; peerStatus?: NodeRunStatus }[];
   onArgChange: (nodeId: string, key: string, value: string | number | boolean) => void;
   onSelectNode: (nodeId: string) => void;
@@ -191,12 +193,12 @@ function SettingsTab({
   const definedKeys = new Set(stageDef.args.map((a) => a.key));
   const extraKeys = Object.keys(argValues).filter((k) => !definedKeys.has(k));
 
-  // Build a map of arg key -> { label, value } for wired arg-ports
-  const linkedArgs = new Map<string, { label: string; value?: string }>();
+  // Build a map of arg key -> { label, value, sensitive } for wired arg-ports
+  const linkedArgs = new Map<string, { label: string; value?: string; sensitive?: boolean }>();
   for (const conn of connectedInputs) {
     // arg-port IDs have the format "arg:<key>"
     if (conn.portId.startsWith("arg:")) {
-      linkedArgs.set(conn.portId.slice(4), { label: conn.peerLabel, value: conn.peerValue });
+      linkedArgs.set(conn.portId.slice(4), { label: conn.peerLabel, value: conn.peerValue, sensitive: conn.peerSensitive });
     }
   }
 
@@ -209,6 +211,69 @@ function SettingsTab({
       )}
       {stageDef.args.map((arg) => {
         const linkedFrom = linkedArgs.get(arg.key);
+        // Mask the value field for Secret nodes
+        const isSecretVariable = stageDef.command === "secret"
+          && arg.key === "value";
+
+        // Cron schedule: replace the expression field with the visual editor
+        // (unless the arg is linked from another node — then fall through to ArgField)
+        if (stageDef.command === "cron" && arg.key === "expression" && !linkedFrom) {
+          return (
+            <div key={arg.key} style={{ marginBottom: 14 }}>
+              <label style={{
+                display: "block",
+                fontSize: 12,
+                fontWeight: 600,
+                marginBottom: 4,
+                color: "var(--text-primary)",
+              }}>
+                {arg.label}
+                {arg.required && <span style={{ color: "var(--accent-red)" }}> *</span>}
+              </label>
+              {arg.description && (
+                <div style={{ fontSize: 11, color: "var(--text-secondary)", marginBottom: 6, lineHeight: 1.4 }}>
+                  {arg.description}
+                </div>
+              )}
+              <CronScheduleEditor
+                value={String(argValues[arg.key] ?? "")}
+                onChange={(v) => onArgChange(nodeId, arg.key, v)}
+              />
+            </div>
+          );
+        }
+
+        // Choice node: replace both options + value args with a combined visual editor
+        if (stageDef.command === "choice" && arg.key === "options" && !linkedFrom) {
+          return (
+            <div key={arg.key} style={{ marginBottom: 14 }}>
+              <label style={{
+                display: "block",
+                fontSize: 12,
+                fontWeight: 600,
+                marginBottom: 4,
+                color: "var(--text-primary)",
+              }}>
+                Options
+                <span style={{ color: "var(--accent-red)" }}> *</span>
+              </label>
+              <div style={{ fontSize: 11, color: "var(--text-secondary)", marginBottom: 6, lineHeight: 1.4 }}>
+                Click a radio to select, click the label to edit, or add new options below.
+              </div>
+              <ChoiceOptionsEditor
+                value={String(argValues.options ?? "")}
+                onChange={(v) => onArgChange(nodeId, "options", v)}
+                selected={String(argValues.value ?? "")}
+                onSelectChange={(v) => onArgChange(nodeId, "value", v)}
+              />
+            </div>
+          );
+        }
+        // Skip the "value" arg for choice nodes — it's handled inside ChoiceOptionsEditor above
+        if (stageDef.command === "choice" && arg.key === "value" && !linkedFrom) {
+          return null;
+        }
+
         return (
           <ArgField
             key={arg.key}
@@ -216,6 +281,7 @@ function SettingsTab({
             value={argValues[arg.key]}
             linkedFrom={linkedFrom}
             onChange={(v) => onArgChange(nodeId, arg.key, v)}
+            forceSecret={isSecretVariable}
           />
         );
       })}
@@ -275,7 +341,7 @@ function InputTab({
       {visiblePorts.map((port) => {
         const connections = connectedInputs.filter((c) => c.portId === port.id);
         const argDef = port.argKey ? stageDef.args?.find((a) => a.key === port.argKey) : undefined;
-        const sensitive = argDef ? isSensitive(argDef) : false;
+        const portSensitive = argDef ? isSensitive(argDef) : false;
         return (
           <div key={port.id} style={{ marginBottom: 16 }}>
             <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 4 }}>
@@ -292,7 +358,9 @@ function InputTab({
               </span>
             </div>
             {connections.length > 0 ? (
-              connections.map((conn, i) => (
+              connections.map((conn, i) => {
+                const sensitive = portSensitive || !!conn.peerSensitive;
+                return (
                 <div
                   key={i}
                   onClick={() => onSelectNode(conn.peerNodeId)}
@@ -331,7 +399,8 @@ function InputTab({
                     <StatusBadge status={conn.peerStatus} />
                   )}
                 </div>
-              ))
+                );
+              })
             ) : (
               <div style={{ marginLeft: 18, fontSize: 12, color: "var(--text-muted)" }}>
                 Not connected
@@ -566,6 +635,14 @@ function OutputTab({
   );
 }
 
+/* ── ISO 8601 Duration Validation ──────────────────────── */
+
+const ISO8601_DURATION = /^P(?!$)(?:\d+Y)?(?:\d+M)?(?:\d+W)?(?:\d+D)?(?:T(?!$)(?:\d+H)?(?:\d+M)?(?:\d+S)?)?$/;
+
+function isValidISO8601Duration(v: string): boolean {
+  return ISO8601_DURATION.test(v);
+}
+
 /* ── Arg Field ──────────────────────────────────────────── */
 
 function ArgField({
@@ -573,14 +650,23 @@ function ArgField({
   value,
   linkedFrom,
   onChange,
+  forceSecret,
 }: {
   arg: ArgDef;
   value: string | number | boolean | undefined;
-  /** If this arg is wired from another node, the peer node's label and optional value. */
-  linkedFrom?: { label: string; value?: string };
+  /** If this arg is wired from another node, the peer node's label, optional value, and sensitivity. */
+  linkedFrom?: { label: string; value?: string; sensitive?: boolean };
   onChange: (v: string | number | boolean) => void;
+  /** Override: treat this field as a secret (password input) regardless of name/label. */
+  forceSecret?: boolean;
 }) {
   const id = `arg-${arg.key}`;
+
+  // ISO 8601 duration validation for the custom_period field
+  const needsDurationValidation = arg.key === "custom_period";
+  const strValue = typeof value === "string" ? value : "";
+  const durationInvalid = needsDurationValidation && strValue.length > 0 && !isValidISO8601Duration(strValue);
+  const treatAsSensitive = forceSecret || isSensitive(arg) || !!linkedFrom?.sensitive;
 
   return (
     <div style={{ marginBottom: 14 }}>
@@ -633,9 +719,9 @@ function ArgField({
                 flexShrink: 1,
                 minWidth: 0,
               }}
-              title={isSensitive(arg) ? "Linked value hidden (sensitive)" : linkedFrom.value}
+              title={treatAsSensitive ? "Linked value hidden (sensitive)" : linkedFrom.value}
             >
-              {isSensitive(arg) ? "••••••••" : linkedFrom.value}
+              {treatAsSensitive ? "••••••••" : linkedFrom.value}
             </span>
           )}
         </div>
@@ -654,6 +740,16 @@ function ArgField({
               <option key={opt} value={opt}>{opt}</option>
             ))}
           </select>
+        ) : arg.type === "date" ? (
+          <input
+            id={id}
+            className="zyra-input"
+            type="date"
+            value={(value as string) ?? ""}
+            placeholder={arg.placeholder ?? ""}
+            onChange={(e) => onChange(e.target.value)}
+            style={{ colorScheme: "dark" }}
+          />
         ) : arg.type === "boolean" ? (
           (() => {
             const effectiveValue = value !== undefined ? !!value : !!arg.default;
@@ -673,20 +769,28 @@ function ArgField({
             );
           })()
         ) : (
-          <input
-            id={id}
-            className="zyra-input"
-            type={isSensitive(arg) ? "password" : arg.type === "number" ? "number" : "text"}
-            value={(value as string) ?? ""}
-            placeholder={arg.placeholder ?? ""}
-            onChange={(e) => {
-              if (arg.type === "number") {
-                onChange(e.target.value === "" ? "" : Number(e.target.value));
-              } else {
-                onChange(e.target.value);
-              }
-            }}
-          />
+          <>
+            <input
+              id={id}
+              className="zyra-input"
+              type={treatAsSensitive ? "password" : arg.type === "number" ? "number" : "text"}
+              value={(value as string) ?? ""}
+              placeholder={arg.placeholder ?? ""}
+              onChange={(e) => {
+                if (arg.type === "number") {
+                  onChange(e.target.value === "" ? "" : Number(e.target.value));
+                } else {
+                  onChange(e.target.value);
+                }
+              }}
+              style={durationInvalid ? { borderColor: "var(--accent-red)" } : undefined}
+            />
+            {durationInvalid && (
+              <div style={{ fontSize: 11, color: "var(--accent-red)", marginTop: 4 }}>
+                Invalid ISO 8601 duration. Use format like P1D, P2W, P1M, P1Y6M, PT12H.
+              </div>
+            )}
+          </>
         )
       )}
     </div>

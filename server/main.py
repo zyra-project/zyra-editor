@@ -12,6 +12,45 @@ import re
 import subprocess
 from pathlib import Path
 
+# Load .env file from the server directory (or project root) so that
+# secret values can be configured without polluting the system env.
+_env_file = Path(__file__).parent / ".env"
+if not _env_file.exists():
+    _env_file = Path(__file__).parent.parent / ".env"
+if _env_file.exists():
+    try:
+        _env_content = _env_file.read_text(encoding="utf-8")
+    except (OSError, UnicodeError):
+        _env_content = None
+    if _env_content is not None:
+        for line in _env_content.splitlines():
+            line = line.strip()
+            if not line or line.startswith("#"):
+                continue
+            # Allow optional leading 'export ' (must be followed by whitespace)
+            if line.startswith("export ") or line.startswith("export\t"):
+                line = line[6:].lstrip()
+            if "=" not in line:
+                continue
+            key, _, raw_val = line.partition("=")
+            key = key.strip()
+            raw_val = raw_val.strip()
+            # Strip inline comments when not inside quotes
+            in_single = False
+            in_double = False
+            val_chars: list[str] = []
+            for ch in raw_val:
+                if ch == "'" and not in_double:
+                    in_single = not in_single
+                elif ch == '"' and not in_single:
+                    in_double = not in_double
+                if ch == "#" and not in_single and not in_double:
+                    break
+                val_chars.append(ch)
+            val = "".join(val_chars).strip().strip("'\"")
+            if key:
+                os.environ.setdefault(key, val)
+
 # Ensure a sane default logging verbosity for CLI jobs so the editor can
 # still stream useful log messages through the WebSocket log panel, while
 # allowing environments to opt into more verbose levels (e.g., debug).
@@ -39,11 +78,62 @@ _zyra_cli = None
 _orig_cli_main = None
 
 
+_ENV_VAR_RE = re.compile(r"\$\{([A-Za-z_][A-Za-z0-9_]*)\}")
+
+
+_log = logging.getLogger("zyra-editor")
+
+
+_warned_env_vars: set[str] = set()
+
+
+def _resolve_env_vars(value: str) -> str:
+    """Replace ${VAR_NAME} references with values from os.environ.
+
+    Unresolved references are left as-is (the CLI will see the literal
+    string, which is preferable to silently dropping the value).
+    """
+    def _replace(m: re.Match) -> str:
+        name = m.group(1)
+        resolved = os.environ.get(name)
+        if resolved is None:
+            if name not in _warned_env_vars:
+                _warned_env_vars.add(name)
+                _log.warning(
+                    "Secret variable ${%s} is not set in the environment. "
+                    "Add it to server/.env or export it before starting the server.",
+                    name,
+                )
+            return m.group(0)
+        return resolved
+    return _ENV_VAR_RE.sub(_replace, value)
+
+
+def _resolve_argv_env_vars(argv: list[str]) -> list[str]:
+    """Resolve ${VAR} env-var references in argv entries.
+
+    Only performs substitution when the entire argument is a single ${VAR}
+    placeholder (full-string match).  This avoids rewriting arbitrary user
+    arguments (e.g. shell templates) that merely contain a ${VAR} substring.
+    """
+    resolved: list[str] = []
+    for a in argv:
+        m = _ENV_VAR_RE.fullmatch(a)
+        if m:
+            resolved.append(_resolve_env_vars(a))
+        else:
+            resolved.append(a)
+    return resolved
+
+
 def _cli_main_with_logging_reset(argv):
     """
     Wrapper around zyra.cli.main that clears and restores logging handlers
     so that handlers created by the CLI write to the swapped stderr tee.
+    Also resolves ${VAR_NAME} env-var references in argv so that secret
+    variable nodes work without embedding plaintext in the pipeline YAML.
     """
+    argv = _resolve_argv_env_vars(argv)
     root = logging.getLogger()
     # Save existing handlers so we can restore them after the CLI run
     prev_handlers = list(root.handlers)
@@ -301,30 +391,38 @@ def _commands_to_manifest(commands: dict) -> dict:
     # Inject editor-only control nodes (not backed by CLI commands)
     stages.insert(0, {
         "stage": "control",
-        "command": "variable",
-        "label": "Variable",
-        "description": "Define a named variable to pass values into the pipeline",
+        "command": "secret",
+        "label": "Secret",
+        "description": "A secret value (API key, password) stored as an environment variable",
         "cli": "",
         "status": "implemented",
         "color": STAGE_COLORS.get("control", DEFAULT_COLOR),
         "inputs": [],
-        "outputs": [{"id": "value", "label": "Value", "types": ["any"]}],
+        "outputs": [{"id": "value", "label": "Value", "types": ["string"]}],
         "args": [
             {
                 "key": "name",
                 "label": "Name",
                 "type": "string",
                 "required": True,
-                "placeholder": "my_var",
-                "description": "Variable name",
+                "placeholder": "API_KEY",
+                "description": "Environment variable name (used as ${NAME} in pipeline)",
             },
             {
                 "key": "value",
                 "label": "Value",
                 "type": "string",
                 "required": True,
-                "placeholder": "...",
-                "description": "The value to pass downstream",
+                "placeholder": "••••••••",
+                "description": "Secret value (never written to pipeline YAML)",
+            },
+            {
+                "key": "description",
+                "label": "Description",
+                "type": "string",
+                "required": False,
+                "placeholder": "API key for external service",
+                "description": "Optional description of what this secret is for",
             },
         ],
     })

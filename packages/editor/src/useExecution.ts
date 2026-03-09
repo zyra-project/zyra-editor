@@ -32,6 +32,25 @@ export interface ExecutionControls {
 /** Max consecutive poll failures before marking a node as failed. */
 const MAX_POLL_FAILURES = 20;
 
+/**
+ * Sleep in short intervals for `totalMs` milliseconds, checking for
+ * cancellation between intervals.  Returns true if completed, false
+ * if cancelled early.
+ */
+async function cancellableSleep(
+  totalMs: number,
+  isCancelled: () => boolean,
+): Promise<boolean> {
+  const pollMs = 200;
+  const start = Date.now();
+  while (Date.now() - start < totalMs) {
+    if (isCancelled()) return false;
+    const remaining = totalMs - (Date.now() - start);
+    await new Promise((r) => setTimeout(r, Math.min(remaining, pollMs)));
+  }
+  return true;
+}
+
 export function useExecution(): ExecutionControls {
   const [runState, setRunState] = useState<RunStateMap>(new Map());
   const [running, setRunning] = useState(false);
@@ -67,10 +86,14 @@ export function useExecution(): ExecutionControls {
         // don't support --dry-run, only the pipeline runner does)
         const result = new Map<string, NodeRunState>();
         for (const step of pipeline.steps) {
+          let preview = stepToCliPreview(step);
+          if (step.delay_seconds) {
+            preview = `[delay ${step.delay_seconds}s] ${preview}`;
+          }
           result.set(step.name, {
             ...emptyRunState(),
             status: "dry-run",
-            dryRunArgv: stepToCliPreview(step),
+            dryRunArgv: preview,
           });
         }
         setRunState(result);
@@ -112,6 +135,22 @@ export function useExecution(): ExecutionControls {
 
       // Use async mode with WebSocket streaming for live log output
       const req: RunStepRequest = { ...requests[stepIndex], mode: "async" };
+
+      // Respect delay/throttle for single-node runs (consistent with full pipeline runs)
+      const delaySecs = step.delay_seconds;
+      if (delaySecs && delaySecs > 0) {
+        updateNode(nodeId, { ...emptyRunState(), status: "queued", submittedRequest: req });
+        const completed = await cancellableSleep(
+          delaySecs * 1000,
+          () => cancelledRef.current || runGenRef.current !== gen,
+        );
+        if (!completed) {
+          updateNode(nodeId, { status: "canceled" });
+          setRunning(false);
+          return null;
+        }
+      }
+
       updateNode(nodeId, { ...emptyRunState(), status: "running", submittedRequest: req });
 
       try {
@@ -338,12 +377,27 @@ export function useExecution(): ExecutionControls {
         async function runStep(
           nodeId: string,
           req: RunStepRequest,
+          delaySecs?: number,
         ): Promise<void> {
           const depsOk = await waitForDeps(nodeId);
           if (!depsOk || cancelledRef.current || runGenRef.current !== gen) {
             updateNode(nodeId, { status: "canceled" });
             resolved.set(nodeId, "canceled");
             return;
+          }
+
+          // Respect delay/throttle before executing.
+          if (delaySecs && delaySecs > 0) {
+            updateNode(nodeId, { status: "queued", submittedRequest: req });
+            const completed = await cancellableSleep(
+              delaySecs * 1000,
+              () => cancelledRef.current || runGenRef.current !== gen,
+            );
+            if (!completed) {
+              updateNode(nodeId, { status: "canceled" });
+              resolved.set(nodeId, "canceled");
+              return;
+            }
           }
 
           updateNode(nodeId, { status: "running", submittedRequest: req });
@@ -487,7 +541,7 @@ export function useExecution(): ExecutionControls {
 
         // Launch all steps — they each wait for their deps internally
         const promises = pipeline.steps.map((step, i) =>
-          runStep(step.name, requests[i]),
+          runStep(step.name, requests[i], step.delay_seconds),
         );
         await Promise.all(promises);
       } finally {

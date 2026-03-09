@@ -1,6 +1,6 @@
 import { useState, useCallback, useEffect, useRef } from "react";
 import yaml from "js-yaml";
-import type { Pipeline, PipelineStep, PipelineGroup, PipelineControl } from "@zyra/core";
+import type { Pipeline, PipelineStep, PipelineGroup, PipelineControl, PipelineSchedule, StepCondition } from "@zyra/core";
 
 /** Zyra native YAML format: stages array with stage/command fields. */
 interface NativeStage {
@@ -76,13 +76,68 @@ export function normalizePipeline(raw: unknown): Pipeline | null {
         }
       }
 
+      // Preserve delay_seconds for delay node reconstruction
+      if (typeof stepObj.delay_seconds === "number" && stepObj.delay_seconds > 0) {
+        step.delay_seconds = stepObj.delay_seconds;
+      }
+
+      // Preserve condition for conditional node reconstruction
+      if (stepObj.condition && typeof stepObj.condition === "object" && !Array.isArray(stepObj.condition)) {
+        const cond = stepObj.condition as Record<string, unknown>;
+        if (typeof cond.field === "string" && typeof cond.value === "string") {
+          const operatorStr = typeof cond.operator === "string" ? cond.operator : "==";
+          const allowedOperators: StepCondition["operator"][] = [
+            "==", "!=", ">", "<", ">=", "<=", "contains", "matches",
+          ];
+          const operator: StepCondition["operator"] = allowedOperators.includes(
+            operatorStr as StepCondition["operator"],
+          )
+            ? (operatorStr as StepCondition["operator"])
+            : "==";
+
+          step.condition = {
+            field: cond.field,
+            operator,
+            value: cond.value,
+            branch: cond.branch === "false" ? "false" : "true",
+          };
+        }
+      }
+
+      // Preserve loop for loop node reconstruction
+      if (stepObj.loop && typeof stepObj.loop === "object" && !Array.isArray(stepObj.loop)) {
+        const lp = stepObj.loop as Record<string, unknown>;
+        const mode = typeof lp.mode === "string" ? lp.mode : "each";
+        if (mode === "each" || mode === "batch" || mode === "range") {
+          const loop: PipelineStep["loop"] = { mode };
+          if (typeof lp.over === "string") loop.over = lp.over;
+          if (typeof lp.batch_size === "number") loop.batch_size = lp.batch_size;
+          if (typeof lp.range_start === "number") loop.range_start = lp.range_start;
+          if (typeof lp.range_end === "number") loop.range_end = lp.range_end;
+          if (typeof lp.range_step === "number") loop.range_step = lp.range_step;
+          if (typeof lp.max_parallel === "number") loop.max_parallel = lp.max_parallel;
+          step.loop = loop;
+        }
+      }
+
       steps.push(step);
     }
 
     if (steps.length === 0) return null;
 
-    // Pass through _controls if present
+    // Preserve top-level schedule for cron node reconstruction
     const pipeline: Pipeline = { version: "1", steps };
+    if (obj.schedule && typeof obj.schedule === "object" && !Array.isArray(obj.schedule)) {
+      const sched = obj.schedule as Record<string, unknown>;
+      if (typeof sched.cron === "string" && sched.cron.trim()) {
+        const s: PipelineSchedule = { cron: sched.cron.trim() };
+        if (typeof sched.timezone === "string" && sched.timezone.trim()) s.timezone = sched.timezone.trim();
+        if (sched.enabled === false) s.enabled = false;
+        pipeline.schedule = s;
+      }
+    }
+
+    // Pass through _controls if present
     const controls: PipelineControl[] = [];
     if (Array.isArray(obj._controls)) {
       for (const c of obj._controls as unknown[]) {
@@ -101,7 +156,9 @@ export function normalizePipeline(raw: unknown): Pipeline | null {
             if (!e || typeof e !== "object") continue;
             const eo = e as Record<string, unknown>;
             if (typeof eo.targetNode === "string" && typeof eo.targetPort === "string") {
-              edges.push({ targetNode: eo.targetNode, targetPort: eo.targetPort });
+              const edge: PipelineControl["edges"][number] = { targetNode: eo.targetNode, targetPort: eo.targetPort };
+              if (typeof eo.sourcePort === "string" && eo.sourcePort !== "") edge.sourcePort = eo.sourcePort;
+              edges.push(edge);
             }
           }
         }
