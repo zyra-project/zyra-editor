@@ -32,6 +32,78 @@ import yaml from "js-yaml";
 import { useTheme } from "./useTheme";
 import { useBackendStatus } from "./useBackendStatus";
 
+/**
+ * Derive a display value string for a control node's output port.
+ * Handles all control node types including control-flow nodes (delay, cron,
+ * conditional, loop) whose output port IDs don't map to arg keys.
+ */
+function resolveControlDisplayValue(
+  srcData: ZyraNodeData,
+  sourceHandle: string | null | undefined,
+): string | null {
+  const args = srcData.argValues ?? {};
+  const cmd = srcData.stageDef.command;
+  const portKey = sourceHandle ?? "value";
+
+  // Control-flow nodes: derive display from args, not port-to-arg mapping
+  if (cmd === "delay") {
+    const d = args.duration;
+    const u = args.unit ?? "seconds";
+    return d != null ? `${d} ${u}` : null;
+  }
+  if (cmd === "cron") {
+    const expr = args.expression;
+    return expr != null && expr !== "" ? String(expr) : null;
+  }
+  if (cmd === "conditional") {
+    const f = args.field ?? "";
+    const op = args.operator ?? "";
+    const v = args.compare_value ?? "";
+    const branch = portKey === "true" ? "true" : portKey === "false" ? "false" : "";
+    const summary = f || op || v ? `${f} ${op} ${v}`.trim() : null;
+    return branch && summary ? `${summary} → ${branch}` : summary;
+  }
+  if (cmd === "loop") {
+    const mode = args.mode ?? "";
+    if (portKey === "index") return "index";
+    if (portKey === "done") return "done";
+    return mode ? `${mode}` : null;
+  }
+
+  // Data-value control nodes: resolve from matching arg key
+  let val = portKey !== "value" && args[portKey] !== undefined
+    ? args[portKey]
+    : args.value;
+
+  // Date "period" port: resolve enum → ISO 8601
+  if (cmd === "date" && portKey === "period") {
+    const iso = resolvePeriodISO(val, args.custom_period);
+    if (iso !== undefined) val = iso;
+  }
+
+  if (val !== undefined && val !== "") {
+    let result = String(val);
+    // Choice "label" port: resolve the label of the selected option
+    if (cmd === "choice" && sourceHandle === "label") {
+      try {
+        const opts = parseOptions(typeof args.options === "string" ? args.options : "");
+        const sel = opts.find((o) => o.value === String(args.value ?? ""));
+        if (sel) result = sel.label;
+      } catch { /* keep result as-is */ }
+    }
+    return result;
+  }
+
+  // Fall back to arg default/placeholder
+  const argKey = portKey !== "value" ? portKey : "value";
+  const valueDef = srcData.stageDef.args.find((a) => a.key === argKey)
+    ?? srcData.stageDef.args.find((a) => a.key === "value");
+  const fallback = valueDef?.default ?? valueDef?.placeholder;
+  if (fallback != null && fallback !== "") return String(fallback);
+
+  return null;
+}
+
 let nodeIdCounter = 0;
 function nextId() {
   return `node-${++nodeIdCounter}`;
@@ -275,37 +347,8 @@ function Editor() {
         // For control nodes, show the actual explicitly set value or default;
         // otherwise mark as unset so the UI doesn't imply a value will be inlined
         if (srcData?.stageDef.stage === "control") {
-          // Resolve value from the source port's matching arg key, falling back to "value"
-          const portKey = e.sourceHandle ?? "value";
-          const val = portKey !== "value" && srcData.argValues?.[portKey] !== undefined
-            ? srcData.argValues[portKey]
-            : srcData.argValues?.value;
-          // Date "period" port: resolve enum ("yearly") → ISO 8601 ("P1Y")
-          let resolvedVal = val;
-          if (srcData.stageDef.command === "date" && portKey === "period") {
-            const iso = resolvePeriodISO(val, srcData.argValues?.custom_period);
-            if (iso !== undefined) resolvedVal = iso;
-          }
-          if (resolvedVal !== undefined && resolvedVal !== "") {
-            displayValue = String(resolvedVal);
-          } else {
-            const argKey = portKey !== "value" ? portKey : "value";
-            const valueDef = srcData.stageDef.args.find((a) => a.key === argKey)
-              ?? srcData.stageDef.args.find((a) => a.key === "value");
-            if (valueDef?.default !== undefined && valueDef.default !== "") {
-              displayValue = String(valueDef.default);
-            } else {
-              displayValue = "(unset)";
-            }
-          }
-          // Choice "label" port: resolve the label of the selected option
-          if (srcData.stageDef.command === "choice" && e.sourceHandle === "label") {
-            try {
-              const opts = parseOptions(typeof srcData.argValues?.options === "string" ? srcData.argValues.options : "");
-              const sel = opts.find((o) => o.value === String(srcData.argValues?.value ?? ""));
-              if (sel) displayValue = sel.label;
-            } catch { /* keep displayValue as-is */ }
-          }
+          const resolved = resolveControlDisplayValue(srcData, e.sourceHandle);
+          displayValue = resolved ?? "(unset)";
         }
         inMap.get(e.target)!.set(e.targetHandle, displayValue);
       }
@@ -863,34 +906,7 @@ function Editor() {
         // For control nodes, extract the actual value (or placeholder/default) to show alongside the label
         let peerValue: string | undefined;
         if (srcData?.stageDef.stage === "control") {
-          // Resolve value from the source port's matching arg key, falling back to "value"
-          const portKey = e.sourceHandle ?? "value";
-          const val = portKey !== "value" && srcData.argValues?.[portKey] !== undefined
-            ? srcData.argValues[portKey]
-            : srcData.argValues?.value;
-          // Date "period" port: resolve enum ("yearly") → ISO 8601 ("P1Y")
-          let resolvedVal = val;
-          if (srcData.stageDef.command === "date" && portKey === "period") {
-            const iso = resolvePeriodISO(val, srcData.argValues?.custom_period);
-            if (iso !== undefined) resolvedVal = iso;
-          }
-          if (resolvedVal !== undefined && resolvedVal !== "") {
-            peerValue = String(resolvedVal);
-          } else {
-            const argKey = portKey !== "value" ? portKey : "value";
-            const valueDef = srcData.stageDef.args.find((a) => a.key === argKey)
-              ?? srcData.stageDef.args.find((a) => a.key === "value");
-            const fallback = valueDef?.default ?? valueDef?.placeholder;
-            if (fallback != null && fallback !== "") peerValue = String(fallback);
-          }
-          // Choice "label" port: resolve the label of the selected option
-          if (srcData.stageDef.command === "choice" && e.sourceHandle === "label") {
-            try {
-              const opts = parseOptions(typeof srcData.argValues?.options === "string" ? srcData.argValues.options : "");
-              const sel = opts.find((o) => o.value === String(srcData.argValues?.value ?? ""));
-              if (sel) peerValue = sel.label;
-            } catch { /* keep peerValue as-is */ }
-          }
+          peerValue = resolveControlDisplayValue(srcData, e.sourceHandle) ?? undefined;
         }
         return {
           portId: e.targetHandle ?? "",

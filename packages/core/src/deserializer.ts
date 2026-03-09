@@ -102,6 +102,17 @@ export function pipelineToGraph(
   // Collect all existing node IDs for deduplication of generated control nodes.
   const existingIds = new Set(nodes.map((n) => n.id));
 
+  /**
+   * Find the first explicit (non-arg:*) input port for a stage.
+   * Falls back to the first effective input (even arg:*) or "in".
+   */
+  function firstExplicitInputPort(stage: StageDef | undefined): string {
+    if (!stage) return "in";
+    const effective = getEffectivePorts(stage);
+    const explicit = effective.inputs.find((p) => !p.id.startsWith("arg:"));
+    return explicit?.id ?? effective.inputs[0]?.id ?? "in";
+  }
+
   /** Generate a unique ID with the given prefix, avoiding collisions. */
   function uniqueId(prefix: string): string {
     let id = prefix;
@@ -167,17 +178,15 @@ export function pipelineToGraph(
       stageCommand: "control/delay",
       argValues: { duration, unit },
     });
-    // Wire the delay node to the target step's first input port (not arg-port,
-    // which would make the arg appear linked/readonly in the editor).
+    // Wire the delay node to the target step's first explicit input port
+    // (not arg:*, which would make the arg appear linked/readonly in the editor).
     const targetInfo = nodeMap.get(step.name);
     if (targetInfo) {
-      const effectivePorts = targetInfo.stage ? getEffectivePorts(targetInfo.stage) : null;
-      const targetPort = effectivePorts?.inputs[0]?.id ?? "in";
       edges.push({
         sourceNode: delayId,
         sourcePort: "delay",
         targetNode: step.name,
-        targetPort,
+        targetPort: firstExplicitInputPort(targetInfo.stage),
       });
     }
   }
@@ -218,13 +227,11 @@ export function pipelineToGraph(
       const stepCond = stepCondMap.get(stepName);
       if (!stepCond) continue;
       const targetInfo = nodeMap.get(stepName);
-      const effectivePorts = targetInfo?.stage ? getEffectivePorts(targetInfo.stage) : null;
-      const targetPort = effectivePorts?.inputs[0]?.id ?? "in";
       edges.push({
         sourceNode: condId,
         sourcePort: stepCond.branch,
         targetNode: stepName,
-        targetPort,
+        targetPort: firstExplicitInputPort(targetInfo?.stage),
       });
     }
   }
@@ -248,20 +255,19 @@ export function pipelineToGraph(
       stageCommand: "control/loop",
       argValues: loopArgs,
     });
-    // Wire loop's "item" output to the step's first input port
+    // Wire loop's "item" output to the step's first explicit input port
     const targetInfo = nodeMap.get(step.name);
-    const effectivePorts = targetInfo?.stage ? getEffectivePorts(targetInfo.stage) : null;
-    const targetPort = effectivePorts?.inputs[0]?.id ?? "in";
     edges.push({
       sourceNode: loopId,
       sourcePort: "item",
       targetNode: step.name,
-      targetPort,
+      targetPort: firstExplicitInputPort(targetInfo?.stage),
     });
     // Wire the "over" source step's output to the loop's "items" input
     if (step.loop.over && nodeMap.has(step.loop.over)) {
       const overInfo = nodeMap.get(step.loop.over);
-      const overPort = overInfo?.stage?.outputs[0]?.id ?? "out";
+      const overEffective = overInfo?.stage ? getEffectivePorts(overInfo.stage) : null;
+      const overPort = overEffective?.outputs[0]?.id ?? "out";
       edges.push({
         sourceNode: step.loop.over,
         sourcePort: overPort,

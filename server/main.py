@@ -110,8 +110,20 @@ def _resolve_env_vars(value: str) -> str:
 
 
 def _resolve_argv_env_vars(argv: list[str]) -> list[str]:
-    """Resolve ${VAR} env-var references in all argv entries."""
-    return [_resolve_env_vars(a) for a in argv]
+    """Resolve ${VAR} env-var references in argv entries.
+
+    Only performs substitution when the entire argument is a single ${VAR}
+    placeholder (full-string match).  This avoids rewriting arbitrary user
+    arguments (e.g. shell templates) that merely contain a ${VAR} substring.
+    """
+    resolved: list[str] = []
+    for a in argv:
+        m = _ENV_VAR_RE.fullmatch(a)
+        if m:
+            resolved.append(_resolve_env_vars(a))
+        else:
+            resolved.append(a)
+    return resolved
 
 
 def _cli_main_with_logging_reset(argv):
