@@ -9,3 +9,5 @@ __pycache__/
 .venv/
 .vscode/
 _work/
+coverage/
+.pytest_cache/

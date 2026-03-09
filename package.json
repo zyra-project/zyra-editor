@@ -6,12 +6,14 @@
     "dev": "pnpm --filter @zyra/editor dev",
     "build": "pnpm --filter @zyra/core build && pnpm --filter @zyra/editor build",
     "lint": "pnpm -r lint",
-    "typecheck": "pnpm -r typecheck"
+    "typecheck": "pnpm -r typecheck",
+    "test": "pnpm --filter @zyra/core test && pnpm --filter @zyra/editor test",
+    "test:coverage": "pnpm --filter @zyra/core test:coverage && pnpm --filter @zyra/editor test:coverage"
   },
   "pnpm": {
     "onlyBuiltDependencies": ["esbuild"]
   },
   "engines": {
-    "node": ">=18"
+    "node": ">=20.19"
   }
 }
