@@ -317,6 +317,16 @@ export function graphToPipeline(
     const isSecretVar = srcNode.stageCommand === "control/secret";
 
     let val = srcNode.argValues.value;
+
+    // Choice "label" port: resolve the label of the currently selected option
+    if (srcNode.stageCommand === "control/choice" && e.sourcePort === "label") {
+      try {
+        const opts = JSON.parse(String(srcNode.argValues.options ?? "[]")) as { label: string; value: string }[];
+        const sel = opts.find((o) => o.value === String(val ?? ""));
+        val = sel?.label ?? val;
+      } catch { /* keep val as-is if options aren't valid JSON */ }
+    }
+
     // Fall back to the ArgDef default so wired control nodes with
     // defaults (e.g., boolean false) still serialize correctly.
     // Treat empty string as unset for non-string control types (matches UI display).

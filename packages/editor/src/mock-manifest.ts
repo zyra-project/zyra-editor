@@ -75,7 +75,10 @@ export const MOCK_MANIFEST: Manifest = {
       status: "implemented",
       color: "#888888",
       inputs: [],
-      outputs: [{ id: "value", label: "Value", types: ["string"] }],
+      outputs: [
+        { id: "value", label: "Value", types: ["string"] },
+        { id: "label", label: "Label", types: ["string"] },
+      ],
       args: [
         {
           key: "options",
