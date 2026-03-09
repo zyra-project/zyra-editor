@@ -275,11 +275,23 @@ function Editor() {
         // For control nodes, show the actual explicitly set value or default;
         // otherwise mark as unset so the UI doesn't imply a value will be inlined
         if (srcData?.stageDef.stage === "control") {
-          const val = srcData.argValues?.value;
-          if (val !== undefined && val !== "") {
-            displayValue = String(val);
+          // Resolve value from the source port's matching arg key, falling back to "value"
+          const portKey = e.sourceHandle ?? "value";
+          const val = portKey !== "value" && srcData.argValues?.[portKey] !== undefined
+            ? srcData.argValues[portKey]
+            : srcData.argValues?.value;
+          // Date "period" port: resolve "custom" → custom_period ISO duration
+          let resolvedVal = val;
+          if (srcData.stageDef.command === "date" && portKey === "period"
+            && val === "custom" && srcData.argValues?.custom_period) {
+            resolvedVal = srcData.argValues.custom_period;
+          }
+          if (resolvedVal !== undefined && resolvedVal !== "") {
+            displayValue = String(resolvedVal);
           } else {
-            const valueDef = srcData.stageDef.args.find((a) => a.key === "value");
+            const argKey = portKey !== "value" ? portKey : "value";
+            const valueDef = srcData.stageDef.args.find((a) => a.key === argKey)
+              ?? srcData.stageDef.args.find((a) => a.key === "value");
             if (valueDef?.default !== undefined && valueDef.default !== "") {
               displayValue = String(valueDef.default);
             } else {
@@ -290,7 +302,7 @@ function Editor() {
           if (srcData.stageDef.command === "choice" && e.sourceHandle === "label") {
             try {
               const opts = parseOptions(typeof srcData.argValues?.options === "string" ? srcData.argValues.options : "");
-              const sel = opts.find((o) => o.value === String(val ?? ""));
+              const sel = opts.find((o) => o.value === String(srcData.argValues?.value ?? ""));
               if (sel) displayValue = sel.label;
             } catch { /* keep displayValue as-is */ }
           }
@@ -851,11 +863,23 @@ function Editor() {
         // For control nodes, extract the actual value (or placeholder/default) to show alongside the label
         let peerValue: string | undefined;
         if (srcData?.stageDef.stage === "control") {
-          const val = srcData.argValues?.value;
-          if (val !== undefined && val !== "") {
-            peerValue = String(val);
+          // Resolve value from the source port's matching arg key, falling back to "value"
+          const portKey = e.sourceHandle ?? "value";
+          const val = portKey !== "value" && srcData.argValues?.[portKey] !== undefined
+            ? srcData.argValues[portKey]
+            : srcData.argValues?.value;
+          // Date "period" port: resolve "custom" → custom_period ISO duration
+          let resolvedVal = val;
+          if (srcData.stageDef.command === "date" && portKey === "period"
+            && val === "custom" && srcData.argValues?.custom_period) {
+            resolvedVal = srcData.argValues.custom_period;
+          }
+          if (resolvedVal !== undefined && resolvedVal !== "") {
+            peerValue = String(resolvedVal);
           } else {
-            const valueDef = srcData.stageDef.args.find((a) => a.key === "value");
+            const argKey = portKey !== "value" ? portKey : "value";
+            const valueDef = srcData.stageDef.args.find((a) => a.key === argKey)
+              ?? srcData.stageDef.args.find((a) => a.key === "value");
             const fallback = valueDef?.default ?? valueDef?.placeholder;
             if (fallback != null && fallback !== "") peerValue = String(fallback);
           }
@@ -863,7 +887,7 @@ function Editor() {
           if (srcData.stageDef.command === "choice" && e.sourceHandle === "label") {
             try {
               const opts = parseOptions(typeof srcData.argValues?.options === "string" ? srcData.argValues.options : "");
-              const sel = opts.find((o) => o.value === String(val ?? ""));
+              const sel = opts.find((o) => o.value === String(srcData.argValues?.value ?? ""));
               if (sel) peerValue = sel.label;
             } catch { /* keep peerValue as-is */ }
           }

@@ -316,7 +316,17 @@ export function graphToPipeline(
     // Secret nodes emit an env-var reference instead of the plaintext value
     const isSecretVar = srcNode.stageCommand === "control/secret";
 
-    let val = srcNode.argValues.value;
+    // Resolve value from the source port's matching arg key, falling back to "value"
+    let val = e.sourcePort && e.sourcePort !== "value" && srcNode.argValues[e.sourcePort] !== undefined
+      ? srcNode.argValues[e.sourcePort]
+      : srcNode.argValues.value;
+
+    // Date "period" port: resolve "custom" → custom_period ISO duration
+    if (srcNode.stageCommand === "control/date" && e.sourcePort === "period") {
+      if (val === "custom" && srcNode.argValues.custom_period) {
+        val = srcNode.argValues.custom_period;
+      }
+    }
 
     // Choice "label" port: resolve the label of the currently selected option
     if (srcNode.stageCommand === "control/choice" && e.sourcePort === "label") {
@@ -334,7 +344,9 @@ export function graphToPipeline(
     // the real value comes from environment variables at runtime.
     if (!isSecretVar && (val === undefined || (val === "" && !srcNode.stageCommand.endsWith("/string")))) {
       const ctrlStage = stageMap.get(srcNode.stageCommand);
-      const valueDef = ctrlStage?.args?.find((a) => a.key === "value");
+      const argKey = e.sourcePort && e.sourcePort !== "value" ? e.sourcePort : "value";
+      const valueDef = ctrlStage?.args?.find((a) => a.key === argKey)
+        ?? ctrlStage?.args?.find((a) => a.key === "value");
       if (valueDef?.default !== undefined) {
         val = valueDef.default;
       } else {
