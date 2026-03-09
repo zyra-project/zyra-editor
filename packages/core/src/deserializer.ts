@@ -99,8 +99,15 @@ export function pipelineToGraph(
     }
   }
 
-  // Collect all existing node IDs for deduplication of generated control nodes.
+  // Collect all existing node IDs (steps + _controls) for deduplication
+  // of generated control nodes.  Including _controls IDs prevents
+  // collisions when the pipeline already has persisted control nodes.
   const existingIds = new Set(nodes.map((n) => n.id));
+  if (pipeline._controls) {
+    for (const ctrl of pipeline._controls) {
+      existingIds.add(ctrl.id);
+    }
+  }
 
   /**
    * Find the first explicit (non-arg:*) input port for a stage.

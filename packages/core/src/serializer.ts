@@ -343,7 +343,15 @@ export function graphToPipeline(
     // Date "period" port: resolve enum value ("yearly") → ISO 8601 duration ("P1Y")
     if (srcNode.stageCommand === "control/date" && e.sourcePort === "period") {
       const resolved = resolvePeriodISO(val, srcNode.argValues.custom_period);
-      if (resolved !== undefined) val = resolved;
+      if (resolved !== undefined) {
+        val = resolved;
+      } else if (val === "custom" && !srcNode.argValues.custom_period) {
+        diagnostics?.push({
+          level: "warn",
+          message: `Control date node "${e.sourceNode}" has period "custom" but no valid custom_period; this connection will be treated as unset.`,
+        });
+        continue;
+      }
     }
 
     // Choice "label" port: resolve the label of the currently selected option

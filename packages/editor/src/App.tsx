@@ -78,7 +78,11 @@ function resolveControlDisplayValue(
   // Date "period" port: resolve enum → ISO 8601
   if (cmd === "date" && portKey === "period") {
     const iso = resolvePeriodISO(val, args.custom_period);
-    if (iso !== undefined) val = iso;
+    if (iso !== undefined) {
+      val = iso;
+    } else if (val === "custom" && !args.custom_period) {
+      return null;  // Treat missing custom_period as unset
+    }
   }
 
   if (val !== undefined && val !== "") {
