@@ -99,13 +99,27 @@ export function pipelineToGraph(
     }
   }
 
+  // Collect all existing node IDs for deduplication of generated control nodes.
+  const existingIds = new Set(nodes.map((n) => n.id));
+
+  /** Generate a unique ID with the given prefix, avoiding collisions. */
+  function uniqueId(prefix: string): string {
+    let id = prefix;
+    let i = 0;
+    while (existingIds.has(id)) {
+      id = `${prefix}_${++i}`;
+    }
+    existingIds.add(id);
+    return id;
+  }
+
   // Reconstruct a cron control node from pipeline.schedule if there
   // is no matching control node already in _controls (i.e., imported YAML).
   const hasCronControl = pipeline._controls?.some(
     (c) => c.stageCommand === "control/cron",
   );
   if (pipeline.schedule && !hasCronControl) {
-    const cronId = "_cron";
+    const cronId = uniqueId("_cron");
     const cronArgs: Record<string, string | number | boolean> = {
       expression: pipeline.schedule.cron,
     };
@@ -131,20 +145,6 @@ export function pipelineToGraph(
         if (ctrl.stageCommand === "control/loop") stepsWithLoopControl.add(ce.targetNode);
       }
     }
-  }
-
-  // Collect all existing node IDs for deduplication of generated control nodes.
-  const existingIds = new Set(nodes.map((n) => n.id));
-
-  /** Generate a unique ID with the given prefix, avoiding collisions. */
-  function uniqueId(prefix: string): string {
-    let id = prefix;
-    let i = 0;
-    while (existingIds.has(id)) {
-      id = `${prefix}_${++i}`;
-    }
-    existingIds.add(id);
-    return id;
   }
 
   // Reconstruct delay control nodes from steps with delay_seconds
