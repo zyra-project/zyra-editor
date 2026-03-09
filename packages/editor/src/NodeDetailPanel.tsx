@@ -5,6 +5,7 @@ import type { ZyraNodeData } from "./ZyraNode";
 import { isSensitive } from "./ZyraNode";
 import type { NodeRunState } from "@zyra/core";
 import { CronScheduleEditor } from "./CronScheduleEditor";
+import { ChoiceOptionsEditor } from "./ChoiceOptionsEditor";
 
 /** Scroll an element to its bottom. */
 function scrollToBottom(el: HTMLElement | null) {
@@ -241,6 +242,37 @@ function SettingsTab({
               />
             </div>
           );
+        }
+
+        // Choice node: replace both options + value args with a combined visual editor
+        if (stageDef.command === "choice" && arg.key === "options" && !linkedFrom) {
+          return (
+            <div key={arg.key} style={{ marginBottom: 14 }}>
+              <label style={{
+                display: "block",
+                fontSize: 12,
+                fontWeight: 600,
+                marginBottom: 4,
+                color: "var(--text-primary)",
+              }}>
+                Options
+                <span style={{ color: "var(--accent-red)" }}> *</span>
+              </label>
+              <div style={{ fontSize: 11, color: "var(--text-secondary)", marginBottom: 6, lineHeight: 1.4 }}>
+                Click a radio to select, click the label to edit, or add new options below.
+              </div>
+              <ChoiceOptionsEditor
+                value={String(argValues.options ?? "")}
+                onChange={(v) => onArgChange(nodeId, "options", v)}
+                selected={String(argValues.value ?? "")}
+                onSelectChange={(v) => onArgChange(nodeId, "value", v)}
+              />
+            </div>
+          );
+        }
+        // Skip the "value" arg for choice nodes — it's handled inside ChoiceOptionsEditor above
+        if (stageDef.command === "choice" && arg.key === "value" && !linkedFrom) {
+          return null;
         }
 
         return (

@@ -337,6 +337,34 @@ export function ZyraNode({ id, data, selected }: NodeProps) {
           );
         }
 
+        // Choice node: show selected value and option count
+        if (stageDef.command === "choice") {
+          const opts = typeof argValues.options === "string" ? argValues.options.split(",").map((s) => s.trim()).filter(Boolean) : [];
+          const sel = argValues.value;
+          const hasSel = sel !== undefined && sel !== "";
+          if (opts.length === 0 && !hasSel) return null;
+          const display = hasSel ? String(sel) : `${opts.length} option${opts.length !== 1 ? "s" : ""}`;
+          return (
+            <div
+              style={{
+                padding: "4px 12px",
+                fontSize: 11,
+                fontFamily: "var(--font-mono)",
+                color: hasSel ? "var(--accent-blue)" : "var(--text-muted)",
+                background: "var(--bg-tertiary)",
+                overflow: "hidden",
+                textOverflow: "ellipsis",
+                whiteSpace: "nowrap",
+                borderBottom: "1px solid var(--border-default)",
+                flexShrink: 0,
+              }}
+              title={hasSel ? `Selected: ${sel} (${opts.length} options)` : `${opts.length} options`}
+            >
+              {display}
+            </div>
+          );
+        }
+
         // Cron schedule node: show human-readable description
         if (stageDef.command === "cron") {
           const expr = argValues.expression;
