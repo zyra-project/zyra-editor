@@ -264,19 +264,10 @@ class TestResolveArgvEnvVars:
 class TestApplyScope:
     def test_appends_plan_scope_when_configured(self, monkeypatch):
         monkeypatch.setattr("main.PLAN_SCOPE", " [scope]")
-        from main import _apply_scope as fresh_apply_scope
-        # Re-import to pick up the monkeypatched value
-        import importlib, main as main_mod
-        main_mod.PLAN_SCOPE = " [scope]"
-        result = main_mod._apply_scope("fetch data")
-        assert result == "fetch data [scope]"
-
-    def test_returns_intent_unchanged_when_scope_empty(self):
         import main as main_mod
-        original = main_mod.PLAN_SCOPE
-        main_mod.PLAN_SCOPE = ""
-        try:
-            result = main_mod._apply_scope("fetch data")
-            assert result == "fetch data"
-        finally:
-            main_mod.PLAN_SCOPE = original
+        assert main_mod._apply_scope("fetch data") == "fetch data [scope]"
+
+    def test_returns_intent_unchanged_when_scope_empty(self, monkeypatch):
+        monkeypatch.setattr("main.PLAN_SCOPE", "")
+        import main as main_mod
+        assert main_mod._apply_scope("fetch data") == "fetch data"
