@@ -15,7 +15,7 @@ import {
   BackgroundVariant,
 } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
-import type { StageDef, Graph, GraphNode, GraphEdge, Pipeline, PipelineGroup, NodeRunStatus } from "@zyra/core";
+import type { StageDef, ArgDef, PortDef, Graph, GraphNode, GraphEdge, Pipeline, PipelineStep, PipelineGroup, NodeRunStatus } from "@zyra/core";
 import { portsCompatible, getEffectivePorts, graphToPipeline, pipelineToGraph, resolvePeriodISO } from "@zyra/core";
 import { ManifestProvider, useManifest } from "./ManifestLoader";
 import { NodePalette } from "./NodePalette";
@@ -103,8 +103,8 @@ function resolveControlDisplayValue(
 
   // Fall back to arg default/placeholder
   const argKey = portKey !== "value" ? portKey : "value";
-  const valueDef = srcData.stageDef.args.find((a) => a.key === argKey)
-    ?? srcData.stageDef.args.find((a) => a.key === "value");
+  const valueDef = srcData.stageDef.args.find((a: ArgDef) => a.key === argKey)
+    ?? srcData.stageDef.args.find((a: ArgDef) => a.key === "value");
   const fallback = valueDef?.default ?? valueDef?.placeholder;
   if (fallback != null && fallback !== "") return String(fallback);
 
@@ -415,7 +415,7 @@ function Editor() {
       const groupNodes = nodes.filter((n) => n.type === "group");
       if (groupNodes.length > 0) {
         // Derive children from current parentId — includes steps and control nodes
-        const stepNames = new Set(p.steps.map((s) => s.name));
+        const stepNames = new Set(p.steps.map((s: PipelineStep) => s.name));
         if (p._controls) for (const c of p._controls) stepNames.add(c.id);
         const groups = groupNodes.map((g) => {
           const d = g.data as GroupBoxData;
@@ -450,15 +450,15 @@ function Editor() {
     (newPipeline: Pipeline) => {
       const graph = pipelineToGraph(newPipeline, manifest.stages);
       const stageMap = new Map(
-        manifest.stages.map((s) => [`${s.stage}/${s.command}`, s]),
+        manifest.stages.map((s: StageDef) => [`${s.stage}/${s.command}`, s]),
       );
 
-      const hasLayout = graph.nodes.some((gn) => gn.position);
+      const hasLayout = graph.nodes.some((gn: GraphNode) => gn.position);
       const autoPositions = hasLayout
         ? new Map<string, { x: number; y: number }>()
         : computeAutoLayout(graph);
 
-      let newNodes: Node[] = graph.nodes.map((gn) => {
+      let newNodes: Node[] = graph.nodes.map((gn: GraphNode) => {
         const stageDef = stageMap.get(gn.stageCommand);
         const existing = nodes.find((n) => n.id === gn.id);
         const pos =
@@ -484,7 +484,7 @@ function Editor() {
         return node;
       });
 
-      const newEdges: Edge[] = graph.edges.map((ge, i) => ({
+      const newEdges: Edge[] = graph.edges.map((ge: GraphEdge, i: number) => ({
         id: `e-yaml-${i}`,
         source: ge.sourceNode,
         sourceHandle: ge.sourcePort,
@@ -530,7 +530,7 @@ function Editor() {
         }
 
         // Update group ID counter
-        const maxGroupNum = newPipeline._groups.reduce((max, g) => {
+        const maxGroupNum = newPipeline._groups.reduce((max: number, g: PipelineGroup) => {
           const m = g.id.match(/^group-(\d+)$/);
           return m ? Math.max(max, Number(m[1])) : max;
         }, groupIdCounter);
@@ -540,7 +540,7 @@ function Editor() {
         newNodes = ensureParentOrder([...groupNodes, ...newNodes]);
       }
 
-      const maxNum = graph.nodes.reduce((max, n) => {
+      const maxNum = graph.nodes.reduce((max: number, n: GraphNode) => {
         const m = n.id.match(/^node-(\d+)$/);
         return m ? Math.max(max, Number(m[1])) : max;
       }, nodeIdCounter);
@@ -627,8 +627,8 @@ function Editor() {
       // Use effective ports so arg-ports and implicit outputs participate
       const srcPorts = getEffectivePorts(srcDef);
       const tgtPorts = getEffectivePorts(tgtDef);
-      const srcPort = srcPorts.outputs.find((p) => p.id === connection.sourceHandle);
-      const tgtPort = tgtPorts.inputs.find((p) => p.id === connection.targetHandle);
+      const srcPort = srcPorts.outputs.find((p: PortDef) => p.id === connection.sourceHandle);
+      const tgtPort = tgtPorts.inputs.find((p: PortDef) => p.id === connection.targetHandle);
       if (!srcPort || !tgtPort) return false;
 
       // Only control nodes and argout:* ports can wire into arg-ports.
@@ -935,7 +935,7 @@ function Editor() {
         } else if (e.sourceHandle?.startsWith("argout:")) {
           // Arg-to-arg wire: show source arg name in label and arg value as peerValue
           const argKey = e.sourceHandle.slice(7);
-          const argDef = srcData?.stageDef.args.find((a: { key: string }) => a.key === argKey);
+          const argDef = srcData?.stageDef.args.find((a: ArgDef) => a.key === argKey);
           const argLabel = argDef?.label ?? argKey;
           peerLabel = `${peerLabel} / ${argLabel}`;
           const val = srcData?.argValues[argKey];

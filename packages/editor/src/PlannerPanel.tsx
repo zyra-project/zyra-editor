@@ -1,6 +1,6 @@
 import { useState, useCallback, useRef, useEffect } from "react";
 import type { Node, Edge } from "@xyflow/react";
-import type { Manifest } from "@zyra/core";
+import type { Manifest, StageDef, ArgDef } from "@zyra/core";
 import {
   planToGraph,
   type PlanAgent,
@@ -312,7 +312,7 @@ export function PlannerPanel({
       agent = { ...suggestion.agent_template };
     } else {
       const matchingStage = manifest.stages.find(
-        (s) => s.stage === suggestion.stage,
+        (s: StageDef) => s.stage === suggestion.stage,
       );
       const stage = matchingStage?.stage ?? suggestion.stage;
       const command = matchingStage?.command ?? suggestion.stage;
@@ -1537,12 +1537,12 @@ function AgentCard({
 
   // Look up the StageDef for this agent to get all possible args
   const stageDef = manifest.stages.find(
-    (s) => s.stage === agent.stage && s.command === agent.command,
+    (s: StageDef) => s.stage === agent.stage && s.command === agent.command,
   );
   // Filter to args not already set on this agent
   const usedKeys = new Set(Object.keys(agent.args));
   const availableArgs = (stageDef?.args ?? []).filter(
-    (a) => !usedKeys.has(a.key) && !usedKeys.has(a.flag ?? ""),
+    (a: ArgDef) => !usedKeys.has(a.key) && !usedKeys.has(a.flag ?? ""),
   );
 
   const handleArgChange = (key: string, newVal: string) => {

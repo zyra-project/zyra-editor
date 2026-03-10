@@ -2,6 +2,7 @@ import { useCallback, useRef, useState } from "react";
 import type {
   Graph,
   StageDef,
+  PipelineStep,
   NodeRunState,
   RunStepRequest,
 } from "@zyra/core";
@@ -109,7 +110,7 @@ export function useExecution(): ExecutionControls {
   const runSingleNode = useCallback(
     async (nodeId: string, graph: Graph, stages: StageDef[]): Promise<string | null> => {
       const { requests, pipeline } = graphToRunRequests(graph, stages);
-      const stepIndex = pipeline.steps.findIndex((s) => s.name === nodeId);
+      const stepIndex = pipeline.steps.findIndex((s: PipelineStep) => s.name === nodeId);
       if (stepIndex === -1) return `Node "${nodeId}" not found in pipeline`;
 
       const step = pipeline.steps[stepIndex];
@@ -540,7 +541,7 @@ export function useExecution(): ExecutionControls {
         }
 
         // Launch all steps — they each wait for their deps internally
-        const promises = pipeline.steps.map((step, i) =>
+        const promises = pipeline.steps.map((step: PipelineStep, i: number) =>
           runStep(step.name, requests[i], step.delay_seconds),
         );
         await Promise.all(promises);

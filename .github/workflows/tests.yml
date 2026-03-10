@@ -39,11 +39,10 @@ jobs:
       - name: Run @zyra/editor tests
         run: pnpm --filter @zyra/editor test
 
-  # ── Type checking (informational — pre-existing errors tracked separately) ───
+  # ── Type checking ───────────────────────────────────────────────────────────
   typecheck:
     name: Type Check
     runs-on: ubuntu-latest
-    continue-on-error: true   # pre-existing implicit-any debt in @zyra/editor
 
     steps:
       - uses: actions/checkout@v4

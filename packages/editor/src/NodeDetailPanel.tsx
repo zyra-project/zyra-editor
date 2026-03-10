@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useMemo } from "react";
-import type { ArgDef, NodeRunStatus } from "@zyra/core";
+import type { ArgDef, PortDef, NodeRunStatus } from "@zyra/core";
 import { STATUS_COLORS, getEffectivePorts } from "@zyra/core";
 import type { ZyraNodeData } from "./ZyraNode";
 import { isSensitive } from "./ZyraNode";
@@ -190,7 +190,7 @@ function SettingsTab({
   connectedInputs: Props["connectedInputs"];
   onArgChange: Props["onArgChange"];
 }) {
-  const definedKeys = new Set(stageDef.args.map((a) => a.key));
+  const definedKeys = new Set(stageDef.args.map((a: ArgDef) => a.key));
   const extraKeys = Object.keys(argValues).filter((k) => !definedKeys.has(k));
 
   // Build a map of arg key -> { label, value, sensitive } for wired arg-ports
@@ -209,7 +209,7 @@ function SettingsTab({
           No configurable arguments for this node.
         </div>
       )}
-      {stageDef.args.map((arg) => {
+      {stageDef.args.map((arg: ArgDef) => {
         const linkedFrom = linkedArgs.get(arg.key);
         // Mask the value field for Secret nodes
         const isSecretVariable = stageDef.command === "secret"
@@ -331,16 +331,16 @@ function InputTab({
 }) {
   const { inputs: allInputs } = useMemo(() => getEffectivePorts(stageDef), [stageDef]);
   // Show explicit ports always, arg-ports only if they have connections
-  const visiblePorts = allInputs.filter((port) => {
+  const visiblePorts = allInputs.filter((port: PortDef) => {
     if (!port.implicit) return true;
     return connectedInputs.some((c) => c.portId === port.id);
   });
 
   return (
     <>
-      {visiblePorts.map((port) => {
+      {visiblePorts.map((port: PortDef) => {
         const connections = connectedInputs.filter((c) => c.portId === port.id);
-        const argDef = port.argKey ? stageDef.args?.find((a) => a.key === port.argKey) : undefined;
+        const argDef = port.argKey ? stageDef.args?.find((a: ArgDef) => a.key === port.argKey) : undefined;
         const portSensitive = argDef ? isSensitive(argDef) : false;
         return (
           <div key={port.id} style={{ marginBottom: 16 }}>
@@ -445,7 +445,7 @@ function OutputTab({
 
   const { outputs: allOutputs } = useMemo(() => getEffectivePorts(stageDef), [stageDef]);
   // Show explicit ports always, implicit ports only if connected
-  const visibleOutputPorts = allOutputs.filter((port) => {
+  const visibleOutputPorts = allOutputs.filter((port: PortDef) => {
     if (!port.implicit) return true;
     return connectedOutputs.some((c) => c.portId === port.id);
   });
@@ -453,7 +453,7 @@ function OutputTab({
   return (
     <>
       {/* Port info */}
-      {visibleOutputPorts.map((port) => {
+      {visibleOutputPorts.map((port: PortDef) => {
         const connections = connectedOutputs.filter((c) => c.portId === port.id);
         return (
           <div key={port.id} style={{ marginBottom: 12 }}>
@@ -736,7 +736,7 @@ function ArgField({
             onChange={(e) => onChange(e.target.value)}
           >
             <option value="" disabled>Select...</option>
-            {arg.options.map((opt) => (
+            {arg.options.map((opt: string) => (
               <option key={opt} value={opt}>{opt}</option>
             ))}
           </select>

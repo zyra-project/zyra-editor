@@ -66,7 +66,7 @@ export function ZyraNode({ id, data, selected }: NodeProps) {
 
   // Visible inputs: explicit ports always shown, arg-ports shown if connected/filled/expanded
   const visibleInputs = useMemo(() => {
-    return allInputs.filter((port) => {
+    return allInputs.filter((port: PortDef) => {
       if (!port.implicit) return true; // explicit ports always visible
       if (connIn.has(port.id)) return true; // connected
       if (port.argKey && argValues[port.argKey] !== undefined && argValues[port.argKey] !== "") return true; // filled
@@ -76,7 +76,7 @@ export function ZyraNode({ id, data, selected }: NodeProps) {
 
   // Visible outputs: explicit ports always shown, implicit shown if connected/filled/expanded
   const visibleOutputs = useMemo(() => {
-    return allOutputs.filter((port) => {
+    return allOutputs.filter((port: PortDef) => {
       if (!port.implicit) return true;
       if (connOut.has(port.id)) return true;
       // Show arg-output ports when the corresponding arg has a value
@@ -502,7 +502,7 @@ export function ZyraNode({ id, data, selected }: NodeProps) {
         }
 
         const val = argValues.value;
-        const valueDef = stageDef.args.find((a) => a.key === "value");
+        const valueDef = stageDef.args.find((a: ArgDef) => a.key === "value");
         const hasValue = val !== undefined && val !== "";
         const display = hasValue
           ? (typeof val === "boolean" ? (val ? "true" : "false") : String(val))
@@ -545,7 +545,7 @@ export function ZyraNode({ id, data, selected }: NodeProps) {
           padding: "8px 12px 0",
           minHeight: 0,
         }}>
-          {visibleInputs.map((port) => (
+          {visibleInputs.map((port: PortDef) => (
             <InputPortRow
               key={port.id}
               port={port}
@@ -581,7 +581,7 @@ export function ZyraNode({ id, data, selected }: NodeProps) {
           padding: "4px 12px 8px",
           borderTop: visibleOutputs.length > 0 ? "1px solid var(--border-default)" : undefined,
         }}>
-          {visibleOutputs.map((port) => (
+          {visibleOutputs.map((port: PortDef) => (
             <OutputPortRow
               key={port.id}
               port={port}

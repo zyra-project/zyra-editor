@@ -1,18 +1,18 @@
 import { createContext, useContext, useEffect, useState, type ReactNode } from "react";
-import type { Manifest } from "@zyra/core";
+import type { Manifest, StageDef } from "@zyra/core";
 import { MOCK_MANIFEST } from "./mock-manifest";
 
 /** Editor-only stages (controls + planned) that should always appear in the palette. */
 const BUILTIN_STAGES = MOCK_MANIFEST.stages.filter(
-  (s) => s.stage === "control" || s.stage === "verify",
+  (s: StageDef) => s.stage === "control" || s.stage === "verify",
 );
 
 /** Merge editor-only stages into a server-provided manifest (avoids duplicates). */
 function withBuiltinStages(manifest: Manifest): Manifest {
   const existing = new Set(
-    manifest.stages.map((s) => `${s.stage}/${s.command}`),
+    manifest.stages.map((s: StageDef) => `${s.stage}/${s.command}`),
   );
-  const toAdd = BUILTIN_STAGES.filter((s) => !existing.has(`${s.stage}/${s.command}`));
+  const toAdd = BUILTIN_STAGES.filter((s: StageDef) => !existing.has(`${s.stage}/${s.command}`));
   if (toAdd.length === 0) return manifest;
   return { ...manifest, stages: [...manifest.stages, ...toAdd] };
 }

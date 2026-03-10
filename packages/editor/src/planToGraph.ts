@@ -1,5 +1,5 @@
 import type { Node, Edge } from "@xyflow/react";
-import type { Manifest, StageDef } from "@zyra/core";
+import type { Manifest, StageDef, ArgDef } from "@zyra/core";
 import type { ZyraNodeData } from "./ZyraNode";
 
 /** Shape of a single agent returned by `zyra plan`. */
@@ -60,7 +60,7 @@ export function planToGraph(
   manifest: Manifest,
 ): { nodes: Node[]; edges: Edge[] } {
   const stageMap = new Map<string, StageDef>(
-    manifest.stages.map((s) => [`${s.stage}/${s.command}`, s]),
+    manifest.stages.map((s: StageDef) => [`${s.stage}/${s.command}`, s]),
   );
 
   // Namespace agent IDs to avoid collisions when applying multiple plans
@@ -118,14 +118,14 @@ export function planToGraph(
     const argValues: Record<string, string> = {};
     for (const [k, v] of Object.entries(a.args)) {
       // Try matching by key directly
-      const byKey = stageDef.args.find((ad) => ad.key === k);
+      const byKey = stageDef.args.find((ad: ArgDef) => ad.key === k);
       if (byKey) {
         argValues[byKey.key] = v;
         continue;
       }
       // Try matching by flag (--flag or -f)
       const byFlag = stageDef.args.find(
-        (ad) => ad.flag === k || ad.flag === `--${k}` || ad.flag === `-${k}`,
+        (ad: ArgDef) => ad.flag === k || ad.flag === `--${k}` || ad.flag === `-${k}`,
       );
       if (byFlag) {
         argValues[byFlag.key] = v;
@@ -134,7 +134,7 @@ export function planToGraph(
       // Case-insensitive key/label match (clarification answers may differ in casing)
       const kLower = k.toLowerCase();
       const byLower = stageDef.args.find(
-        (ad) =>
+        (ad: ArgDef) =>
           ad.key.toLowerCase() === kLower ||
           (ad.flag && ad.flag.replace(/^-+/, "").toLowerCase() === kLower),
       );
