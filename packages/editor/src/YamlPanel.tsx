@@ -2,6 +2,15 @@ import { useState, useCallback, useEffect, useRef } from "react";
 import yaml from "js-yaml";
 import type { Pipeline, PipelineStep, PipelineGroup, PipelineControl, PipelineSchedule, StepCondition } from "@zyra/core";
 
+declare global {
+  interface Window {
+    showSaveFilePicker?: (options?: {
+      suggestedName?: string;
+      types?: { description: string; accept: Record<string, string[]> }[];
+    }) => Promise<FileSystemFileHandle>;
+  }
+}
+
 /** Zyra native YAML format: stages array with stage/command fields. */
 interface NativeStage {
   stage: string;
@@ -329,7 +338,27 @@ export function YamlPanel({ pipeline, onPipelineChange, onClose }: YamlPanelProp
     setParseError(null);
   }, [pipeline]);
 
-  const handleSave = useCallback(() => {
+  const handleSave = useCallback(async () => {
+    if (typeof window.showSaveFilePicker === "function") {
+      try {
+        const handle = await window.showSaveFilePicker({
+          suggestedName: "pipeline.yaml",
+          types: [
+            {
+              description: "YAML files",
+              accept: { "text/yaml": [".yaml", ".yml"] },
+            },
+          ],
+        });
+        const writable = await handle.createWritable();
+        await writable.write(yamlText);
+        await writable.close();
+        return;
+      } catch (e: unknown) {
+        if (e instanceof DOMException && e.name === "AbortError") return;
+      }
+    }
+    // Fallback for browsers without File System Access API
     const blob = new Blob([yamlText], { type: "text/yaml" });
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
