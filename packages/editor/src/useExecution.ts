@@ -1,12 +1,13 @@
 import { useCallback, useRef, useState } from "react";
 import type {
   Graph,
+  GraphEdge,
   StageDef,
   PipelineStep,
   NodeRunState,
   RunStepRequest,
 } from "@zyra/core";
-import { emptyRunState, graphToRunRequests, graphToPipeline, stepToCliPreview } from "@zyra/core";
+import { emptyRunState, extractByPath, graphToRunRequests, graphToPipeline, stepToCliPreview } from "@zyra/core";
 import { postRun, getJobStatus, connectJobWs, cancelJob } from "./api";
 
 export type RunStateMap = Map<string, NodeRunState>;
@@ -109,6 +110,31 @@ export function useExecution(): ExecutionControls {
 
   const runSingleNode = useCallback(
     async (nodeId: string, graph: Graph, stages: StageDef[]): Promise<string | null> => {
+      // Handle Extract nodes client-side (they aren't pipeline steps)
+      const gNode = graph.nodes.find((n) => n.id === nodeId);
+      if (gNode?.stageCommand === "control/extract") {
+        const inputEdge = graph.edges.find(
+          (e: GraphEdge) => e.targetNode === nodeId && e.targetPort === "input",
+        );
+        if (!inputEdge) return "No input connected to Extract node";
+        const upState = runState.get(inputEdge.sourceNode);
+        if (!upState || upState.status !== "succeeded") {
+          return "Upstream node has not succeeded yet";
+        }
+        const expression = String(gNode.argValues.expression ?? "");
+        const fallback = gNode.argValues.fallback !== undefined
+          ? String(gNode.argValues.fallback) : undefined;
+        const result = extractByPath(upState.stdout, expression, fallback);
+        updateNode(nodeId, {
+          ...emptyRunState(),
+          status: "succeeded",
+          stdout: result,
+          stderr: "",
+          exitCode: 0,
+        });
+        return null;
+      }
+
       const { requests, pipeline } = graphToRunRequests(graph, stages);
       const stepIndex = pipeline.steps.findIndex((s: PipelineStep) => s.name === nodeId);
       if (stepIndex === -1) return `Node "${nodeId}" not found in pipeline`;
@@ -401,10 +427,12 @@ export function useExecution(): ExecutionControls {
             }
           }
 
-          updateNode(nodeId, { status: "running", submittedRequest: req });
+          // Inject any values from upstream Extract nodes into this step's args
+          const finalReq = injectExtractValues(nodeId, req, graph);
+          updateNode(nodeId, { status: "running", submittedRequest: finalReq });
 
           try {
-            const res = await postRun(req);
+            const res = await postRun(finalReq);
 
             if (res.status === "error") {
               updateNode(nodeId, {
@@ -540,11 +568,109 @@ export function useExecution(): ExecutionControls {
           }
         }
 
+        // ── Extract nodes: participate as virtual steps ──────────
+        // Identify extract nodes and their dependencies from the graph.
+        const extractNodes = graph.nodes.filter(
+          (n) => n.stageCommand === "control/extract",
+        );
+        for (const en of extractNodes) {
+          // Find the upstream node connected to the extract node's "input" port
+          const inputEdge = graph.edges.find(
+            (e: GraphEdge) => e.targetNode === en.id && e.targetPort === "input",
+          );
+          deps.set(en.id, inputEdge ? [inputEdge.sourceNode] : []);
+          init.set(en.id, { ...emptyRunState(), status: "queued" });
+        }
+        // Re-set state to include extract nodes in the initial map
+        if (extractNodes.length > 0) setRunState(new Map(init));
+
+        /** Run a client-side extract: read upstream stdout, apply expression. */
+        async function runExtractNode(
+          nodeId: string,
+          graphRef: Graph,
+        ): Promise<void> {
+          const depsOk = await waitForDeps(nodeId);
+          if (!depsOk || cancelledRef.current || runGenRef.current !== gen) {
+            updateNode(nodeId, { status: "canceled" });
+            resolved.set(nodeId, "canceled");
+            return;
+          }
+
+          const gNode = graphRef.nodes.find((n) => n.id === nodeId);
+          if (!gNode) {
+            updateNode(nodeId, { status: "failed", stderr: "Extract node not found" });
+            resolved.set(nodeId, "failed");
+            return;
+          }
+
+          const inputEdge = graphRef.edges.find(
+            (e: GraphEdge) => e.targetNode === nodeId && e.targetPort === "input",
+          );
+          if (!inputEdge) {
+            updateNode(nodeId, {
+              status: "failed",
+              stderr: "No input connected to Extract node",
+            });
+            resolved.set(nodeId, "failed");
+            return;
+          }
+
+          // Read upstream stdout from React state
+          let upstreamStdout = "";
+          setRunState((prev) => {
+            const us = prev.get(inputEdge.sourceNode);
+            if (us) upstreamStdout = us.stdout;
+            return prev; // no mutation
+          });
+
+          const expression = String(gNode.argValues.expression ?? "");
+          const fallback = gNode.argValues.fallback !== undefined
+            ? String(gNode.argValues.fallback) : undefined;
+          const result = extractByPath(upstreamStdout, expression, fallback);
+
+          updateNode(nodeId, {
+            status: "succeeded",
+            stdout: result,
+            stderr: "",
+            exitCode: 0,
+          });
+          resolved.set(nodeId, "succeeded");
+        }
+
+        /** Inject extracted values into a step's request args. */
+        function injectExtractValues(
+          nodeId: string,
+          req: RunStepRequest,
+          graphRef: Graph,
+        ): RunStepRequest {
+          const patches: Record<string, unknown> = {};
+          for (const edge of graphRef.edges) {
+            if (edge.targetNode !== nodeId) continue;
+            if (!edge.targetPort.startsWith("arg:")) continue;
+            const srcNode = graphRef.nodes.find((n) => n.id === edge.sourceNode);
+            if (srcNode?.stageCommand !== "control/extract") continue;
+            // Read the extract node's stdout (the extracted value)
+            let extractedValue = "";
+            setRunState((prev) => {
+              const es = prev.get(edge.sourceNode);
+              if (es) extractedValue = es.stdout;
+              return prev;
+            });
+            const argKey = edge.targetPort.slice(4); // strip "arg:"
+            patches[argKey] = extractedValue;
+          }
+          if (Object.keys(patches).length === 0) return req;
+          return { ...req, args: { ...req.args, ...patches } };
+        }
+
         // Launch all steps — they each wait for their deps internally
         const promises = pipeline.steps.map((step: PipelineStep, i: number) =>
           runStep(step.name, requests[i], step.delay_seconds),
         );
-        await Promise.all(promises);
+        const extractPromises = extractNodes.map((en) =>
+          runExtractNode(en.id, graph),
+        );
+        await Promise.all([...promises, ...extractPromises]);
       } finally {
         if (runGenRef.current === gen) setRunning(false);
       }

@@ -340,7 +340,8 @@ export function graphToPipeline(
     // they are handled separately above.
     const srcCmd = nodeMap.get(e.sourceNode)?.stageCommand;
     if (srcCmd === "control/delay" || srcCmd === "control/cron"
-      || srcCmd === "control/conditional" || srcCmd === "control/loop") continue;
+      || srcCmd === "control/conditional" || srcCmd === "control/loop"
+      || srcCmd === "control/extract") continue;
     if (!e.targetPort.startsWith("arg:")) {
       diagnostics?.push({
         level: "warn",

@@ -72,6 +72,10 @@ function resolveControlDisplayValue(
     if (portKey === "done") return "done";
     return mode ? `${mode}` : null;
   }
+  if (cmd === "extract") {
+    const expr = args.expression;
+    return expr != null && expr !== "" ? `$.${expr}` : null;
+  }
 
   // Data-value control nodes: resolve from matching arg key
   let val = portKey !== "value" && args[portKey] !== undefined

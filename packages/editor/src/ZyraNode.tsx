@@ -462,6 +462,33 @@ export function ZyraNode({ id, data, selected }: NodeProps) {
           );
         }
 
+        // Extract node: show dot-path expression
+        if (stageDef.command === "extract") {
+          const expr = argValues.expression;
+          const hasExpr = typeof expr === "string" && expr.trim().length > 0;
+          if (!hasExpr) return null;
+          const display = `$.${expr}`;
+          return (
+            <div
+              style={{
+                padding: "4px 12px",
+                fontSize: 11,
+                fontFamily: "var(--font-mono)",
+                color: "var(--accent-blue)",
+                background: "var(--bg-tertiary)",
+                overflow: "hidden",
+                textOverflow: "ellipsis",
+                whiteSpace: "nowrap",
+                borderBottom: "1px solid var(--border-default)",
+                flexShrink: 0,
+              }}
+              title={display}
+            >
+              {display}
+            </div>
+          );
+        }
+
         // Loop node: show mode and key details
         if (stageDef.command === "loop") {
           const mode = argValues.mode;

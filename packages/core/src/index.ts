@@ -35,3 +35,5 @@ export type { RunPlan } from "./pipeline.js";
 export { graphToRunRequests, stepToCliPreview } from "./pipeline.js";
 
 export { pipelineToGraph } from "./deserializer.js";
+
+export { extractByPath } from "./extract.js";

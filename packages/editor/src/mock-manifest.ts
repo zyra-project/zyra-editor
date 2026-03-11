@@ -390,6 +390,39 @@ export const MOCK_MANIFEST: Manifest = {
       ],
     },
     {
+      stage: "control",
+      command: "extract",
+      label: "Extract",
+      description: "Extract a field from upstream JSON output using a dot-path expression",
+      cli: "",
+      status: "implemented",
+      color: "#888888",
+      inputs: [
+        { id: "input", label: "Input (stdout)", types: ["string", "any"] },
+      ],
+      outputs: [
+        { id: "value", label: "Value", types: ["string", "any"] },
+      ],
+      args: [
+        {
+          key: "expression",
+          label: "Expression",
+          type: "string",
+          required: true,
+          placeholder: "data.items[0].url",
+          description: "Dot-notation path to extract from JSON (e.g. results[0].name)",
+        },
+        {
+          key: "fallback",
+          label: "Fallback",
+          type: "string",
+          required: false,
+          placeholder: "",
+          description: "Value to use if the expression does not match or input is not valid JSON",
+        },
+      ],
+    },
+    {
       stage: "search",
       command: "catalog",
       label: "Catalog Search",
