@@ -163,6 +163,23 @@ export function normalizePipeline(raw: unknown): Pipeline | null {
           }
         }
         const ctrl: PipelineControl = { id: co.id, stageCommand: co.stageCommand, argValues, edges };
+        // Parse inputEdges (incoming edges, e.g. step → Extract node)
+        if (Array.isArray(co.inputEdges)) {
+          const inputEdges: PipelineControl["inputEdges"] = [];
+          for (const ie of co.inputEdges as unknown[]) {
+            if (!ie || typeof ie !== "object") continue;
+            const io = ie as Record<string, unknown>;
+            if (typeof io.sourceNode === "string" && typeof io.sourcePort === "string") {
+              const inputEdge: NonNullable<PipelineControl["inputEdges"]>[number] = {
+                sourceNode: io.sourceNode,
+                sourcePort: io.sourcePort,
+              };
+              if (typeof io.targetPort === "string" && io.targetPort !== "") inputEdge.targetPort = io.targetPort;
+              inputEdges.push(inputEdge);
+            }
+          }
+          if (inputEdges.length > 0) ctrl.inputEdges = inputEdges;
+        }
         if (typeof co.label === "string" && co.label) ctrl.label = co.label;
         if (co._layout && typeof co._layout === "object" && !Array.isArray(co._layout)) {
           const lo = co._layout as Record<string, unknown>;

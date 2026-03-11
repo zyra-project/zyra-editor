@@ -200,7 +200,7 @@ export function ZyraNode({ id, data, selected }: NodeProps) {
           </span>
         )}
         <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-          {hovered && onRunNode && runStatus !== "running" && stageDef.stage !== "control" && (
+          {hovered && onRunNode && runStatus !== "running" && (stageDef.stage !== "control" || stageDef.command === "extract") && (
             <button
               title="Run this step"
               aria-label="Run this step"

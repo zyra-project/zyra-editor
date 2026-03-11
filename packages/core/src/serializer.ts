@@ -118,6 +118,8 @@ export interface PipelineControl {
   argValues: Record<string, string | number | boolean>;
   /** Edges from this control node to downstream nodes. */
   edges: { sourcePort?: string; targetNode: string; targetPort: string }[];
+  /** Edges from upstream nodes into this control node (e.g. Extract's input). */
+  inputEdges?: { sourceNode: string; sourcePort: string; targetPort?: string }[];
   _layout?: { x: number; y: number; w?: number; h?: number };
 }
 
@@ -617,12 +619,25 @@ export function graphToPipeline(
       delete ctrlArgs.value;
     }
 
+    // Collect incoming edges for control nodes that receive data (e.g. Extract)
+    const ctrlInputEdges = graph.edges
+      .filter((e) => e.targetNode === n.id && !controlNodeIds.has(e.sourceNode))
+      .map((e) => {
+        const ie: { sourceNode: string; sourcePort: string; targetPort?: string } = {
+          sourceNode: e.sourceNode,
+          sourcePort: e.sourcePort,
+        };
+        if (e.targetPort) ie.targetPort = e.targetPort;
+        return ie;
+      });
+
     const ctrl: PipelineControl = {
       id: n.id,
       stageCommand: n.stageCommand,
       argValues: ctrlArgs,
       edges: ctrlEdges,
     };
+    if (ctrlInputEdges.length > 0) ctrl.inputEdges = ctrlInputEdges;
     if (n.label) ctrl.label = n.label;
     if (n.position || n.size) {
       const layout: PipelineControl["_layout"] = {

@@ -369,6 +369,21 @@ export function pipelineToGraph(
           targetPort: ce.targetPort,
         });
       }
+
+      // Reconstruct incoming edges (e.g. step → Extract node's input port)
+      if (ctrl.inputEdges) {
+        const ctrlStage = findStage(ctrl.stageCommand) ?? byKey.get(ctrl.stageCommand);
+        const defaultTargetPort = ctrlStage?.inputs?.[0]?.id ?? "input";
+        for (const ie of ctrl.inputEdges) {
+          if (!allNodeIds.has(ie.sourceNode)) continue;
+          edges.push({
+            sourceNode: ie.sourceNode,
+            sourcePort: ie.sourcePort,
+            targetNode: ctrl.id,
+            targetPort: ie.targetPort || defaultTargetPort,
+          });
+        }
+      }
     }
   }
 
