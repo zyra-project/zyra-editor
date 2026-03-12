@@ -62,7 +62,15 @@ export function useExecution(
   getGraphSnapshot?: () => GraphSnapshot | undefined,
   useCache = false,
 ): ExecutionControls {
-  const [runState, setRunState] = useState<RunStateMap>(new Map());
+  const [runState, _setRunState] = useState<RunStateMap>(new Map());
+  const runStateRef = useRef<RunStateMap>(runState);
+  // Wrapper that eagerly updates the ref so persistRun always sees the latest state.
+  const setRunState: typeof _setRunState = useCallback((action) => {
+    const prev = runStateRef.current;
+    const next = typeof action === "function" ? action(prev) : action;
+    runStateRef.current = next;
+    _setRunState(next);
+  }, []);
   const [running, setRunning] = useState(false);
   const cancelledRef = useRef(false);
   const runGenRef = useRef(0); // generation counter to detect stale runs
@@ -101,10 +109,7 @@ export function useExecution(
   /** Persist a completed run to the server (fire-and-forget). */
   const persistRun = useCallback(
     (mode: "pipeline" | "single-node") => {
-      // Read the latest runState synchronously via the setter trick
-      let snapshot: RunStateMap = new Map();
-      setRunState((prev) => { snapshot = prev; return prev; });
-
+      const snapshot = runStateRef.current;
       const record = buildRunRecord(snapshot, mode, getGraphSnapshot?.());
       if (!record) return;
 
@@ -600,12 +605,18 @@ export function useExecution(
                 emitEvent(nodeId, "ws-connected", "WebSocket connected");
               };
 
+              let wsDone = false;
               ws.onmessage = (ev) => {
                 try {
                   const msg = JSON.parse(ev.data);
-                  const stdoutChunk = msg.params?.stdout ?? "";
-                  const stderrChunk = msg.params?.stderr ?? "";
-                  if (stdoutChunk || stderrChunk) {
+                  // Skip keepalive frames
+                  if (msg.keepalive) return;
+
+                  const stdoutChunk = msg.stdout ?? msg.params?.stdout ?? "";
+                  const stderrChunk = msg.stderr ?? msg.params?.stderr ?? "";
+                  // Filter out the server's initial "listening" frame
+                  const isListeningFrame = stderrChunk === "listening" && !stdoutChunk;
+                  if (!isListeningFrame && (stdoutChunk || stderrChunk)) {
                     setRunState((prev) => {
                       const next = new Map(prev);
                       const cur = next.get(nodeId) ?? emptyRunState();
@@ -617,20 +628,43 @@ export function useExecution(
                       return next;
                     });
                   }
+                  // Log progress updates
+                  if (msg.progress !== undefined && msg.progress < 1.0) {
+                    setRunState((prev) => {
+                      const next = new Map(prev);
+                      const cur = next.get(nodeId) ?? emptyRunState();
+                      next.set(nodeId, { ...cur, stderr: cur.stderr + `[ws] Progress: ${Math.round(msg.progress * 100)}%\n` });
+                      return next;
+                    });
+                  }
+                  // Check for terminal status
+                  const status = msg.status ?? msg.params?.status;
+                  const exitCode = msg.exit_code ?? msg.params?.exit_code;
                   if (
-                    msg.params?.status === "succeeded" ||
-                    msg.params?.status === "failed" ||
-                    msg.params?.status === "canceled"
+                    status === "succeeded" ||
+                    status === "failed" ||
+                    status === "canceled"
                   ) {
                     const doneAt = Date.now();
                     updateNode(nodeId, {
-                      status: msg.params.status,
-                      exitCode: msg.params.exit_code,
+                      status,
+                      exitCode,
                       completedAt: doneAt,
                     });
-                    emitEvent(nodeId, "completed", `Run ${msg.params.status}`, { status: msg.params.status, exit_code: msg.params.exit_code });
-                    resolved.set(nodeId, msg.params.status);
+                    emitEvent(nodeId, "completed", `Run ${status}`, { status, exit_code: exitCode });
+                    resolved.set(nodeId, status);
                     ws.close();
+                    wsDone = true;
+                    resolve();
+                  } else if (exitCode !== undefined && !wsDone) {
+                    // Final payload with exit_code but no explicit status
+                    const s = exitCode === 0 ? "succeeded" : "failed";
+                    const doneAt = Date.now();
+                    updateNode(nodeId, { status: s, exitCode, completedAt: doneAt });
+                    emitEvent(nodeId, "completed", `Run ${s}`, { status: s, exit_code: exitCode });
+                    resolved.set(nodeId, s);
+                    ws.close();
+                    wsDone = true;
                     resolve();
                   }
                 } catch {

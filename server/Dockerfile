@@ -11,8 +11,9 @@ WORKDIR /app
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Copy the server entry point
+# Copy the server source files
 COPY main.py .
+COPY run_history.py .
 
 # Work directory for job outputs (mounted as volume)
 RUN mkdir -p /data
