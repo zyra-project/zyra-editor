@@ -34,6 +34,8 @@ export interface ExecutionControls {
   clearNode: (nodeId: string) => void;
   /** Mark a node to skip cache on the next run. */
   forceRerunNode: (nodeId: string) => void;
+  /** Re-run from failed nodes, skipping already-succeeded steps. */
+  retryFromFailure: (graph: Graph, stages: StageDef[]) => Promise<void>;
 }
 
 /** Max consecutive poll failures before marking a node as failed. */
@@ -449,7 +451,7 @@ export function useExecution(
   // ── Full pipeline run ──────────────────────────────────────────
 
   const runPipeline = useCallback(
-    async (graph: Graph, stages: StageDef[]) => {
+    async (graph: Graph, stages: StageDef[], preResolved?: Map<string, NodeRunState>) => {
       setRunning(true);
       cancelledRef.current = false;
       const gen = ++runGenRef.current;
@@ -465,15 +467,28 @@ export function useExecution(
           deps.set(step.name, step.depends_on ?? []);
         }
 
-        // Initialise all nodes as queued
+        // Initialise all nodes — use preResolved data for retry-from-failure
         const init = new Map<string, NodeRunState>();
         for (const step of pipeline.steps) {
-          init.set(step.name, { ...emptyRunState(), status: "queued" });
+          const pre = preResolved?.get(step.name);
+          if (pre && (pre.status === "succeeded" || pre.status === "cached")) {
+            init.set(step.name, { ...pre, status: "cached" });
+          } else {
+            init.set(step.name, { ...emptyRunState(), status: "queued" });
+          }
         }
         setRunState(init);
 
         // Track resolved status locally (state updates are async)
         const resolved = new Map<string, "succeeded" | "failed" | "canceled">();
+        // Pre-seed resolved map for nodes carried over from a previous run
+        if (preResolved) {
+          for (const [nodeId, ns] of preResolved) {
+            if (ns.status === "succeeded" || ns.status === "cached") {
+              resolved.set(nodeId, "succeeded");
+            }
+          }
+        }
 
         /** Wait until all dependencies of a node are resolved. */
         function waitForDeps(nodeId: string): Promise<boolean> {
@@ -754,7 +769,12 @@ export function useExecution(
             (e: GraphEdge) => e.targetNode === en.id && e.targetPort === "input",
           );
           deps.set(en.id, inputEdge ? [inputEdge.sourceNode] : []);
-          init.set(en.id, { ...emptyRunState(), status: "queued" });
+          const pre = preResolved?.get(en.id);
+          if (pre && (pre.status === "succeeded" || pre.status === "cached")) {
+            init.set(en.id, { ...pre, status: "cached" });
+          } else {
+            init.set(en.id, { ...emptyRunState(), status: "queued" });
+          }
         }
         // Re-set state to include extract nodes in the initial map
         if (extractNodes.length > 0) setRunState(new Map(init));
@@ -838,13 +858,14 @@ export function useExecution(
           return { ...req, args: { ...req.args, ...patches } };
         }
 
-        // Launch all steps — they each wait for their deps internally
-        const promises = pipeline.steps.map((step: PipelineStep, i: number) =>
-          runStep(step.name, requests[i], step.delay_seconds),
-        );
-        const extractPromises = extractNodes.map((en) =>
-          runExtractNode(en.id, graph),
-        );
+        // Launch all steps — skip already-resolved nodes (from retry)
+        const promises = pipeline.steps
+          .map((step: PipelineStep, i: number) => ({ step, i }))
+          .filter(({ step }) => !resolved.has(step.name))
+          .map(({ step, i }) => runStep(step.name, requests[i], step.delay_seconds));
+        const extractPromises = extractNodes
+          .filter((en) => !resolved.has(en.id))
+          .map((en) => runExtractNode(en.id, graph));
         await Promise.all([...promises, ...extractPromises]);
         persistRun("pipeline");
         forceRerunRef.current.clear();
@@ -853,6 +874,71 @@ export function useExecution(
       }
     },
     [updateNode, emitEvent, persistRun],
+  );
+
+  // ── Retry from failure ───────────────────────────────────────────
+
+  const retryFromFailure = useCallback(
+    async (graph: Graph, stages: StageDef[]) => {
+      const prevState = runStateRef.current;
+
+      // Build the pipeline to get dependency info
+      const { pipeline } = graphToRunRequests(graph, stages);
+
+      // Build forward adjacency: nodeId → nodes that depend on it
+      const downstream = new Map<string, Set<string>>();
+      for (const step of pipeline.steps) {
+        for (const dep of step.depends_on ?? []) {
+          if (!downstream.has(dep)) downstream.set(dep, new Set());
+          downstream.get(dep)!.add(step.name);
+        }
+      }
+      // Include extract node dependencies
+      for (const en of graph.nodes.filter((n) => n.stageCommand === "control/extract")) {
+        const inputEdge = graph.edges.find(
+          (e: GraphEdge) => e.targetNode === en.id && e.targetPort === "input",
+        );
+        if (inputEdge) {
+          if (!downstream.has(inputEdge.sourceNode)) downstream.set(inputEdge.sourceNode, new Set());
+          downstream.get(inputEdge.sourceNode)!.add(en.id);
+        }
+      }
+
+      // Find all failed nodes and BFS forward to build the dirty set
+      const dirtySet = new Set<string>();
+      const queue: string[] = [];
+      for (const [nodeId, ns] of prevState) {
+        if (ns.status === "failed") {
+          dirtySet.add(nodeId);
+          queue.push(nodeId);
+        }
+      }
+      while (queue.length > 0) {
+        const current = queue.shift()!;
+        for (const child of downstream.get(current) ?? []) {
+          if (!dirtySet.has(child)) {
+            dirtySet.add(child);
+            queue.push(child);
+          }
+        }
+      }
+
+      // Build preResolved map: succeeded/cached nodes NOT in dirty set
+      const preResolved = new Map<string, NodeRunState>();
+      for (const [nodeId, ns] of prevState) {
+        if (!dirtySet.has(nodeId) && (ns.status === "succeeded" || ns.status === "cached")) {
+          preResolved.set(nodeId, ns);
+        }
+      }
+
+      // Force dirty nodes to bypass cache
+      for (const nodeId of dirtySet) {
+        forceRerunRef.current.add(nodeId);
+      }
+
+      await runPipeline(graph, stages, preResolved);
+    },
+    [runPipeline],
   );
 
   // ── Cancel ─────────────────────────────────────────────────────
@@ -909,5 +995,5 @@ export function useExecution(
     forceRerunRef.current.add(nodeId);
   }, []);
 
-  return { runState, running, dryRun, runPipeline, runSingleNode, cancelAll, reset, clearNode, forceRerunNode };
+  return { runState, running, dryRun, runPipeline, runSingleNode, cancelAll, reset, clearNode, forceRerunNode, retryFromFailure };
 }

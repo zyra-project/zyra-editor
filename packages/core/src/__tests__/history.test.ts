@@ -131,6 +131,35 @@ describe("buildRunRecord", () => {
     );
   });
 
+  it("treats 'cached' nodes as succeeded when computing overall status", () => {
+    const map = new Map<string, NodeRunState>();
+    map.set("a", makeState({ status: "cached", stdout: "cached output" }));
+    map.set("b", makeState({ status: "succeeded" }));
+    const record = buildRunRecord(map, "pipeline")!;
+    expect(record.status).toBe("succeeded");
+    expect(record.steps).toHaveLength(2);
+  });
+
+  it("records 'failed' when retry has cached + failed nodes", () => {
+    const map = new Map<string, NodeRunState>();
+    map.set("a", makeState({ status: "cached", stdout: "from cache" }));
+    map.set("b", makeState({ status: "failed", stderr: "exit 1" }));
+    const record = buildRunRecord(map, "pipeline")!;
+    expect(record.status).toBe("failed");
+    expect(record.steps).toHaveLength(2);
+    expect(record.steps.find((s) => s.nodeId === "a")!.status).toBe("cached");
+    expect(record.steps.find((s) => s.nodeId === "b")!.status).toBe("failed");
+  });
+
+  it("records 'canceled' when retry has cached + canceled (no failure)", () => {
+    const map = new Map<string, NodeRunState>();
+    map.set("a", makeState({ status: "cached" }));
+    map.set("b", makeState({ status: "succeeded" }));
+    map.set("c", makeState({ status: "canceled" }));
+    const record = buildRunRecord(map, "pipeline")!;
+    expect(record.status).toBe("canceled");
+  });
+
   it("preserves step details: jobId, exitCode, stdout, stderr, events", () => {
     const events = [{ type: "submitted" as const, timestamp: 1000, message: "go" }];
     const map = new Map<string, NodeRunState>();

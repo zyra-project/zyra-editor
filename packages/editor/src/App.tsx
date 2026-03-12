@@ -830,6 +830,11 @@ function Editor() {
     exec.runPipeline(graph, manifest.stages);
   }, [nodes, edges, manifest.stages, exec.runPipeline]);
 
+  const handleRetryFromFailure = useCallback(() => {
+    const graph = toGraph(nodes, edges);
+    exec.retryFromFailure(graph, manifest.stages);
+  }, [nodes, edges, manifest.stages, exec.retryFromFailure]);
+
   const handleRunNode = useCallback(
     async (nodeId: string) => {
       // Validate this node before running
@@ -1037,6 +1042,7 @@ function Editor() {
         onRun={handleRun}
         onCancel={exec.cancelAll}
         onReset={exec.reset}
+        onRetryFromFailure={handleRetryFromFailure}
         running={exec.running}
         nodeCount={nodes.filter((n) => n.type !== "group").length}
         runState={exec.runState}

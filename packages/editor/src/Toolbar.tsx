@@ -10,6 +10,7 @@ interface ToolbarProps {
   onRun: () => void;
   onCancel: () => void;
   onReset: () => void;
+  onRetryFromFailure: () => void;
   running: boolean;
   nodeCount: number;
   runState: RunStateMap;
@@ -32,6 +33,7 @@ export function Toolbar({
   onRun,
   onCancel,
   onReset,
+  onRetryFromFailure,
   running,
   nodeCount,
   runState,
@@ -128,6 +130,16 @@ export function Toolbar({
         {hasRun && !running && (
           <button className="zyra-btn zyra-btn--neutral" onClick={onReset} title="Clear all execution results">
             Clear
+          </button>
+        )}
+
+        {hasRun && !running && counts.failed > 0 && (
+          <button
+            className="zyra-btn zyra-btn--warning"
+            onClick={onRetryFromFailure}
+            title="Re-run from the failed node(s), skipping already-succeeded steps"
+          >
+            Retry from Failure
           </button>
         )}
       </div>
