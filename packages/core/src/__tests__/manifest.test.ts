@@ -5,6 +5,7 @@ import {
   argToOutputPort,
   getImplicitOutputs,
   getEffectivePorts,
+  validateArgs,
 } from "../manifest.js";
 import type { PortDef, ArgDef, StageDef } from "../manifest.js";
 
@@ -228,5 +229,88 @@ describe("getEffectivePorts", () => {
     const { inputs, outputs } = getEffectivePorts(stage);
     expect(inputs.every((p) => !p.id.startsWith("arg:"))).toBe(true);
     expect(outputs.every((p) => !p.id.startsWith("argout:"))).toBe(true);
+  });
+});
+
+// ── validateArgs ──────────────────────────────────────────────────────────────
+
+describe("validateArgs", () => {
+  it("returns no errors when all required fields are filled", () => {
+    const args = [makeArg({ key: "name", required: true })];
+    expect(validateArgs(args, { name: "hello" })).toEqual([]);
+  });
+
+  it("returns error for missing required field", () => {
+    const args = [makeArg({ key: "name", label: "Name", required: true })];
+    const errors = validateArgs(args, {});
+    expect(errors).toHaveLength(1);
+    expect(errors[0].key).toBe("name");
+    expect(errors[0].message).toContain("required");
+  });
+
+  it("returns error for empty string on required field", () => {
+    const args = [makeArg({ key: "name", label: "Name", required: true })];
+    expect(validateArgs(args, { name: "" })).toHaveLength(1);
+  });
+
+  it("skips required check for linked (wired) args", () => {
+    const args = [makeArg({ key: "name", required: true })];
+    expect(validateArgs(args, {}, new Set(["name"]))).toEqual([]);
+  });
+
+  it("returns no errors for optional empty fields", () => {
+    const args = [makeArg({ key: "opt", required: false })];
+    expect(validateArgs(args, {})).toEqual([]);
+  });
+
+  it("validates number type — rejects non-numeric string", () => {
+    const args = [makeArg({ key: "count", label: "Count", type: "number", required: false })];
+    const errors = validateArgs(args, { count: "abc" });
+    expect(errors).toHaveLength(1);
+    expect(errors[0].message).toContain("valid number");
+  });
+
+  it("validates number type — accepts numeric string", () => {
+    const args = [makeArg({ key: "count", type: "number", required: false })];
+    expect(validateArgs(args, { count: "42" })).toEqual([]);
+  });
+
+  it("validates number type — accepts actual number", () => {
+    const args = [makeArg({ key: "count", type: "number", required: false })];
+    expect(validateArgs(args, { count: 0 })).toEqual([]);
+  });
+
+  it("validates enum type — rejects value not in options", () => {
+    const args = [makeArg({ key: "fmt", label: "Format", type: "enum", options: ["csv", "json"], required: false })];
+    const errors = validateArgs(args, { fmt: "xml" });
+    expect(errors).toHaveLength(1);
+    expect(errors[0].message).toContain("one of");
+  });
+
+  it("validates enum type — accepts valid option", () => {
+    const args = [makeArg({ key: "fmt", type: "enum", options: ["csv", "json"], required: false })];
+    expect(validateArgs(args, { fmt: "csv" })).toEqual([]);
+  });
+
+  it("validates date type — rejects invalid date", () => {
+    const args = [makeArg({ key: "since", label: "Since", type: "date", required: false })];
+    const errors = validateArgs(args, { since: "not-a-date" });
+    expect(errors).toHaveLength(1);
+    expect(errors[0].message).toContain("valid date");
+  });
+
+  it("validates date type — accepts valid date", () => {
+    const args = [makeArg({ key: "since", type: "date", required: false })];
+    expect(validateArgs(args, { since: "2025-01-15" })).toEqual([]);
+  });
+
+  it("collects multiple errors across different args", () => {
+    const args = [
+      makeArg({ key: "name", label: "Name", required: true }),
+      makeArg({ key: "count", label: "Count", type: "number", required: false }),
+    ];
+    const errors = validateArgs(args, { count: "abc" });
+    expect(errors).toHaveLength(2);
+    expect(errors.map((e) => e.key)).toEqual(["name", "count"]);
   });
 });
