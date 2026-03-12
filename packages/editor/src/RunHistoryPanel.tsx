@@ -67,7 +67,12 @@ export function RunHistoryPanel({ onClose, onRestoreGraph, refreshKey }: Props) 
 
   return (
     <div style={{
+      position: "fixed",
+      top: 48, /* below toolbar */
+      right: 0,
+      bottom: 0,
       width: 380,
+      zIndex: 40,
       background: "var(--bg-tertiary)",
       borderLeft: "1px solid var(--border-default)",
       display: "flex",
@@ -76,6 +81,7 @@ export function RunHistoryPanel({ onClose, onRestoreGraph, refreshKey }: Props) 
       fontFamily: "var(--font-sans)",
       fontSize: 13,
       color: "var(--text-bright)",
+      boxShadow: "-4px 0 16px var(--node-shadow)",
     }}>
       {/* Header */}
       <div style={{
