@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useMemo } from "react";
-import type { ArgDef, PortDef, NodeRunStatus, ArgValidationError } from "@zyra/core";
+import type { ArgDef, PortDef, NodeRunStatus, ArgValidationError, RunEvent } from "@zyra/core";
 import { STATUS_COLORS, getEffectivePorts, validateArgs } from "@zyra/core";
 import type { ZyraNodeData } from "./ZyraNode";
 import { isSensitive } from "./ZyraNode";
@@ -627,9 +627,20 @@ function OutputTab({
             </div>
           )}
 
-          {/* Running indicator */}
-          {runState.status === "running" && <RunningIndicator />}
+          {/* Duration */}
+          {runState.startedAt && runState.completedAt && (
+            <div style={{ fontSize: 11, color: "var(--text-muted)", marginBottom: 8, fontFamily: "var(--font-mono)" }}>
+              Duration: {formatDuration(runState.completedAt - runState.startedAt)}
+            </div>
+          )}
 
+          {/* Running indicator */}
+          {runState.status === "running" && <RunningIndicator startedAt={runState.startedAt} />}
+
+          {/* Event timeline */}
+          {runState.events.length > 0 && (
+            <EventTimeline events={runState.events} startedAt={runState.startedAt} />
+          )}
 
         </div>
       ) : (
@@ -865,15 +876,82 @@ function StatusBadge({ status }: { status: NodeRunStatus }) {
   );
 }
 
-function RunningIndicator() {
-  const [elapsed, setElapsed] = useState(0);
+function RunningIndicator({ startedAt }: { startedAt?: number }) {
+  const [now, setNow] = useState(Date.now());
   useEffect(() => {
-    const t = setInterval(() => setElapsed((s) => s + 1), 1000);
+    const t = setInterval(() => setNow(Date.now()), 1000);
     return () => clearInterval(t);
   }, []);
+  const elapsed = startedAt ? Math.floor((now - startedAt) / 1000) : 0;
   return (
     <div style={{ color: "var(--accent-blue)", fontSize: 11, fontFamily: "var(--font-mono)" }}>
-      Running… {elapsed < 60 ? `${elapsed}s` : `${Math.floor(elapsed / 60)}m ${elapsed % 60}s`}
+      Running… {formatDuration(elapsed * 1000)}
+    </div>
+  );
+}
+
+function formatDuration(ms: number): string {
+  const secs = Math.round(ms / 1000);
+  if (secs < 60) return `${secs}s`;
+  const mins = Math.floor(secs / 60);
+  const rem = secs % 60;
+  return `${mins}m ${rem}s`;
+}
+
+const EVENT_ICONS: Record<string, string> = {
+  submitted: "\u25b6",     // play
+  "job-accepted": "\u2611", // checkbox
+  "ws-connected": "\u21c4", // arrows
+  "ws-disconnected": "\u2716", // x
+  "poll-fallback": "\u21bb", // loop
+  completed: "\u2714",     // check
+  canceled: "\u2014",      // dash
+  error: "\u26a0",         // warning
+};
+
+function EventTimeline({ events, startedAt }: { events: RunEvent[]; startedAt?: number }) {
+  const [expanded, setExpanded] = useState(false);
+  const base = startedAt ?? events[0]?.timestamp ?? 0;
+
+  return (
+    <div style={{ borderTop: "1px solid var(--border-default)", paddingTop: 8, marginTop: 8 }}>
+      <button
+        onClick={() => setExpanded(!expanded)}
+        style={{
+          background: "none",
+          border: "none",
+          color: "var(--text-secondary)",
+          fontSize: 11,
+          cursor: "pointer",
+          padding: 0,
+          fontFamily: "var(--font-mono)",
+        }}
+      >
+        {expanded ? "\u25bc" : "\u25b6"} Events ({events.length})
+      </button>
+      {expanded && (
+        <div style={{ marginTop: 6 }}>
+          {events.map((ev, i) => {
+            const offset = ((ev.timestamp - base) / 1000).toFixed(1);
+            return (
+              <div key={i} style={{
+                fontSize: 11,
+                fontFamily: "var(--font-mono)",
+                color: ev.type === "error" ? "var(--accent-red)" : "var(--text-secondary)",
+                padding: "2px 0",
+                display: "flex",
+                gap: 6,
+              }}>
+                <span style={{ color: "var(--text-muted)", minWidth: 45, textAlign: "right", flexShrink: 0 }}>
+                  +{offset}s
+                </span>
+                <span>{EVENT_ICONS[ev.type] ?? "\u2022"}</span>
+                <span>{ev.message ?? ev.type}</span>
+              </div>
+            );
+          })}
+        </div>
+      )}
     </div>
   );
 }

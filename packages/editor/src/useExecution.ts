@@ -6,6 +6,8 @@ import type {
   PipelineStep,
   NodeRunState,
   RunStepRequest,
+  RunEventType,
+  RunEvent,
 } from "@zyra/core";
 import { emptyRunState, extractByPath, graphToRunRequests, graphToPipeline, stepToCliPreview } from "@zyra/core";
 import { postRun, getJobStatus, connectJobWs, cancelJob } from "./api";
@@ -67,6 +69,20 @@ export function useExecution(): ExecutionControls {
         const next = new Map(prev);
         const cur = next.get(nodeId) ?? emptyRunState();
         next.set(nodeId, { ...cur, ...patch });
+        return next;
+      });
+    },
+    [],
+  );
+
+  /** Append a structured event to a node's event timeline. */
+  const emitEvent = useCallback(
+    (nodeId: string, type: RunEventType, message?: string, detail?: Record<string, unknown>) => {
+      const event: RunEvent = { type, timestamp: Date.now(), message, detail };
+      setRunState((prev) => {
+        const next = new Map(prev);
+        const cur = next.get(nodeId) ?? emptyRunState();
+        next.set(nodeId, { ...cur, events: [...cur.events, event] });
         return next;
       });
     },
@@ -178,18 +194,23 @@ export function useExecution(): ExecutionControls {
         }
       }
 
-      updateNode(nodeId, { ...emptyRunState(), status: "running", submittedRequest: req });
+      const now = Date.now();
+      updateNode(nodeId, { ...emptyRunState(), status: "running", submittedRequest: req, startedAt: now });
+      emitEvent(nodeId, "submitted", `Submitted ${req.stage}/${req.command}`);
 
       try {
         const res = await postRun(req);
 
         if (res.status === "error") {
+          const doneAt = Date.now();
           updateNode(nodeId, {
             status: "failed",
             stdout: res.stdout ?? "",
             stderr: res.stderr ?? "",
             exitCode: res.exit_code,
+            completedAt: doneAt,
           });
+          emitEvent(nodeId, "error", "Server returned error", { exit_code: res.exit_code });
           return null;
         }
 
@@ -197,17 +218,21 @@ export function useExecution(): ExecutionControls {
         if (!jobId) {
           // Sync fallback — server returned result directly
           const exitOk = (res.exit_code ?? 0) === 0;
+          const doneAt = Date.now();
           updateNode(nodeId, {
             status: exitOk ? "succeeded" : "failed",
             stdout: res.stdout ?? "",
             stderr: res.stderr ?? "",
             exitCode: res.exit_code,
+            completedAt: doneAt,
           });
+          emitEvent(nodeId, "completed", exitOk ? "Completed successfully" : "Failed", { exit_code: res.exit_code });
           return null;
         }
 
         activeJobsRef.current.set(nodeId, jobId);
         updateNode(nodeId, { jobId });
+        emitEvent(nodeId, "job-accepted", `Job ${jobId} accepted`, { jobId });
 
         // Stream logs via WebSocket
         await new Promise<void>((resolve) => {
@@ -231,6 +256,7 @@ export function useExecution(): ExecutionControls {
 
           ws.onopen = () => {
             appendStderr("[ws] Connected to job stream\n");
+            emitEvent(nodeId, "ws-connected", "WebSocket connected");
           };
 
           ws.onmessage = (ev) => {
@@ -267,14 +293,18 @@ export function useExecution(): ExecutionControls {
                 status === "failed" ||
                 status === "canceled"
               ) {
-                updateNode(nodeId, { status, exitCode });
+                const doneAt = Date.now();
+                updateNode(nodeId, { status, exitCode, completedAt: doneAt });
+                emitEvent(nodeId, "completed", `Run ${status}`, { status, exit_code: exitCode });
                 ws.close();
                 done = true;
                 resolve();
               } else if (exitCode !== undefined && !done) {
                 // Final payload with exit_code but no explicit status
                 const s = exitCode === 0 ? "succeeded" : "failed";
-                updateNode(nodeId, { status: s, exitCode });
+                const doneAt = Date.now();
+                updateNode(nodeId, { status: s, exitCode, completedAt: doneAt });
+                emitEvent(nodeId, "completed", `Run ${s}`, { status: s, exit_code: exitCode });
                 ws.close();
                 done = true;
                 resolve();
@@ -290,6 +320,7 @@ export function useExecution(): ExecutionControls {
             if (cancelledRef.current || runGenRef.current !== gen) return;
             fallbackStarted = true;
             appendStderr("[ws] Connection closed, falling back to polling\n");
+            emitEvent(nodeId, "poll-fallback", "Fell back to HTTP polling");
             (async () => {
               let consecutiveFailures = 0;
               while (!cancelledRef.current && runGenRef.current === gen) {
@@ -306,17 +337,22 @@ export function useExecution(): ExecutionControls {
                     status.status === "failed" ||
                     status.status === "canceled"
                   ) {
-                    updateNode(nodeId, { status: status.status });
+                    const doneAt = Date.now();
+                    updateNode(nodeId, { status: status.status, completedAt: doneAt });
+                    emitEvent(nodeId, "completed", `Run ${status.status}`, { status: status.status, exit_code: status.exit_code });
                     resolve();
                     return;
                   }
                 } catch {
                   consecutiveFailures++;
                   if (consecutiveFailures >= MAX_POLL_FAILURES) {
+                    const doneAt = Date.now();
                     updateNode(nodeId, {
                       status: "failed",
                       stderr: `Lost connection to job ${jobId}\n`,
+                      completedAt: doneAt,
                     });
+                    emitEvent(nodeId, "error", `Lost connection after ${MAX_POLL_FAILURES} failures`);
                     resolve();
                     return;
                   }
@@ -333,21 +369,25 @@ export function useExecution(): ExecutionControls {
           };
           ws.onclose = () => {
             removeWsRef();
+            if (!done) emitEvent(nodeId, "ws-disconnected", "WebSocket disconnected");
             startPollingFallback();
           };
         });
       } catch (err) {
+        const doneAt = Date.now();
         updateNode(nodeId, {
           status: "failed",
           stderr: err instanceof Error ? err.message : String(err),
+          completedAt: doneAt,
         });
+        emitEvent(nodeId, "error", err instanceof Error ? err.message : String(err));
       } finally {
         activeJobsRef.current.delete(nodeId);
         if (runGenRef.current === gen) setRunning(false);
       }
       return null;
     },
-    [runState, updateNode],
+    [runState, updateNode, emitEvent],
   );
 
   // ── Full pipeline run ──────────────────────────────────────────
@@ -429,18 +469,23 @@ export function useExecution(): ExecutionControls {
 
           // Inject any values from upstream Extract nodes into this step's args
           const finalReq = injectExtractValues(nodeId, req, graph);
-          updateNode(nodeId, { status: "running", submittedRequest: finalReq });
+          const stepStartedAt = Date.now();
+          updateNode(nodeId, { status: "running", submittedRequest: finalReq, startedAt: stepStartedAt });
+          emitEvent(nodeId, "submitted", `Submitted ${finalReq.stage}/${finalReq.command}`);
 
           try {
             const res = await postRun(finalReq);
 
             if (res.status === "error") {
+              const doneAt = Date.now();
               updateNode(nodeId, {
                 status: "failed",
                 stdout: res.stdout ?? "",
                 stderr: res.stderr ?? "",
                 exitCode: res.exit_code,
+                completedAt: doneAt,
               });
+              emitEvent(nodeId, "error", "Server returned error", { exit_code: res.exit_code });
               resolved.set(nodeId, "failed");
               return;
             }
@@ -449,18 +494,22 @@ export function useExecution(): ExecutionControls {
             if (!jobId) {
               // Sync fallback — already completed
               const exitOk = (res.exit_code ?? 0) === 0;
+              const doneAt = Date.now();
               updateNode(nodeId, {
                 status: exitOk ? "succeeded" : "failed",
                 stdout: res.stdout ?? "",
                 stderr: res.stderr ?? "",
                 exitCode: res.exit_code,
+                completedAt: doneAt,
               });
+              emitEvent(nodeId, "completed", exitOk ? "Completed successfully" : "Failed", { exit_code: res.exit_code });
               resolved.set(nodeId, exitOk ? "succeeded" : "failed");
               return;
             }
 
             activeJobsRef.current.set(nodeId, jobId);
             updateNode(nodeId, { jobId });
+            emitEvent(nodeId, "job-accepted", `Job ${jobId} accepted`, { jobId });
 
             // Stream logs via WebSocket
             await new Promise<void>((resolve) => {
@@ -470,6 +519,10 @@ export function useExecution(): ExecutionControls {
               const removeWsRef = () => {
                 const idx = wsRefs.current.indexOf(ws);
                 if (idx !== -1) wsRefs.current.splice(idx, 1);
+              };
+
+              ws.onopen = () => {
+                emitEvent(nodeId, "ws-connected", "WebSocket connected");
               };
 
               ws.onmessage = (ev) => {
@@ -494,10 +547,13 @@ export function useExecution(): ExecutionControls {
                     msg.params?.status === "failed" ||
                     msg.params?.status === "canceled"
                   ) {
+                    const doneAt = Date.now();
                     updateNode(nodeId, {
                       status: msg.params.status,
                       exitCode: msg.params.exit_code,
+                      completedAt: doneAt,
                     });
+                    emitEvent(nodeId, "completed", `Run ${msg.params.status}`, { status: msg.params.status, exit_code: msg.params.exit_code });
                     resolved.set(nodeId, msg.params.status);
                     ws.close();
                     resolve();
@@ -511,6 +567,7 @@ export function useExecution(): ExecutionControls {
               const startPollingFallback = () => {
                 if (fallbackStarted || resolved.has(nodeId)) return;
                 fallbackStarted = true;
+                emitEvent(nodeId, "poll-fallback", "Fell back to HTTP polling");
                 pollUntilDone(nodeId, jobId).then(resolve);
               };
 
@@ -520,14 +577,18 @@ export function useExecution(): ExecutionControls {
 
               ws.onclose = () => {
                 removeWsRef();
+                if (!resolved.has(nodeId)) emitEvent(nodeId, "ws-disconnected", "WebSocket disconnected");
                 startPollingFallback();
               };
             });
           } catch (err) {
+            const doneAt = Date.now();
             updateNode(nodeId, {
               status: "failed",
               stderr: err instanceof Error ? err.message : String(err),
+              completedAt: doneAt,
             });
+            emitEvent(nodeId, "error", err instanceof Error ? err.message : String(err));
             resolved.set(nodeId, "failed");
           }
         }
@@ -549,17 +610,22 @@ export function useExecution(): ExecutionControls {
                 status.status === "failed" ||
                 status.status === "canceled"
               ) {
-                updateNode(nodeId, { status: status.status });
+                const doneAt = Date.now();
+                updateNode(nodeId, { status: status.status, completedAt: doneAt });
+                emitEvent(nodeId, "completed", `Run ${status.status}`, { status: status.status, exit_code: status.exit_code });
                 resolved.set(nodeId, status.status);
                 return;
               }
             } catch {
               consecutiveFailures++;
               if (consecutiveFailures >= MAX_POLL_FAILURES) {
+                const doneAt = Date.now();
                 updateNode(nodeId, {
                   status: "failed",
                   stderr: `Lost connection to job ${jobId} after ${MAX_POLL_FAILURES} failed status checks`,
+                  completedAt: doneAt,
                 });
+                emitEvent(nodeId, "error", `Lost connection after ${MAX_POLL_FAILURES} failures`);
                 resolved.set(nodeId, "failed");
                 return;
               }
@@ -675,7 +741,7 @@ export function useExecution(): ExecutionControls {
         if (runGenRef.current === gen) setRunning(false);
       }
     },
-    [updateNode],
+    [updateNode, emitEvent],
   );
 
   // ── Cancel ─────────────────────────────────────────────────────
@@ -688,13 +754,15 @@ export function useExecution(): ExecutionControls {
     }
     wsRefs.current = [];
 
+    const doneAt = Date.now();
     for (const [nodeId, jobId] of activeJobsRef.current) {
       cancelJob(jobId).catch(() => {});
-      updateNode(nodeId, { status: "canceled" });
+      updateNode(nodeId, { status: "canceled", completedAt: doneAt });
+      emitEvent(nodeId, "canceled", "Canceled by user");
     }
     activeJobsRef.current = new Map();
     setRunning(false);
-  }, [updateNode]);
+  }, [updateNode, emitEvent]);
 
   // ── Reset ──────────────────────────────────────────────────────
 

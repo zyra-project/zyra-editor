@@ -28,6 +28,8 @@ export type {
   RunStepResponse,
   JobStatus,
   NodeRunStatus,
+  RunEventType,
+  RunEvent,
   NodeRunState,
 } from "./execution.js";
 export { emptyRunState, STATUS_COLORS } from "./execution.js";
