@@ -67,6 +67,8 @@ from starlette.middleware.cors import CORSMiddleware
 from zyra.api.server import create_app
 from zyra.api.workers import jobs as _jobs_mod
 
+from run_history import init_db, save_run, list_runs, get_run, delete_run
+
 # Monkey-patch start_job so that logging handlers are reset inside the
 # captured-stdio context.  Without this, logging.basicConfig() (called
 # during server startup) installs a StreamHandler that points to the
@@ -229,6 +231,9 @@ def _patched_start_job(*args, **kwargs):
 _jobs_mod.start_job = _patched_start_job
 
 app = create_app()
+
+# Initialise the run-history SQLite database.
+_history_db = init_db()
 
 # Allow the Vite dev server during development
 app.add_middleware(
@@ -2037,6 +2042,68 @@ def get_manifest(request: Request):
     resp.raise_for_status()
     data = resp.json()
     return _commands_to_manifest(data.get("commands", {}))
+
+
+# ── Run history endpoints ─────────────────────────────────────────
+
+
+class RunStepPayload(BaseModel):
+    nodeId: str
+    status: str
+    jobId: str | None = None
+    exitCode: int | None = None
+    stdout: str = ""
+    stderr: str = ""
+    startedAt: str | None = None
+    completedAt: str | None = None
+    durationMs: int | None = None
+    request: dict | None = None
+    events: list[dict] = Field(default_factory=list)
+    dryRunArgv: str | None = None
+
+
+class RunPayload(BaseModel):
+    id: str
+    startedAt: str
+    completedAt: str | None = None
+    status: str
+    durationMs: int | None = None
+    mode: str
+    nodeCount: int
+    summary: str | None = None
+    graphSnapshot: dict | None = None
+    steps: list[RunStepPayload] = Field(default_factory=list)
+
+
+@app.post("/v1/runs")
+async def save_run_endpoint(payload: RunPayload):
+    """Persist a completed run record."""
+    data = payload.model_dump()
+    await asyncio.to_thread(save_run, _history_db, data)
+    return {"id": data["id"]}
+
+
+@app.get("/v1/runs")
+async def list_runs_endpoint(limit: int = 50, offset: int = 0):
+    """List recent run summaries (no step details)."""
+    return await asyncio.to_thread(list_runs, _history_db, limit, offset)
+
+
+@app.get("/v1/runs/{run_id}")
+async def get_run_endpoint(run_id: str):
+    """Get full run detail including all steps."""
+    result = await asyncio.to_thread(get_run, _history_db, run_id)
+    if result is None:
+        raise HTTPException(status_code=404, detail="Run not found")
+    return result
+
+
+@app.delete("/v1/runs/{run_id}", status_code=204)
+async def delete_run_endpoint(run_id: str):
+    """Delete a run and its steps."""
+    found = await asyncio.to_thread(delete_run, _history_db, run_id)
+    if not found:
+        raise HTTPException(status_code=404, detail="Run not found")
 
 
 # Serve the built React editor in production

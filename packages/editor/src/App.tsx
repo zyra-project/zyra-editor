@@ -28,6 +28,7 @@ import { useExecution } from "./useExecution";
 import { YamlPanel, normalizePipeline } from "./YamlPanel";
 import { parseOptions } from "./ChoiceOptionsEditor";
 import { PlannerPanel, type PlanHistoryEntry, type PlanBatch } from "./PlannerPanel";
+import { RunHistoryPanel } from "./RunHistoryPanel";
 import yaml from "js-yaml";
 import { useTheme } from "./useTheme";
 import { useBackendStatus } from "./useBackendStatus";
@@ -270,12 +271,30 @@ function Editor() {
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
   const [yamlOpen, setYamlOpen] = useState(false);
   const [plannerOpen, setPlannerOpen] = useState(false);
+  const [historyOpen, setHistoryOpen] = useState(false);
   const [paletteCollapsed, setPaletteCollapsed] = useState(false);
   const [plannerIntent, setPlannerIntent] = useState("");
   const [plannerHistory, setPlannerHistory] = useState<PlanHistoryEntry[]>([]);
   const [planBatches, setPlanBatches] = useState<PlanBatch[]>([]);
   const backendStatus = useBackendStatus();
-  const exec = useExecution();
+  // Ref for stable graph snapshot callback (nodesRef is declared further down for lock checks)
+  const graphNodesRef = useRef(nodes);
+  graphNodesRef.current = nodes;
+  const graphEdgesRef = useRef(edges);
+  graphEdgesRef.current = edges;
+  const getGraphSnapshot = useCallback(() => ({
+    nodes: graphNodesRef.current,
+    edges: graphEdgesRef.current,
+  }), []);
+  const exec = useExecution(getGraphSnapshot);
+  const [historyRefreshKey, setHistoryRefreshKey] = useState(0);
+  const prevRunningRef = useRef(false);
+  useEffect(() => {
+    if (prevRunningRef.current && !exec.running) {
+      setHistoryRefreshKey((k) => k + 1);
+    }
+    prevRunningRef.current = exec.running;
+  }, [exec.running]);
   const reactFlowWrapper = useRef<HTMLDivElement>(null);
   const { screenToFlowPosition, setCenter } = useReactFlow();
 
@@ -928,6 +947,8 @@ function Editor() {
           setYamlOpen(false);
         } else if (plannerOpen) {
           setPlannerOpen(false);
+        } else if (historyOpen) {
+          setHistoryOpen(false);
         } else if (selectedNodeId) {
           setSelectedNodeId(null);
         }
@@ -954,7 +975,7 @@ function Editor() {
     }
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [selectedNodeId, yamlOpen, plannerOpen, handleOpenFile]);
+  }, [selectedNodeId, yamlOpen, plannerOpen, historyOpen, handleOpenFile]);
 
   const selectedNode = nodes.find((n) => n.id === selectedNodeId);
 
@@ -1022,6 +1043,8 @@ function Editor() {
         onToggleYaml={() => setYamlOpen((v) => !v)}
         plannerOpen={plannerOpen}
         onTogglePlanner={() => setPlannerOpen((v) => !v)}
+        historyOpen={historyOpen}
+        onToggleHistory={() => setHistoryOpen((v) => !v)}
         theme={theme}
         onToggleTheme={toggleTheme}
         backendStatus={backendStatus}
@@ -1086,6 +1109,18 @@ function Editor() {
         onClearNode={exec.clearNode}
         onSelectNode={handleSelectNode}
       />
+
+      {/* Run History Panel */}
+      {historyOpen && (
+        <RunHistoryPanel
+          onClose={() => setHistoryOpen(false)}
+          onRestoreGraph={(snapshot) => {
+            setNodes(snapshot.nodes as Node[]);
+            setEdges(snapshot.edges as Edge[]);
+          }}
+          refreshKey={historyRefreshKey}
+        />
+      )}
 
       {/* AI Planner Panel */}
       {plannerOpen && (

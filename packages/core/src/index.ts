@@ -40,3 +40,11 @@ export { graphToRunRequests, stepToCliPreview } from "./pipeline.js";
 export { pipelineToGraph } from "./deserializer.js";
 
 export { extractByPath } from "./extract.js";
+
+export type {
+  RunSummary,
+  RunStepRecord,
+  GraphSnapshot,
+  RunHistoryRecord,
+} from "./history.js";
+export { buildRunRecord } from "./history.js";

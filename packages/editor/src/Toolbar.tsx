@@ -17,6 +17,8 @@ interface ToolbarProps {
   onToggleYaml: () => void;
   plannerOpen: boolean;
   onTogglePlanner: () => void;
+  historyOpen: boolean;
+  onToggleHistory: () => void;
   theme: Theme;
   onToggleTheme: () => void;
   backendStatus: BackendStatus & { refresh: () => void };
@@ -35,6 +37,8 @@ export function Toolbar({
   onToggleYaml,
   plannerOpen,
   onTogglePlanner,
+  historyOpen,
+  onToggleHistory,
   theme,
   onToggleTheme,
   backendStatus,
@@ -147,6 +151,31 @@ export function Toolbar({
       >
         <span style={{ fontSize: 14 }}>{"\u2728"}</span>
         Plan
+      </button>
+
+      {/* Run History toggle */}
+      <button
+        onClick={onToggleHistory}
+        title="Run History — browse past pipeline executions"
+        aria-expanded={historyOpen}
+        style={{
+          background: historyOpen ? "var(--accent-blue)" : "none",
+          border: "1px solid var(--border-default)",
+          borderRadius: "var(--radius-md)",
+          color: historyOpen ? "#fff" : "var(--text-secondary)",
+          cursor: "pointer",
+          padding: "4px 10px",
+          fontSize: 12,
+          lineHeight: 1,
+          display: "flex",
+          alignItems: "center",
+          gap: 5,
+          fontFamily: "var(--font-sans)",
+          fontWeight: 500,
+        }}
+      >
+        <span style={{ fontSize: 14 }}>{"\u{1f552}"}</span>
+        History
       </button>
 
       {/* Spacer */}

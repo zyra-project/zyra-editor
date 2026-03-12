@@ -8,9 +8,10 @@ import type {
   RunStepRequest,
   RunEventType,
   RunEvent,
+  GraphSnapshot,
 } from "@zyra/core";
-import { emptyRunState, extractByPath, graphToRunRequests, graphToPipeline, stepToCliPreview } from "@zyra/core";
-import { postRun, getJobStatus, connectJobWs, cancelJob } from "./api";
+import { emptyRunState, extractByPath, graphToRunRequests, graphToPipeline, stepToCliPreview, buildRunRecord } from "@zyra/core";
+import { postRun, getJobStatus, connectJobWs, cancelJob, saveRunHistory } from "./api";
 
 export type RunStateMap = Map<string, NodeRunState>;
 
@@ -55,7 +56,9 @@ async function cancellableSleep(
   return true;
 }
 
-export function useExecution(): ExecutionControls {
+export function useExecution(
+  getGraphSnapshot?: () => GraphSnapshot | undefined,
+): ExecutionControls {
   const [runState, setRunState] = useState<RunStateMap>(new Map());
   const [running, setRunning] = useState(false);
   const cancelledRef = useRef(false);
@@ -87,6 +90,23 @@ export function useExecution(): ExecutionControls {
       });
     },
     [],
+  );
+
+  /** Persist a completed run to the server (fire-and-forget). */
+  const persistRun = useCallback(
+    (mode: "pipeline" | "single-node") => {
+      // Read the latest runState synchronously via the setter trick
+      let snapshot: RunStateMap = new Map();
+      setRunState((prev) => { snapshot = prev; return prev; });
+
+      const record = buildRunRecord(snapshot, mode, getGraphSnapshot?.());
+      if (!record) return;
+
+      saveRunHistory(record).catch(() => {
+        // Silently ignore — history is best-effort
+      });
+    },
+    [getGraphSnapshot],
   );
 
   // ── Dry run ────────────────────────────────────────────────────
@@ -383,11 +403,12 @@ export function useExecution(): ExecutionControls {
         emitEvent(nodeId, "error", err instanceof Error ? err.message : String(err));
       } finally {
         activeJobsRef.current.delete(nodeId);
+        persistRun("single-node");
         if (runGenRef.current === gen) setRunning(false);
       }
       return null;
     },
-    [runState, updateNode, emitEvent],
+    [runState, updateNode, emitEvent, persistRun],
   );
 
   // ── Full pipeline run ──────────────────────────────────────────
@@ -737,11 +758,12 @@ export function useExecution(): ExecutionControls {
           runExtractNode(en.id, graph),
         );
         await Promise.all([...promises, ...extractPromises]);
+        persistRun("pipeline");
       } finally {
         if (runGenRef.current === gen) setRunning(false);
       }
     },
-    [updateNode, emitEvent],
+    [updateNode, emitEvent, persistRun],
   );
 
   // ── Cancel ─────────────────────────────────────────────────────
