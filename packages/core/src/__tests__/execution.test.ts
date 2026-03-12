@@ -50,6 +50,7 @@ describe("STATUS_COLORS", () => {
     "succeeded",
     "failed",
     "canceled",
+    "cached",
   ];
 
   it("has an entry for every NodeRunStatus", () => {
@@ -106,6 +107,7 @@ describe("RunEvent type contract", () => {
       "completed",
       "canceled",
       "error",
+      "cache-hit",
     ];
     for (const type of allTypes) {
       const ev: RunEvent = { type, timestamp: 0 };

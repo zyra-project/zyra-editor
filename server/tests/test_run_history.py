@@ -1,7 +1,7 @@
 """
 Unit tests for the run_history SQLite module.
 
-Tests use an in-memory database (via monkeypatch) to avoid filesystem side-effects.
+Tests use a temporary on-disk database (via monkeypatch) to avoid filesystem side-effects.
 """
 import json
 import os

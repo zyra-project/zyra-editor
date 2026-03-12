@@ -205,7 +205,7 @@ function SettingsTab({
   // Validate args against their definitions
   const validationErrors = useMemo(
     () => validateArgs(stageDef.args, argValues, new Set(linkedArgs.keys())),
-    [stageDef.args, argValues, linkedArgs.size],
+    [stageDef.args, argValues, [...linkedArgs.keys()].sort().join(",")],
   );
   const errorsByKey = useMemo(() => {
     const map = new Map<string, string>();

@@ -58,6 +58,7 @@ CREATE INDEX IF NOT EXISTS idx_runs_started_at  ON runs(started_at);
 def init_db() -> sqlite3.Connection:
     """Create (or open) the history database and return a connection."""
     data_dir = os.environ.get("ZYRA_DATA_DIR", ".")
+    os.makedirs(data_dir, exist_ok=True)
     db_path = os.path.join(data_dir, "run_history.db")
     conn = sqlite3.connect(db_path, check_same_thread=False)
     conn.execute("PRAGMA journal_mode=WAL")

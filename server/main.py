@@ -12,6 +12,7 @@ import os
 import re
 import subprocess
 import sys
+import threading
 from pathlib import Path
 
 # Load .env file from the server directory (or project root) so that
@@ -234,6 +235,7 @@ app = create_app()
 
 # Initialise the run-history SQLite database.
 _history_db = init_db()
+_history_lock = threading.Lock()
 
 # Allow the Vite dev server during development
 app.add_middleware(
@@ -2079,7 +2081,10 @@ class RunPayload(BaseModel):
 async def save_run_endpoint(payload: RunPayload):
     """Persist a completed run record."""
     data = payload.model_dump()
-    await asyncio.to_thread(save_run, _history_db, data)
+    def _save():
+        with _history_lock:
+            save_run(_history_db, data)
+    await asyncio.to_thread(_save)
     return {"id": data["id"]}
 
 
@@ -2101,7 +2106,10 @@ async def get_run_endpoint(run_id: str):
 @app.delete("/v1/runs/{run_id}", status_code=204)
 async def delete_run_endpoint(run_id: str):
     """Delete a run and its steps."""
-    found = await asyncio.to_thread(delete_run, _history_db, run_id)
+    def _delete():
+        with _history_lock:
+            return delete_run(_history_db, run_id)
+    found = await asyncio.to_thread(_delete)
     if not found:
         raise HTTPException(status_code=404, detail="Run not found")
 
