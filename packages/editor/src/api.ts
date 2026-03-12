@@ -48,6 +48,26 @@ export function connectJobWs(
   return new WebSocket(url);
 }
 
+// ── Cache lookup ─────────────────────────────────────────────────────
+
+export interface CacheLookupResult {
+  hit: boolean;
+  stdout?: string;
+  stderr?: string;
+  exit_code?: number;
+  completed_at?: string;
+}
+
+export async function lookupCache(key: string): Promise<CacheLookupResult> {
+  try {
+    const res = await fetch(`${BASE}/cache/lookup?key=${encodeURIComponent(key)}`);
+    if (!res.ok) return { hit: false };
+    return res.json();
+  } catch {
+    return { hit: false };
+  }
+}
+
 // ── Run history ──────────────────────────────────────────────────────
 
 export async function saveRunHistory(record: RunHistoryRecord): Promise<{ id: string }> {

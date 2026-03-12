@@ -19,6 +19,8 @@ interface ToolbarProps {
   onTogglePlanner: () => void;
   historyOpen: boolean;
   onToggleHistory: () => void;
+  useCache: boolean;
+  onToggleCache: () => void;
   theme: Theme;
   onToggleTheme: () => void;
   backendStatus: BackendStatus & { refresh: () => void };
@@ -39,6 +41,8 @@ export function Toolbar({
   onTogglePlanner,
   historyOpen,
   onToggleHistory,
+  useCache,
+  onToggleCache,
   theme,
   onToggleTheme,
   backendStatus,
@@ -48,7 +52,7 @@ export function Toolbar({
   const counts = { succeeded: 0, failed: 0, running: 0, total: 0 };
   for (const [, state] of runState) {
     counts.total++;
-    if (state.status === "succeeded") counts.succeeded++;
+    if (state.status === "succeeded" || state.status === "cached") counts.succeeded++;
     else if (state.status === "failed") counts.failed++;
     else if (state.status === "running") counts.running++;
   }
@@ -176,6 +180,30 @@ export function Toolbar({
       >
         <span style={{ fontSize: 14 }}>{"\u{1f552}"}</span>
         History
+      </button>
+
+      {/* Cache toggle */}
+      <button
+        onClick={onToggleCache}
+        title="When enabled, skip re-execution of nodes whose inputs haven't changed"
+        style={{
+          background: useCache ? "var(--accent-blue)" : "none",
+          border: "1px solid var(--border-default)",
+          borderRadius: "var(--radius-md)",
+          color: useCache ? "#fff" : "var(--text-secondary)",
+          cursor: "pointer",
+          padding: "4px 10px",
+          fontSize: 12,
+          lineHeight: 1,
+          display: "flex",
+          alignItems: "center",
+          gap: 5,
+          fontFamily: "var(--font-sans)",
+          fontWeight: 500,
+        }}
+      >
+        <span style={{ fontSize: 14 }}>{"\u26A1"}</span>
+        Cache{useCache ? ": ON" : ": OFF"}
       </button>
 
       {/* Spacer */}

@@ -67,7 +67,7 @@ from starlette.middleware.cors import CORSMiddleware
 from zyra.api.server import create_app
 from zyra.api.workers import jobs as _jobs_mod
 
-from run_history import init_db, save_run, list_runs, get_run, delete_run
+from run_history import init_db, save_run, list_runs, get_run, delete_run, lookup_cache
 
 # Monkey-patch start_job so that logging handlers are reset inside the
 # captured-stdio context.  Without this, logging.basicConfig() (called
@@ -2104,6 +2104,15 @@ async def delete_run_endpoint(run_id: str):
     found = await asyncio.to_thread(delete_run, _history_db, run_id)
     if not found:
         raise HTTPException(status_code=404, detail="Run not found")
+
+
+@app.get("/v1/cache/lookup")
+async def cache_lookup_endpoint(key: str):
+    """Look up a cached step result by cache key."""
+    result = await asyncio.to_thread(lookup_cache, _history_db, key)
+    if result:
+        return {"hit": True, **result}
+    return {"hit": False}
 
 
 # Serve the built React editor in production

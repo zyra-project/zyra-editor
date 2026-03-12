@@ -41,6 +41,8 @@ export { pipelineToGraph } from "./deserializer.js";
 
 export { extractByPath } from "./extract.js";
 
+export { canonicalizeRequest, computeCacheKey } from "./cache.js";
+
 export type {
   RunSummary,
   RunStepRecord,

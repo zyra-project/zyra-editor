@@ -10,8 +10,8 @@ import type {
   RunEvent,
   GraphSnapshot,
 } from "@zyra/core";
-import { emptyRunState, extractByPath, graphToRunRequests, graphToPipeline, stepToCliPreview, buildRunRecord } from "@zyra/core";
-import { postRun, getJobStatus, connectJobWs, cancelJob, saveRunHistory } from "./api";
+import { emptyRunState, extractByPath, graphToRunRequests, graphToPipeline, stepToCliPreview, buildRunRecord, computeCacheKey } from "@zyra/core";
+import { postRun, getJobStatus, connectJobWs, cancelJob, saveRunHistory, lookupCache } from "./api";
 
 export type RunStateMap = Map<string, NodeRunState>;
 
@@ -32,6 +32,8 @@ export interface ExecutionControls {
   reset: () => void;
   /** Clear execution state for a single node. */
   clearNode: (nodeId: string) => void;
+  /** Mark a node to skip cache on the next run. */
+  forceRerunNode: (nodeId: string) => void;
 }
 
 /** Max consecutive poll failures before marking a node as failed. */
@@ -58,6 +60,7 @@ async function cancellableSleep(
 
 export function useExecution(
   getGraphSnapshot?: () => GraphSnapshot | undefined,
+  useCache = false,
 ): ExecutionControls {
   const [runState, setRunState] = useState<RunStateMap>(new Map());
   const [running, setRunning] = useState(false);
@@ -65,6 +68,9 @@ export function useExecution(
   const runGenRef = useRef(0); // generation counter to detect stale runs
   const activeJobsRef = useRef<Map<string, string>>(new Map()); // nodeId → jobId
   const wsRefs = useRef<WebSocket[]>([]);
+  const useCacheRef = useRef(useCache);
+  useCacheRef.current = useCache;
+  const forceRerunRef = useRef<Set<string>>(new Set());
 
   const updateNode = useCallback(
     (nodeId: string, patch: Partial<NodeRunState>) => {
@@ -198,6 +204,30 @@ export function useExecution(
 
       // Use async mode with WebSocket streaming for live log output
       const req: RunStepRequest = { ...requests[stepIndex], mode: "async" };
+
+      // ── Cache check (single-node) ─────────────────────────────
+      if (useCacheRef.current && !forceRerunRef.current.has(nodeId)) {
+        try {
+          const cacheKey = await computeCacheKey(req);
+          const cached = await lookupCache(cacheKey);
+          if (cached.hit) {
+            updateNode(nodeId, {
+              ...emptyRunState(),
+              status: "cached",
+              stdout: cached.stdout ?? "",
+              stderr: cached.stderr ?? "",
+              exitCode: cached.exit_code ?? 0,
+              submittedRequest: req,
+              completedAt: Date.now(),
+            });
+            emitEvent(nodeId, "cache-hit", "Using cached result");
+            return null;
+          }
+        } catch {
+          // Cache lookup failed — proceed with normal execution
+        }
+      }
+      forceRerunRef.current.delete(nodeId);
 
       // Respect delay/throttle for single-node runs (consistent with full pipeline runs)
       const delaySecs = step.delay_seconds;
@@ -490,6 +520,30 @@ export function useExecution(
 
           // Inject any values from upstream Extract nodes into this step's args
           const finalReq = injectExtractValues(nodeId, req, graph);
+
+          // ── Cache check ────────────────────────────────────────
+          if (useCacheRef.current && !forceRerunRef.current.has(nodeId)) {
+            try {
+              const cacheKey = await computeCacheKey(finalReq);
+              const cached = await lookupCache(cacheKey);
+              if (cached.hit) {
+                updateNode(nodeId, {
+                  status: "cached",
+                  stdout: cached.stdout ?? "",
+                  stderr: cached.stderr ?? "",
+                  exitCode: cached.exit_code ?? 0,
+                  submittedRequest: finalReq,
+                  completedAt: Date.now(),
+                });
+                emitEvent(nodeId, "cache-hit", "Using cached result");
+                resolved.set(nodeId, "succeeded");
+                return;
+              }
+            } catch {
+              // Cache lookup failed — proceed with normal execution
+            }
+          }
+
           const stepStartedAt = Date.now();
           updateNode(nodeId, { status: "running", submittedRequest: finalReq, startedAt: stepStartedAt });
           emitEvent(nodeId, "submitted", `Submitted ${finalReq.stage}/${finalReq.command}`);
@@ -759,6 +813,7 @@ export function useExecution(
         );
         await Promise.all([...promises, ...extractPromises]);
         persistRun("pipeline");
+        forceRerunRef.current.clear();
       } finally {
         if (runGenRef.current === gen) setRunning(false);
       }
@@ -814,5 +869,11 @@ export function useExecution(
     });
   }, []);
 
-  return { runState, running, dryRun, runPipeline, runSingleNode, cancelAll, reset, clearNode };
+  // ── Force re-run (bypass cache for a specific node) ──────────────
+
+  const forceRerunNode = useCallback((nodeId: string) => {
+    forceRerunRef.current.add(nodeId);
+  }, []);
+
+  return { runState, running, dryRun, runPipeline, runSingleNode, cancelAll, reset, clearNode, forceRerunNode };
 }

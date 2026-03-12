@@ -11,6 +11,7 @@ The database file lives at ``$ZYRA_DATA_DIR/run_history.db`` (defaults to
 
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import sqlite3
@@ -63,7 +64,71 @@ def init_db() -> sqlite3.Connection:
     conn.execute("PRAGMA foreign_keys=ON")
     conn.executescript(_SCHEMA)
     conn.commit()
+    _migrate_cache_key(conn)
+    _backfill_cache_keys(conn)
     return conn
+
+
+def _migrate_cache_key(conn: sqlite3.Connection) -> None:
+    """Add cache_key column to run_steps if it doesn't exist yet."""
+    cur = conn.execute("PRAGMA table_info(run_steps)")
+    columns = {row[1] for row in cur.fetchall()}
+    if "cache_key" not in columns:
+        conn.execute("ALTER TABLE run_steps ADD COLUMN cache_key TEXT")
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_run_steps_cache_key "
+            "ON run_steps(cache_key)"
+        )
+        conn.commit()
+
+
+def _compute_cache_key(request_dict: dict[str, Any]) -> str:
+    """Compute a SHA-256 cache key from a request dict.
+
+    Uses the same canonical form as the TypeScript ``canonicalizeRequest``:
+    ``JSON.stringify({ stage, command, args })`` with sorted keys.
+    """
+    canonical = json.dumps(
+        {
+            "stage": request_dict.get("stage", ""),
+            "command": request_dict.get("command", ""),
+            "args": _sort_keys(request_dict.get("args", {})),
+        },
+        separators=(",", ":"),
+        sort_keys=False,  # we sort manually for nested structures
+    )
+    return hashlib.sha256(canonical.encode()).hexdigest()
+
+
+def _sort_keys(obj: Any) -> Any:
+    """Recursively sort dict keys for deterministic JSON output."""
+    if isinstance(obj, dict):
+        return {k: _sort_keys(v) for k, v in sorted(obj.items())}
+    if isinstance(obj, list):
+        return [_sort_keys(item) for item in obj]
+    return obj
+
+
+def _backfill_cache_keys(conn: sqlite3.Connection) -> None:
+    """One-time backfill of cache_key for existing rows."""
+    cur = conn.execute(
+        "SELECT id, request FROM run_steps "
+        "WHERE cache_key IS NULL AND request IS NOT NULL"
+    )
+    rows = cur.fetchall()
+    if not rows:
+        return
+    for row_id, request_json in rows:
+        try:
+            req = json.loads(request_json)
+            key = _compute_cache_key(req)
+            conn.execute(
+                "UPDATE run_steps SET cache_key = ? WHERE id = ?",
+                (key, row_id),
+            )
+        except (json.JSONDecodeError, TypeError):
+            continue
+    conn.commit()
 
 
 # ── Write operations ──────────────────────────────────────────────────
@@ -92,13 +157,16 @@ def save_run(conn: sqlite3.Connection, run: dict[str, Any]) -> None:
             ),
         )
         for step in run.get("steps", []):
+            cache_key = None
+            if step.get("request"):
+                cache_key = _compute_cache_key(step["request"])
             cur.execute(
                 """
                 INSERT INTO run_steps
                     (run_id, node_id, status, job_id, exit_code,
                      stdout, stderr, started_at, completed_at, duration_ms,
-                     request, events, dry_run_argv)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                     request, events, dry_run_argv, cache_key)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     run["id"],
@@ -114,6 +182,7 @@ def save_run(conn: sqlite3.Connection, run: dict[str, Any]) -> None:
                     json.dumps(step["request"]) if step.get("request") else None,
                     json.dumps(step.get("events", [])),
                     step.get("dryRunArgv"),
+                    cache_key,
                 ),
             )
         conn.commit()
@@ -217,6 +286,37 @@ def get_run(conn: sqlite3.Connection, run_id: str) -> dict[str, Any] | None:
         for r in cur.fetchall()
     ]
     return run
+
+
+# ── Cache operations ──────────────────────────────────────────────────
+
+def lookup_cache(
+    conn: sqlite3.Connection,
+    cache_key: str,
+) -> dict[str, Any] | None:
+    """Find the most recent successful step matching *cache_key*.
+
+    Returns ``{"stdout", "stderr", "exit_code", "completed_at"}`` or ``None``.
+    """
+    cur = conn.execute(
+        """
+        SELECT stdout, stderr, exit_code, completed_at
+        FROM run_steps
+        WHERE cache_key = ? AND status = 'succeeded'
+        ORDER BY completed_at DESC
+        LIMIT 1
+        """,
+        (cache_key,),
+    )
+    row = cur.fetchone()
+    if row is None:
+        return None
+    return {
+        "stdout": row[0],
+        "stderr": row[1],
+        "exit_code": row[2],
+        "completed_at": row[3],
+    }
 
 
 # ── Delete operations ─────────────────────────────────────────────────

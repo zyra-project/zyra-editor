@@ -37,6 +37,7 @@ const statusIndicator: Record<
   succeeded: { color: STATUS_COLORS.succeeded, label: "\u2713" },
   failed: { color: STATUS_COLORS.failed, label: "\u2717" },
   canceled: { color: STATUS_COLORS.canceled, label: "\u2014" },
+  cached: { color: STATUS_COLORS.cached, label: "C" },
 };
 
 export function ZyraNode({ id, data, selected }: NodeProps) {

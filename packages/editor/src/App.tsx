@@ -272,6 +272,7 @@ function Editor() {
   const [yamlOpen, setYamlOpen] = useState(false);
   const [plannerOpen, setPlannerOpen] = useState(false);
   const [historyOpen, setHistoryOpen] = useState(false);
+  const [useCache, setUseCache] = useState(true);
   const [paletteCollapsed, setPaletteCollapsed] = useState(false);
   const [plannerIntent, setPlannerIntent] = useState("");
   const [plannerHistory, setPlannerHistory] = useState<PlanHistoryEntry[]>([]);
@@ -286,7 +287,7 @@ function Editor() {
     nodes: graphNodesRef.current,
     edges: graphEdgesRef.current,
   }), []);
-  const exec = useExecution(getGraphSnapshot);
+  const exec = useExecution(getGraphSnapshot, useCache);
   const [historyRefreshKey, setHistoryRefreshKey] = useState(0);
   const prevRunningRef = useRef(false);
   useEffect(() => {
@@ -1045,6 +1046,8 @@ function Editor() {
         onTogglePlanner={() => setPlannerOpen((v) => !v)}
         historyOpen={historyOpen}
         onToggleHistory={() => setHistoryOpen((v) => !v)}
+        useCache={useCache}
+        onToggleCache={() => setUseCache((v) => !v)}
         theme={theme}
         onToggleTheme={toggleTheme}
         backendStatus={backendStatus}

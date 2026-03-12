@@ -36,7 +36,8 @@ export type NodeRunStatus =
   | "running"
   | "succeeded"
   | "failed"
-  | "canceled";
+  | "canceled"
+  | "cached";
 
 // ── Structured run events ────────────────────────────────────────
 
@@ -48,7 +49,8 @@ export type RunEventType =
   | "poll-fallback"
   | "completed"
   | "canceled"
-  | "error";
+  | "error"
+  | "cache-hit";
 
 /** A single structured event in a node's execution timeline. */
 export interface RunEvent {
@@ -93,4 +95,5 @@ export const STATUS_COLORS: Record<NodeRunStatus, string> = {
   succeeded: "#3fb950",
   failed: "#f85149",
   canceled: "#d29922",
+  cached: "#8b949e",
 };

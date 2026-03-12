@@ -89,7 +89,7 @@ export function buildRunRecord(
     ? "failed"
     : hasCanceled
       ? "canceled"
-      : steps.every((s) => s.status === "succeeded")
+      : steps.every((s) => s.status === "succeeded" || s.status === "cached")
         ? "succeeded"
         : "partial";
 
