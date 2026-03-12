@@ -1,6 +1,7 @@
 import { useState } from "react";
 import type { RunStateMap } from "./useExecution";
 import { STATUS_COLORS } from "@zyra/core";
+import { GanttChartContainer, runStateToGanttBars } from "./GanttChart";
 
 interface LogPanelProps {
   runState: RunStateMap;
@@ -9,8 +10,11 @@ interface LogPanelProps {
   onSelectNode?: (nodeId: string) => void;
 }
 
+type LogTab = "steps" | "timeline";
+
 export function LogPanel({ runState, selectedNodeId, onClearNode, onSelectNode }: LogPanelProps) {
   const [collapsed, setCollapsed] = useState(true);
+  const [activeTab, setActiveTab] = useState<LogTab>("steps");
 
   if (runState.size === 0) return null;
 
@@ -23,6 +27,9 @@ export function LogPanel({ runState, selectedNodeId, onClearNode, onSelectNode }
     else if (state.status === "running") counts.running++;
     else if (state.status === "queued") counts.queued++;
   }
+
+  const ganttBars = runStateToGanttBars(runState);
+  const hasTimingData = ganttBars.length > 0;
 
   return (
     <div className="zyra-logs" style={{
@@ -57,6 +64,19 @@ export function LogPanel({ runState, selectedNodeId, onClearNode, onSelectNode }
           {collapsed ? "\u25b6" : "\u25bc"} Pipeline
         </button>
 
+        {/* Tab switcher (only when expanded) */}
+        {!collapsed && (
+          <div style={{ display: "flex", gap: 2 }}>
+            <TabButton label="Steps" active={activeTab === "steps"} onClick={() => setActiveTab("steps")} />
+            <TabButton
+              label="Timeline"
+              active={activeTab === "timeline"}
+              onClick={() => setActiveTab("timeline")}
+              disabled={!hasTimingData}
+            />
+          </div>
+        )}
+
         {/* Status pills */}
         <div style={{ display: "flex", gap: 10, flex: 1 }}>
           {counts.running > 0 && (
@@ -74,79 +94,121 @@ export function LogPanel({ runState, selectedNodeId, onClearNode, onSelectNode }
         </div>
       </div>
 
-      {/* Expanded: node list */}
+      {/* Expanded content */}
       {!collapsed && (
         <div style={{
-          maxHeight: 160,
+          maxHeight: activeTab === "timeline" ? 220 : 160,
           overflowY: "auto",
-          padding: "4px 8px",
+          padding: activeTab === "timeline" ? "4px 0" : "4px 8px",
         }}>
-          {Array.from(runState.entries()).map(([nodeId, state]) => {
-            const color = (STATUS_COLORS as Record<string, string>)[state.status];
-            const isSelected = nodeId === selectedNodeId;
-            return (
-              <div
-                key={nodeId}
-                style={{
-                  display: "flex",
-                  alignItems: "center",
-                  padding: "4px 8px",
-                  borderRadius: "var(--radius-sm)",
-                  background: isSelected ? "var(--bg-tertiary)" : "transparent",
-                  cursor: "pointer",
-                  gap: 8,
-                  marginBottom: 2,
-                }}
-                onClick={() => onSelectNode?.(nodeId)}
-              >
-                <span style={{
-                  width: 8,
-                  height: 8,
-                  borderRadius: "50%",
-                  background: color ?? "var(--text-muted)",
-                  flexShrink: 0,
-                  animation: state.status === "running" ? "zyra-pulse 1.2s infinite" : undefined,
-                }} />
-                <span style={{
-                  color: "var(--text-primary)",
-                  fontSize: 11,
-                  flex: 1,
-                  overflow: "hidden",
-                  textOverflow: "ellipsis",
-                  whiteSpace: "nowrap",
-                }}>
-                  {nodeId}
-                </span>
-                <span style={{ fontSize: 10, color: "var(--text-muted)" }}>
-                  {state.status}
-                </span>
-                {onClearNode && state.status !== "running" && (
-                  <button
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      onClearNode(nodeId);
-                    }}
-                    title="Clear"
-                    aria-label={`Clear ${nodeId}`}
+          {activeTab === "steps" && (
+            <>
+              {Array.from(runState.entries()).map(([nodeId, state]) => {
+                const color = (STATUS_COLORS as Record<string, string>)[state.status];
+                const isSelected = nodeId === selectedNodeId;
+                return (
+                  <div
+                    key={nodeId}
                     style={{
-                      background: "none",
-                      border: "none",
-                      color: "var(--text-muted)",
+                      display: "flex",
+                      alignItems: "center",
+                      padding: "4px 8px",
+                      borderRadius: "var(--radius-sm)",
+                      background: isSelected ? "var(--bg-tertiary)" : "transparent",
                       cursor: "pointer",
-                      fontSize: 10,
-                      padding: "0 2px",
-                      lineHeight: 1,
+                      gap: 8,
+                      marginBottom: 2,
                     }}
+                    onClick={() => onSelectNode?.(nodeId)}
                   >
-                    &times;
-                  </button>
-                )}
-              </div>
-            );
-          })}
+                    <span style={{
+                      width: 8,
+                      height: 8,
+                      borderRadius: "50%",
+                      background: color ?? "var(--text-muted)",
+                      flexShrink: 0,
+                      animation: state.status === "running" ? "zyra-pulse 1.2s infinite" : undefined,
+                    }} />
+                    <span style={{
+                      color: "var(--text-primary)",
+                      fontSize: 11,
+                      flex: 1,
+                      overflow: "hidden",
+                      textOverflow: "ellipsis",
+                      whiteSpace: "nowrap",
+                    }}>
+                      {nodeId}
+                    </span>
+                    <span style={{ fontSize: 10, color: "var(--text-muted)" }}>
+                      {state.status}
+                    </span>
+                    {onClearNode && state.status !== "running" && (
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          onClearNode(nodeId);
+                        }}
+                        title="Clear"
+                        aria-label={`Clear ${nodeId}`}
+                        style={{
+                          background: "none",
+                          border: "none",
+                          color: "var(--text-muted)",
+                          cursor: "pointer",
+                          fontSize: 10,
+                          padding: "0 2px",
+                          lineHeight: 1,
+                        }}
+                      >
+                        &times;
+                      </button>
+                    )}
+                  </div>
+                );
+              })}
+            </>
+          )}
+
+          {activeTab === "timeline" && (
+            <GanttChartContainer bars={ganttBars} />
+          )}
         </div>
       )}
     </div>
+  );
+}
+
+function TabButton({
+  label,
+  active,
+  onClick,
+  disabled,
+}: {
+  label: string;
+  active: boolean;
+  onClick: () => void;
+  disabled?: boolean;
+}) {
+  return (
+    <button
+      onClick={onClick}
+      disabled={disabled}
+      style={{
+        background: active ? "var(--bg-tertiary)" : "none",
+        border: "1px solid",
+        borderColor: active ? "var(--border-default)" : "transparent",
+        borderRadius: "var(--radius-sm)",
+        color: active ? "var(--text-bright)" : disabled ? "var(--text-muted)" : "var(--text-secondary)",
+        cursor: disabled ? "default" : "pointer",
+        padding: "2px 8px",
+        fontSize: 10,
+        fontFamily: "var(--font-sans)",
+        fontWeight: active ? 600 : 400,
+        opacity: disabled ? 0.5 : 1,
+      }}
+    >
+      {label}
+    </button>
   );
 }
 

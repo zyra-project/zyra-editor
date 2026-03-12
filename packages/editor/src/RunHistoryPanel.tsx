@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback } from "react";
 import type { RunSummary, RunHistoryRecord, GraphSnapshot, RunEvent } from "@zyra/core";
 import { STATUS_COLORS } from "@zyra/core";
 import { listRunHistory, getRunHistory, deleteRunHistory } from "./api";
+import { GanttChart, stepsToGanttBars } from "./GanttChart";
 
 interface Props {
   onClose: () => void;
@@ -300,7 +301,10 @@ function RunDetail({
   run: RunHistoryRecord;
   onRestore?: () => void;
 }) {
+  const [showTimeline, setShowTimeline] = useState(false);
   const statusColor = (STATUS_COLORS as Record<string, string>)[run.status] ?? "#555";
+  const ganttBars = stepsToGanttBars(run.steps);
+  const hasTimingData = ganttBars.length > 0;
 
   return (
     <div style={{ padding: 16 }}>
@@ -336,26 +340,57 @@ function RunDetail({
         </div>
       </div>
 
-      {/* Restore graph button */}
-      {onRestore && (
-        <button
-          onClick={onRestore}
-          style={{
-            display: "block",
-            width: "100%",
-            padding: "6px 0",
-            marginBottom: 12,
-            background: "var(--bg-secondary)",
-            border: "1px solid var(--accent-blue)",
-            borderRadius: "var(--radius-sm)",
-            color: "var(--accent-blue)",
-            fontSize: 12,
-            fontWeight: 600,
-            cursor: "pointer",
-          }}
-        >
-          Restore graph from this run
-        </button>
+      {/* Action buttons */}
+      <div style={{ display: "flex", gap: 8, marginBottom: 12 }}>
+        {onRestore && (
+          <button
+            onClick={onRestore}
+            style={{
+              flex: 1,
+              padding: "6px 0",
+              background: "var(--bg-secondary)",
+              border: "1px solid var(--accent-blue)",
+              borderRadius: "var(--radius-sm)",
+              color: "var(--accent-blue)",
+              fontSize: 12,
+              fontWeight: 600,
+              cursor: "pointer",
+            }}
+          >
+            Restore graph
+          </button>
+        )}
+        {hasTimingData && (
+          <button
+            onClick={() => setShowTimeline((v) => !v)}
+            style={{
+              flex: 1,
+              padding: "6px 0",
+              background: showTimeline ? "var(--accent-blue)" : "var(--bg-secondary)",
+              border: `1px solid ${showTimeline ? "var(--accent-blue)" : "var(--border-default)"}`,
+              borderRadius: "var(--radius-sm)",
+              color: showTimeline ? "#fff" : "var(--text-secondary)",
+              fontSize: 12,
+              fontWeight: 600,
+              cursor: "pointer",
+            }}
+          >
+            Timeline
+          </button>
+        )}
+      </div>
+
+      {/* Gantt chart */}
+      {showTimeline && (
+        <div style={{
+          marginBottom: 12,
+          border: "1px solid var(--border-default)",
+          borderRadius: "var(--radius-sm)",
+          overflow: "hidden",
+          background: "var(--bg-primary)",
+        }}>
+          <GanttChart bars={ganttBars} width={348} />
+        </div>
       )}
 
       {/* Steps */}
