@@ -3,8 +3,9 @@ export type {
   StageDef,
   PortDef,
   ArgDef,
+  ArgValidationError,
 } from "./manifest.js";
-export { portsCompatible, argToPort, argToOutputPort, getImplicitOutputs, getEffectivePorts } from "./manifest.js";
+export { portsCompatible, argToPort, argToOutputPort, getImplicitOutputs, getEffectivePorts, validateArgs } from "./manifest.js";
 
 export type {
   Graph,

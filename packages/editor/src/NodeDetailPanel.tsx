@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef, useMemo } from "react";
-import type { ArgDef, PortDef, NodeRunStatus } from "@zyra/core";
-import { STATUS_COLORS, getEffectivePorts } from "@zyra/core";
+import type { ArgDef, PortDef, NodeRunStatus, ArgValidationError } from "@zyra/core";
+import { STATUS_COLORS, getEffectivePorts, validateArgs } from "@zyra/core";
 import type { ZyraNodeData } from "./ZyraNode";
 import { isSensitive } from "./ZyraNode";
 import type { NodeRunState } from "@zyra/core";
@@ -202,6 +202,17 @@ function SettingsTab({
     }
   }
 
+  // Validate args against their definitions
+  const validationErrors = useMemo(
+    () => validateArgs(stageDef.args, argValues, new Set(linkedArgs.keys())),
+    [stageDef.args, argValues, linkedArgs.size],
+  );
+  const errorsByKey = useMemo(() => {
+    const map = new Map<string, string>();
+    for (const e of validationErrors) map.set(e.key, e.message);
+    return map;
+  }, [validationErrors]);
+
   return (
     <>
       {stageDef.args.length === 0 && extraKeys.length === 0 && (
@@ -282,6 +293,7 @@ function SettingsTab({
             linkedFrom={linkedFrom}
             onChange={(v) => onArgChange(nodeId, arg.key, v)}
             forceSecret={isSecretVariable}
+            error={errorsByKey.get(arg.key)}
           />
         );
       })}
@@ -651,6 +663,7 @@ function ArgField({
   linkedFrom,
   onChange,
   forceSecret,
+  error,
 }: {
   arg: ArgDef;
   value: string | number | boolean | undefined;
@@ -659,6 +672,8 @@ function ArgField({
   onChange: (v: string | number | boolean) => void;
   /** Override: treat this field as a secret (password input) regardless of name/label. */
   forceSecret?: boolean;
+  /** Validation error message for this field. */
+  error?: string;
 }) {
   const id = `arg-${arg.key}`;
 
@@ -729,27 +744,42 @@ function ArgField({
 
       {!linkedFrom && (
         arg.type === "enum" && arg.options ? (
-          <select
-            id={id}
-            className="zyra-input"
-            value={(value as string) ?? arg.default ?? ""}
-            onChange={(e) => onChange(e.target.value)}
-          >
-            <option value="" disabled>Select...</option>
-            {arg.options.map((opt: string) => (
-              <option key={opt} value={opt}>{opt}</option>
-            ))}
-          </select>
+          <>
+            <select
+              id={id}
+              className="zyra-input"
+              value={(value as string) ?? arg.default ?? ""}
+              onChange={(e) => onChange(e.target.value)}
+              style={error ? { borderColor: "var(--accent-red)" } : undefined}
+            >
+              <option value="" disabled>Select...</option>
+              {arg.options.map((opt: string) => (
+                <option key={opt} value={opt}>{opt}</option>
+              ))}
+            </select>
+            {error && (
+              <div style={{ fontSize: 11, color: "var(--accent-red)", marginTop: 4 }}>
+                {error}
+              </div>
+            )}
+          </>
         ) : arg.type === "date" ? (
-          <input
-            id={id}
-            className="zyra-input"
-            type="date"
-            value={(value as string) ?? ""}
-            placeholder={arg.placeholder ?? ""}
-            onChange={(e) => onChange(e.target.value)}
-            style={{ colorScheme: "dark" }}
-          />
+          <>
+            <input
+              id={id}
+              className="zyra-input"
+              type="date"
+              value={(value as string) ?? ""}
+              placeholder={arg.placeholder ?? ""}
+              onChange={(e) => onChange(e.target.value)}
+              style={{ colorScheme: "dark", ...(error ? { borderColor: "var(--accent-red)" } : {}) }}
+            />
+            {error && (
+              <div style={{ fontSize: 11, color: "var(--accent-red)", marginTop: 4 }}>
+                {error}
+              </div>
+            )}
+          </>
         ) : arg.type === "boolean" ? (
           (() => {
             const effectiveValue = value !== undefined ? !!value : !!arg.default;
@@ -783,11 +813,16 @@ function ArgField({
                   onChange(e.target.value);
                 }
               }}
-              style={durationInvalid ? { borderColor: "var(--accent-red)" } : undefined}
+              style={(durationInvalid || error) ? { borderColor: "var(--accent-red)" } : undefined}
             />
             {durationInvalid && (
               <div style={{ fontSize: 11, color: "var(--accent-red)", marginTop: 4 }}>
                 Invalid ISO 8601 duration. Use format like P1D, P2W, P1M, P1Y6M, PT12H.
+              </div>
+            )}
+            {error && !durationInvalid && (
+              <div style={{ fontSize: 11, color: "var(--accent-red)", marginTop: 4 }}>
+                {error}
               </div>
             )}
           </>

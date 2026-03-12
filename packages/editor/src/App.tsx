@@ -16,7 +16,7 @@ import {
 } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
 import type { StageDef, ArgDef, PortDef, Graph, GraphNode, GraphEdge, Pipeline, PipelineStep, PipelineGroup, NodeRunStatus } from "@zyra/core";
-import { portsCompatible, getEffectivePorts, graphToPipeline, pipelineToGraph, resolvePeriodISO } from "@zyra/core";
+import { portsCompatible, getEffectivePorts, graphToPipeline, pipelineToGraph, resolvePeriodISO, validateArgs } from "@zyra/core";
 import { ManifestProvider, useManifest } from "./ManifestLoader";
 import { NodePalette } from "./NodePalette";
 import { ZyraNode, type ZyraNodeData } from "./ZyraNode";
@@ -786,12 +786,47 @@ function Editor() {
   }, [nodes, edges, manifest.stages, exec.dryRun]);
 
   const handleRun = useCallback(() => {
+    // Validate all nodes before running
+    const errors: string[] = [];
+    for (const n of nodes) {
+      if (n.type === "group") continue;
+      const d = n.data as ZyraNodeData;
+      const linkedKeys = new Set(
+        edges
+          .filter((e) => e.target === n.id && e.targetHandle?.startsWith("arg:"))
+          .map((e) => e.targetHandle!.slice(4)),
+      );
+      const nodeErrors = validateArgs(d.stageDef.args, d.argValues, linkedKeys);
+      if (nodeErrors.length > 0) {
+        const label = d.nodeLabel || d.stageDef.label;
+        errors.push(`${label}: ${nodeErrors.map((ve) => ve.message).join(", ")}`);
+      }
+    }
+    if (errors.length > 0) {
+      alert(`Validation errors:\n\n${errors.join("\n")}`);
+      return;
+    }
     const graph = toGraph(nodes, edges);
     exec.runPipeline(graph, manifest.stages);
   }, [nodes, edges, manifest.stages, exec.runPipeline]);
 
   const handleRunNode = useCallback(
     async (nodeId: string) => {
+      // Validate this node before running
+      const n = nodes.find((nd) => nd.id === nodeId);
+      if (n && n.type !== "group") {
+        const d = n.data as ZyraNodeData;
+        const linkedKeys = new Set(
+          edges
+            .filter((e) => e.target === nodeId && e.targetHandle?.startsWith("arg:"))
+            .map((e) => e.targetHandle!.slice(4)),
+        );
+        const nodeErrors = validateArgs(d.stageDef.args, d.argValues, linkedKeys);
+        if (nodeErrors.length > 0) {
+          alert(`Validation errors:\n\n${nodeErrors.map((ve) => ve.message).join("\n")}`);
+          return;
+        }
+      }
       const graph = toGraph(nodes, edges);
       const err = await exec.runSingleNode(nodeId, graph, manifest.stages);
       if (err) {

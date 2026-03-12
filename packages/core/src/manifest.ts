@@ -59,6 +59,71 @@ export function portsCompatible(
   return output.types.some((t) => input.types.includes(t));
 }
 
+// ── arg validation ───────────────────────────────────────────────
+
+/** A single validation error for an argument. */
+export interface ArgValidationError {
+  key: string;
+  message: string;
+}
+
+/**
+ * Validate argument values against their ArgDef constraints.
+ * @param args      The ArgDef definitions from the stage manifest.
+ * @param values    The current argument values keyed by ArgDef.key.
+ * @param linkedKeys  Set of arg keys that are wired from another node (skip required check).
+ * @returns Array of validation errors (empty = valid).
+ */
+export function validateArgs(
+  args: ArgDef[],
+  values: Record<string, unknown>,
+  linkedKeys?: Set<string>,
+): ArgValidationError[] {
+  const errors: ArgValidationError[] = [];
+
+  for (const arg of args) {
+    const val = values[arg.key];
+    const isLinked = linkedKeys?.has(arg.key);
+
+    // Required check (skip if wired from another node)
+    if (arg.required && !isLinked) {
+      if (val === undefined || val === null || val === "") {
+        errors.push({ key: arg.key, message: `${arg.label} is required` });
+        continue; // no point checking type on empty value
+      }
+    }
+
+    // Skip further checks if value is empty/undefined (optional field)
+    if (val === undefined || val === null || val === "") continue;
+
+    // Type-specific checks
+    switch (arg.type) {
+      case "number": {
+        const n = typeof val === "number" ? val : Number(val);
+        if (Number.isNaN(n)) {
+          errors.push({ key: arg.key, message: `${arg.label} must be a valid number` });
+        }
+        break;
+      }
+      case "enum": {
+        if (arg.options && !arg.options.includes(String(val))) {
+          errors.push({ key: arg.key, message: `${arg.label} must be one of: ${arg.options.join(", ")}` });
+        }
+        break;
+      }
+      case "date": {
+        const d = new Date(String(val));
+        if (Number.isNaN(d.getTime())) {
+          errors.push({ key: arg.key, message: `${arg.label} must be a valid date` });
+        }
+        break;
+      }
+    }
+  }
+
+  return errors;
+}
+
 // ── arg-port helpers ──────────────────────────────────────────────
 
 const ARG_TYPE_MAP: Record<string, string[]> = {
