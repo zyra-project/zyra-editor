@@ -50,3 +50,6 @@ export type {
   RunHistoryRecord,
 } from "./history.js";
 export { buildRunRecord } from "./history.js";
+
+export type { LineageResult } from "./lineage.js";
+export { computeLineage } from "./lineage.js";

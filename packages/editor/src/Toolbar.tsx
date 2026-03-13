@@ -22,6 +22,8 @@ interface ToolbarProps {
   onToggleHistory: () => void;
   useCache: boolean;
   onToggleCache: () => void;
+  lineageMode: boolean;
+  onToggleLineage: () => void;
   theme: Theme;
   onToggleTheme: () => void;
   backendStatus: BackendStatus & { refresh: () => void };
@@ -45,6 +47,8 @@ export function Toolbar({
   onToggleHistory,
   useCache,
   onToggleCache,
+  lineageMode,
+  onToggleLineage,
   theme,
   onToggleTheme,
   backendStatus,
@@ -216,6 +220,30 @@ export function Toolbar({
       >
         <span style={{ fontSize: 14 }}>{"\u26A1"}</span>
         Cache{useCache ? ": ON" : ": OFF"}
+      </button>
+
+      {/* Lineage toggle */}
+      <button
+        onClick={onToggleLineage}
+        title="When enabled, selecting a node highlights its upstream and downstream data flow"
+        style={{
+          background: lineageMode ? "var(--accent-blue)" : "none",
+          border: "1px solid var(--border-default)",
+          borderRadius: "var(--radius-md)",
+          color: lineageMode ? "#fff" : "var(--text-secondary)",
+          cursor: "pointer",
+          padding: "4px 10px",
+          fontSize: 12,
+          lineHeight: 1,
+          display: "flex",
+          alignItems: "center",
+          gap: 5,
+          fontFamily: "var(--font-sans)",
+          fontWeight: 500,
+        }}
+      >
+        <span style={{ fontSize: 14 }}>{"\u{1f517}"}</span>
+        Lineage{lineageMode ? ": ON" : ": OFF"}
       </button>
 
       {/* Spacer */}

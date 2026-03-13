@@ -16,7 +16,7 @@ import {
 } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
 import type { StageDef, ArgDef, PortDef, Graph, GraphNode, GraphEdge, Pipeline, PipelineStep, PipelineGroup, NodeRunStatus } from "@zyra/core";
-import { portsCompatible, getEffectivePorts, graphToPipeline, pipelineToGraph, resolvePeriodISO, validateArgs } from "@zyra/core";
+import { portsCompatible, getEffectivePorts, graphToPipeline, pipelineToGraph, resolvePeriodISO, validateArgs, computeLineage } from "@zyra/core";
 import { ManifestProvider, useManifest } from "./ManifestLoader";
 import { NodePalette } from "./NodePalette";
 import { ZyraNode, type ZyraNodeData } from "./ZyraNode";
@@ -273,6 +273,7 @@ function Editor() {
   const [plannerOpen, setPlannerOpen] = useState(false);
   const [historyOpen, setHistoryOpen] = useState(false);
   const [useCache, setUseCache] = useState(true);
+  const [lineageMode, setLineageMode] = useState(false);
   const [paletteCollapsed, setPaletteCollapsed] = useState(false);
   const [plannerIntent, setPlannerIntent] = useState("");
   const [plannerHistory, setPlannerHistory] = useState<PlanHistoryEntry[]>([]);
@@ -397,7 +398,13 @@ function Editor() {
     return { connectedInputMap: inMap, connectedOutputMap: outMap };
   }, [edges, nodes]);
 
-  // Inject run status + connected port sets into node data (skip group nodes)
+  // Compute lineage (upstream/downstream) for the selected node
+  const lineage = useMemo(() => {
+    if (!lineageMode || !selectedNodeId) return null;
+    return computeLineage(selectedNodeId, edges);
+  }, [lineageMode, selectedNodeId, edges]);
+
+  // Inject run status + connected port sets + lineage into node data (skip group nodes)
   const nodesWithStatus = useMemo(() => {
     return nodes.map((n) => {
       if (n.type === "group") return n;
@@ -407,12 +414,24 @@ function Editor() {
       const newArgv = rs?.dryRunArgv;
       const connIn = connectedInputMap.get(n.id);
       const connOut = connectedOutputMap.get(n.id);
+      // Lineage props
+      const dim = lineage != null
+        && n.id !== selectedNodeId
+        && !lineage.upstream.has(n.id)
+        && !lineage.downstream.has(n.id);
+      const role = lineage == null ? undefined
+        : n.id === selectedNodeId ? "selected" as const
+        : lineage.upstream.has(n.id) ? "upstream" as const
+        : lineage.downstream.has(n.id) ? "downstream" as const
+        : undefined;
       if (
         d.runStatus === newStatus &&
         d.dryRunArgv === newArgv &&
         d.onRunNode === onRunNode &&
         d.connectedInputPorts === connIn &&
-        d.connectedOutputPorts === connOut
+        d.connectedOutputPorts === connOut &&
+        d.lineageDim === dim &&
+        d.lineageRole === role
       ) {
         return n;
       }
@@ -425,10 +444,12 @@ function Editor() {
           onRunNode,
           connectedInputPorts: connIn,
           connectedOutputPorts: connOut,
+          lineageDim: dim,
+          lineageRole: role,
         },
       };
     });
-  }, [nodes, exec.runState, onRunNode, connectedInputMap, connectedOutputMap]);
+  }, [nodes, exec.runState, onRunNode, connectedInputMap, connectedOutputMap, lineage, selectedNodeId]);
 
   // Pipeline from current canvas state
   const pipeline = useMemo<Pipeline>(() => {
@@ -1034,6 +1055,26 @@ function Editor() {
       });
   }, [selectedNodeId, edges, nodes, exec.runState]);
 
+  // Lineage-aware edge styling: color upstream/downstream, dim unrelated
+  const edgesWithLineage = useMemo(() => {
+    if (!lineage) return edges;
+    const sel = selectedNodeId!;
+    return edges.map((e) => {
+      const isUpstream = lineage.upstream.has(e.source)
+        && (lineage.upstream.has(e.target) || e.target === sel);
+      const isDownstream = (lineage.downstream.has(e.target))
+        && (lineage.downstream.has(e.source) || e.source === sel);
+      if (isUpstream) {
+        return { ...e, style: { stroke: "#da8ee7", strokeWidth: 2.5 }, animated: false };
+      }
+      if (isDownstream) {
+        return { ...e, style: { stroke: "#39d353", strokeWidth: 2.5 }, animated: false };
+      }
+      // Unrelated edge — dim it
+      return { ...e, style: { stroke: "var(--accent-blue)", strokeWidth: 1, opacity: 0.15 }, animated: false };
+    });
+  }, [edges, lineage, selectedNodeId]);
+
   return (
     <div className="zyra-editor">
       <Toolbar
@@ -1054,6 +1095,8 @@ function Editor() {
         onToggleHistory={() => setHistoryOpen((v) => !v)}
         useCache={useCache}
         onToggleCache={() => setUseCache((v) => !v)}
+        lineageMode={lineageMode}
+        onToggleLineage={() => setLineageMode((v) => !v)}
         theme={theme}
         onToggleTheme={toggleTheme}
         backendStatus={backendStatus}
@@ -1069,7 +1112,7 @@ function Editor() {
       <div className="zyra-canvas" ref={reactFlowWrapper}>
         <ReactFlow
           nodes={nodesWithStatus}
-          edges={edges}
+          edges={edgesWithLineage}
           onNodesChange={onNodesChange}
           onEdgesChange={onEdgesChange}
           onConnect={onConnect}
