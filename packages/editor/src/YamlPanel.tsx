@@ -1,6 +1,6 @@
 import { useState, useCallback, useEffect, useRef } from "react";
 import yaml from "js-yaml";
-import type { Pipeline, PipelineStep, PipelineGroup, PipelineControl, PipelineSchedule, StepCondition } from "@zyra/core";
+import type { Pipeline, PipelineStep, PipelineGroup, PipelineControl, PipelineSchedule, StepCondition, PipelineResource } from "@zyra/core";
 
 declare global {
   interface Window {
@@ -21,6 +21,45 @@ interface NativeStage {
 interface NativeYaml {
   name?: string;
   stages?: NativeStage[];
+}
+
+/**
+ * Parse a `resources` field from raw YAML.
+ * Supports:
+ * - Array of objects: [{ name, value, description? }]
+ * - Flat map: { name: value, ... }
+ */
+function parseResources(raw: unknown): PipelineResource[] | undefined {
+  if (!raw) return undefined;
+
+  // Array-of-objects format
+  if (Array.isArray(raw)) {
+    const result: PipelineResource[] = [];
+    for (const item of raw) {
+      if (!item || typeof item !== "object") continue;
+      const obj = item as Record<string, unknown>;
+      const name = typeof obj.name === "string" ? obj.name : undefined;
+      const value = typeof obj.value === "string" ? obj.value : undefined;
+      if (!name || value === undefined) continue;
+      const res: PipelineResource = { name, value };
+      if (typeof obj.description === "string" && obj.description) res.description = obj.description;
+      result.push(res);
+    }
+    return result.length > 0 ? result : undefined;
+  }
+
+  // Flat map format: { name: value }
+  if (typeof raw === "object" && !Array.isArray(raw)) {
+    const result: PipelineResource[] = [];
+    for (const [name, value] of Object.entries(raw as Record<string, unknown>)) {
+      if (typeof value === "string" || typeof value === "number" || typeof value === "boolean") {
+        result.push({ name, value: String(value) });
+      }
+    }
+    return result.length > 0 ? result : undefined;
+  }
+
+  return undefined;
 }
 
 /**
@@ -234,6 +273,10 @@ export function normalizePipeline(raw: unknown): Pipeline | null {
       if (groups.length > 0) pipeline._groups = groups;
     }
 
+    // Parse resources
+    const resources = parseResources(obj.resources);
+    if (resources) pipeline.resources = resources;
+
     return pipeline;
   }
 
@@ -278,7 +321,10 @@ export function normalizePipeline(raw: unknown): Pipeline | null {
 
       steps.push(step);
     }
-    return { version: "1", steps };
+    const nativePipeline: Pipeline = { version: "1", steps };
+    const nativeResources = parseResources(obj.resources);
+    if (nativeResources) nativePipeline.resources = nativeResources;
+    return nativePipeline;
   }
 
   return null;

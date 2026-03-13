@@ -486,3 +486,38 @@ describe("graphToPipeline — transitive dependencies", () => {
     expect(stepB.depends_on).toContain("a");
   });
 });
+
+// ── Pipeline.resources ──────────────────────────────────────────────────────
+
+describe("Pipeline.resources", () => {
+  it("Pipeline type accepts resources field", () => {
+    const pipeline: Pipeline = {
+      version: "1",
+      steps: [{ name: "a", command: "acquire/http", args: { path: "${res:work_dir}" } }],
+      resources: [
+        { name: "work_dir", value: "/data/output" },
+        { name: "s3_bucket", value: "s3://my-bucket", description: "Main bucket" },
+      ],
+    };
+    expect(pipeline.resources).toHaveLength(2);
+    expect(pipeline.resources![0].name).toBe("work_dir");
+    expect(pipeline.resources![1].description).toBe("Main bucket");
+  });
+
+  it("Pipeline without resources has undefined field", () => {
+    const pipeline: Pipeline = {
+      version: "1",
+      steps: [{ name: "a", command: "acquire/http", args: {} }],
+    };
+    expect(pipeline.resources).toBeUndefined();
+  });
+
+  it("graphToPipeline does not populate resources (set externally)", () => {
+    const graph: Graph = {
+      nodes: [{ id: "a", stageCommand: "acquire/http", argValues: {} }],
+      edges: [],
+    };
+    const pipeline = graphToPipeline(graph, STAGES);
+    expect(pipeline.resources).toBeUndefined();
+  });
+});

@@ -10,7 +10,8 @@ import type {
   RunEvent,
   GraphSnapshot,
 } from "@zyra/core";
-import { emptyRunState, extractByPath, graphToRunRequests, graphToPipeline, stepToCliPreview, buildRunRecord, computeCacheKey } from "@zyra/core";
+import { emptyRunState, extractByPath, graphToRunRequests, graphToPipeline, stepToCliPreview, buildRunRecord, computeCacheKey, resolveRequestResources } from "@zyra/core";
+import type { ResourceMap } from "@zyra/core";
 import { postRun, getJobStatus, connectJobWs, cancelJob, saveRunHistory, lookupCache } from "./api";
 
 export type RunStateMap = Map<string, NodeRunState>;
@@ -63,6 +64,7 @@ async function cancellableSleep(
 export function useExecution(
   getGraphSnapshot?: () => GraphSnapshot | undefined,
   useCache = false,
+  resourceMap?: ResourceMap,
 ): ExecutionControls {
   const [runState, _setRunState] = useState<RunStateMap>(new Map());
   const runStateRef = useRef<RunStateMap>(runState);
@@ -80,6 +82,8 @@ export function useExecution(
   const wsRefs = useRef<WebSocket[]>([]);
   const useCacheRef = useRef(useCache);
   useCacheRef.current = useCache;
+  const resourceMapRef = useRef(resourceMap);
+  resourceMapRef.current = resourceMap;
   const forceRerunRef = useRef<Set<string>>(new Set());
 
   const updateNode = useCallback(
@@ -251,12 +255,17 @@ export function useExecution(
         }
       }
 
+      // Resolve resource references in args before submission
+      const resolvedReq = resourceMapRef.current
+        ? { ...req, args: resolveRequestResources(req.args, resourceMapRef.current) }
+        : req;
+
       const now = Date.now();
-      updateNode(nodeId, { ...emptyRunState(), status: "running", submittedRequest: req, startedAt: now });
-      emitEvent(nodeId, "submitted", `Submitted ${req.stage}/${req.command}`);
+      updateNode(nodeId, { ...emptyRunState(), status: "running", submittedRequest: resolvedReq, startedAt: now });
+      emitEvent(nodeId, "submitted", `Submitted ${resolvedReq.stage}/${resolvedReq.command}`);
 
       try {
-        const res = await postRun(req);
+        const res = await postRun(resolvedReq);
 
         if (res.status === "error") {
           const doneAt = Date.now();
@@ -564,12 +573,17 @@ export function useExecution(
             }
           }
 
+          // Resolve resource references in args before submission
+          const resolvedFinalReq = resourceMapRef.current
+            ? { ...finalReq, args: resolveRequestResources(finalReq.args, resourceMapRef.current) }
+            : finalReq;
+
           const stepStartedAt = Date.now();
-          updateNode(nodeId, { status: "running", submittedRequest: finalReq, startedAt: stepStartedAt });
-          emitEvent(nodeId, "submitted", `Submitted ${finalReq.stage}/${finalReq.command}`);
+          updateNode(nodeId, { status: "running", submittedRequest: resolvedFinalReq, startedAt: stepStartedAt });
+          emitEvent(nodeId, "submitted", `Submitted ${resolvedFinalReq.stage}/${resolvedFinalReq.command}`);
 
           try {
-            const res = await postRun(finalReq);
+            const res = await postRun(resolvedFinalReq);
 
             if (res.status === "error") {
               const doneAt = Date.now();

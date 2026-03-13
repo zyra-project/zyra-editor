@@ -24,6 +24,9 @@ interface ToolbarProps {
   onToggleCache: () => void;
   lineageMode: boolean;
   onToggleLineage: () => void;
+  resourcesOpen: boolean;
+  onToggleResources: () => void;
+  resourceCount: number;
   theme: Theme;
   onToggleTheme: () => void;
   backendStatus: BackendStatus & { refresh: () => void };
@@ -49,6 +52,9 @@ export function Toolbar({
   onToggleCache,
   lineageMode,
   onToggleLineage,
+  resourcesOpen,
+  onToggleResources,
+  resourceCount,
   theme,
   onToggleTheme,
   backendStatus,
@@ -244,6 +250,31 @@ export function Toolbar({
       >
         <span style={{ fontSize: 14 }}>{"\u{1f517}"}</span>
         Lineage{lineageMode ? ": ON" : ": OFF"}
+      </button>
+
+      {/* Resources toggle */}
+      <button
+        onClick={onToggleResources}
+        title="Pipeline Resources — define named values referenced across nodes via ${res:name}"
+        aria-expanded={resourcesOpen}
+        style={{
+          background: resourcesOpen ? "var(--accent-blue)" : "none",
+          border: "1px solid var(--border-default)",
+          borderRadius: "var(--radius-md)",
+          color: resourcesOpen ? "#fff" : "var(--text-secondary)",
+          cursor: "pointer",
+          padding: "4px 10px",
+          fontSize: 12,
+          lineHeight: 1,
+          display: "flex",
+          alignItems: "center",
+          gap: 5,
+          fontFamily: "var(--font-sans)",
+          fontWeight: 500,
+        }}
+      >
+        <span style={{ fontSize: 14 }}>{"\u{1f4e6}"}</span>
+        Resources{resourceCount > 0 ? `: ${resourceCount}` : ""}
       </button>
 
       {/* Spacer */}

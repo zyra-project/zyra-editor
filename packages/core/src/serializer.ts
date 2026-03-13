@@ -1,4 +1,5 @@
 import type { StageDef } from "./manifest.js";
+import type { PipelineResource } from "./resources.js";
 
 /** Map human-readable period enum values to ISO 8601 durations. */
 export const PERIOD_TO_ISO: Record<string, string> = {
@@ -142,6 +143,8 @@ export interface Pipeline {
   version: string;
   /** Recurring execution schedule (from a control/cron node). */
   schedule?: PipelineSchedule;
+  /** Named pipeline-level resources, referenced in args via ${res:name}. */
+  resources?: PipelineResource[];
   steps: PipelineStep[];
   /** Editor-only group box layout — not used by the Zyra CLI. */
   _groups?: PipelineGroup[];

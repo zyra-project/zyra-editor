@@ -15,8 +15,8 @@ import {
   BackgroundVariant,
 } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
-import type { StageDef, ArgDef, PortDef, Graph, GraphNode, GraphEdge, Pipeline, PipelineStep, PipelineGroup, NodeRunStatus } from "@zyra/core";
-import { portsCompatible, getEffectivePorts, graphToPipeline, pipelineToGraph, resolvePeriodISO, validateArgs, computeLineage } from "@zyra/core";
+import type { StageDef, ArgDef, PortDef, Graph, GraphNode, GraphEdge, Pipeline, PipelineStep, PipelineGroup, NodeRunStatus, PipelineResource } from "@zyra/core";
+import { portsCompatible, getEffectivePorts, graphToPipeline, pipelineToGraph, resolvePeriodISO, validateArgs, computeLineage, toResourceMap } from "@zyra/core";
 import { ManifestProvider, useManifest } from "./ManifestLoader";
 import { NodePalette } from "./NodePalette";
 import { ZyraNode, type ZyraNodeData } from "./ZyraNode";
@@ -29,6 +29,7 @@ import { YamlPanel, normalizePipeline } from "./YamlPanel";
 import { parseOptions } from "./ChoiceOptionsEditor";
 import { PlannerPanel, type PlanHistoryEntry, type PlanBatch } from "./PlannerPanel";
 import { RunHistoryPanel } from "./RunHistoryPanel";
+import { ResourcePanel } from "./ResourcePanel";
 import yaml from "js-yaml";
 import { useTheme } from "./useTheme";
 import { useBackendStatus } from "./useBackendStatus";
@@ -274,6 +275,17 @@ function Editor() {
   const [historyOpen, setHistoryOpen] = useState(false);
   const [useCache, setUseCache] = useState(true);
   const [lineageMode, setLineageMode] = useState(false);
+  const [resourcesOpen, setResourcesOpen] = useState(false);
+  const [resources, setResources] = useState<PipelineResource[]>(() => {
+    try {
+      const stored = localStorage.getItem("zyra-resources");
+      if (stored) return JSON.parse(stored) as PipelineResource[];
+    } catch { /* ignore */ }
+    return [];
+  });
+  useEffect(() => {
+    try { localStorage.setItem("zyra-resources", JSON.stringify(resources)); } catch { /* ignore */ }
+  }, [resources]);
   const [paletteCollapsed, setPaletteCollapsed] = useState(false);
   const [plannerIntent, setPlannerIntent] = useState("");
   const [plannerHistory, setPlannerHistory] = useState<PlanHistoryEntry[]>([]);
@@ -288,7 +300,8 @@ function Editor() {
     nodes: graphNodesRef.current,
     edges: graphEdgesRef.current,
   }), []);
-  const exec = useExecution(getGraphSnapshot, useCache);
+  const resourceMap = useMemo(() => toResourceMap(resources), [resources]);
+  const exec = useExecution(getGraphSnapshot, useCache, resourceMap);
   const [historyRefreshKey, setHistoryRefreshKey] = useState(0);
   const prevRunningRef = useRef(false);
   useEffect(() => {
@@ -456,6 +469,9 @@ function Editor() {
     try {
       const p = graphToPipeline(toGraph(nodes, edges), manifest.stages);
 
+      // Include resources in pipeline output
+      if (resources.length > 0) p.resources = resources;
+
       // Serialize group boxes into _groups (editor-only metadata)
       const groupNodes = nodes.filter((n) => n.type === "group");
       if (groupNodes.length > 0) {
@@ -488,7 +504,7 @@ function Editor() {
     } catch {
       return { version: "1", steps: [] };
     }
-  }, [nodes, edges, manifest.stages]);
+  }, [nodes, edges, manifest.stages, resources]);
 
   // YAML -> canvas
   const handlePipelineChange = useCallback(
@@ -593,6 +609,8 @@ function Editor() {
 
       setNodes(newNodes);
       setEdges(newEdges);
+      // Restore resources from pipeline
+      setResources(newPipeline.resources ?? []);
     },
     [manifest.stages, nodes, setNodes, setEdges, exec.running],
   );
@@ -1097,6 +1115,9 @@ function Editor() {
         onToggleCache={() => setUseCache((v) => !v)}
         lineageMode={lineageMode}
         onToggleLineage={() => setLineageMode((v) => !v)}
+        resourcesOpen={resourcesOpen}
+        onToggleResources={() => setResourcesOpen((v) => !v)}
+        resourceCount={resources.length}
         theme={theme}
         onToggleTheme={toggleTheme}
         backendStatus={backendStatus}
@@ -1161,6 +1182,15 @@ function Editor() {
         onClearNode={exec.clearNode}
         onSelectNode={handleSelectNode}
       />
+
+      {/* Resources Panel */}
+      {resourcesOpen && (
+        <ResourcePanel
+          resources={resources}
+          onChange={setResources}
+          onClose={() => setResourcesOpen(false)}
+        />
+      )}
 
       {/* Run History Panel */}
       {historyOpen && (
