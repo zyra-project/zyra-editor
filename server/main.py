@@ -2093,13 +2093,22 @@ class RunPayload(BaseModel):
     steps: list[RunStepPayload] = Field(default_factory=list)
 
 
+def _require_history_db():
+    """Return the history DB connection, lazily initializing if needed."""
+    global _history_db
+    if _history_db is None:
+        _history_db = init_db()
+    return _history_db
+
+
 @app.post("/v1/runs")
 async def save_run_endpoint(payload: RunPayload):
     """Persist a completed run record."""
+    db = _require_history_db()
     data = payload.model_dump()
     def _save():
         with _history_lock:
-            save_run(_history_db, data)
+            save_run(db, data)
     await asyncio.to_thread(_save)
     return {"id": data["id"]}
 
@@ -2107,18 +2116,20 @@ async def save_run_endpoint(payload: RunPayload):
 @app.get("/v1/runs")
 async def list_runs_endpoint(limit: int = 50, offset: int = 0):
     """List recent run summaries (no step details)."""
+    db = _require_history_db()
     def _list():
         with _history_lock:
-            return list_runs(_history_db, limit, offset)
+            return list_runs(db, limit, offset)
     return await asyncio.to_thread(_list)
 
 
 @app.get("/v1/runs/{run_id}")
 async def get_run_endpoint(run_id: str):
     """Get full run detail including all steps."""
+    db = _require_history_db()
     def _get():
         with _history_lock:
-            return get_run(_history_db, run_id)
+            return get_run(db, run_id)
     result = await asyncio.to_thread(_get)
     if result is None:
         raise HTTPException(status_code=404, detail="Run not found")
@@ -2128,9 +2139,10 @@ async def get_run_endpoint(run_id: str):
 @app.delete("/v1/runs/{run_id}", status_code=204)
 async def delete_run_endpoint(run_id: str):
     """Delete a run and its steps."""
+    db = _require_history_db()
     def _delete():
         with _history_lock:
-            return delete_run(_history_db, run_id)
+            return delete_run(db, run_id)
     found = await asyncio.to_thread(_delete)
     if not found:
         raise HTTPException(status_code=404, detail="Run not found")
@@ -2139,9 +2151,10 @@ async def delete_run_endpoint(run_id: str):
 @app.get("/v1/cache/lookup")
 async def cache_lookup_endpoint(key: str):
     """Look up a cached step result by cache key."""
+    db = _require_history_db()
     def _lookup():
         with _history_lock:
-            return lookup_cache(_history_db, key)
+            return lookup_cache(db, key)
     result = await asyncio.to_thread(_lookup)
     if result:
         return {"hit": True, **result}
