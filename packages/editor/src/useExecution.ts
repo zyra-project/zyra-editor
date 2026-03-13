@@ -234,7 +234,7 @@ export function useExecution(
         const unmet: string[] = [];
         for (const dep of deps) {
           const depState = runState.get(dep);
-          if (!depState || depState.status !== "succeeded") {
+          if (!depState || (depState.status !== "succeeded" && depState.status !== "cached")) {
             unmet.push(dep);
           }
         }
@@ -275,6 +275,8 @@ export function useExecution(
               completedAt: now,
             });
             emitEvent(nodeId, "cache-hit", "Using cached result");
+            persistRun("single-node");
+            if (runGenRef.current === gen) setRunning(false);
             return null;
           }
         } catch {

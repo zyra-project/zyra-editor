@@ -206,6 +206,7 @@ export function normalizePipeline(raw: unknown): Pipeline | null {
             if (typeof eo.targetNode === "string" && typeof eo.targetPort === "string") {
               const edge: PipelineControl["edges"][number] = { targetNode: eo.targetNode, targetPort: eo.targetPort };
               if (typeof eo.sourcePort === "string" && eo.sourcePort !== "") edge.sourcePort = eo.sourcePort;
+              if (typeof eo.format === "string" && eo.format !== "") edge.format = eo.format;
               edges.push(edge);
             }
           }

@@ -368,6 +368,16 @@ export function pipelineToGraph(
           targetNode: ce.targetNode,
           targetPort: ce.targetPort,
         });
+
+        // Restore {} format strings into target node's argValues so the
+        // format input survives YAML round-trips.
+        if (ce.format && ce.targetPort.startsWith("arg:")) {
+          const argKey = ce.targetPort.slice(4);
+          const targetInfo = nodeMap.get(ce.targetNode);
+          if (targetInfo) {
+            targetInfo.node.argValues[argKey] = ce.format;
+          }
+        }
       }
 
       // Reconstruct incoming edges (e.g. step → Extract node's input port)

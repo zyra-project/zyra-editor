@@ -717,40 +717,60 @@ function ArgField({
         </div>
       )}
 
-      {/* Linked from another node — show read-only badge with optional value preview */}
+      {/* Linked from another node — show read-only badge with optional format input */}
       {linkedFrom && (
-        <div style={{
-          display: "flex",
-          alignItems: "center",
-          gap: 6,
-          padding: "6px 8px",
-          background: "var(--bg-primary)",
-          borderRadius: "var(--radius-sm)",
-          border: "1px solid var(--accent-blue)",
-          fontSize: 11,
-          color: "var(--accent-blue)",
-          overflow: "hidden",
-        }}>
-          <span style={{ fontSize: 9, opacity: 0.7, flexShrink: 0 }}>linked</span>
-          <span style={{ fontWeight: 600, flexShrink: 0 }}>{linkedFrom.label}</span>
-          {linkedFrom.value && (
-            <span
-              style={{
-                color: "var(--text-secondary)",
-                fontFamily: "var(--font-mono)",
-                fontSize: 10,
-                overflow: "hidden",
-                textOverflow: "ellipsis",
-                whiteSpace: "nowrap",
-                flexShrink: 1,
-                minWidth: 0,
-              }}
-              title={treatAsSensitive ? "Linked value hidden (sensitive)" : linkedFrom.value}
-            >
-              {treatAsSensitive ? "••••••••" : linkedFrom.value}
-            </span>
+        <>
+          <div style={{
+            display: "flex",
+            alignItems: "center",
+            gap: 6,
+            padding: "6px 8px",
+            background: "var(--bg-primary)",
+            borderRadius: "var(--radius-sm)",
+            border: "1px solid var(--accent-blue)",
+            fontSize: 11,
+            color: "var(--accent-blue)",
+            overflow: "hidden",
+          }}>
+            <span style={{ fontSize: 9, opacity: 0.7, flexShrink: 0 }}>linked</span>
+            <span style={{ fontWeight: 600, flexShrink: 0 }}>{linkedFrom.label}</span>
+            {linkedFrom.value && (
+              <span
+                style={{
+                  color: "var(--text-secondary)",
+                  fontFamily: "var(--font-mono)",
+                  fontSize: 10,
+                  overflow: "hidden",
+                  textOverflow: "ellipsis",
+                  whiteSpace: "nowrap",
+                  flexShrink: 1,
+                  minWidth: 0,
+                }}
+                title={treatAsSensitive ? "Linked value hidden (sensitive)" : linkedFrom.value}
+              >
+                {treatAsSensitive ? "••••••••" : linkedFrom.value}
+              </span>
+            )}
+          </div>
+          <input
+            className="zyra-input"
+            value={typeof value === "string" ? value : ""}
+            onChange={(e) => onChange(e.target.value)}
+            placeholder="Format: e.g. X-API-Key: {}"
+            title="Use {} as a placeholder for the linked value"
+            style={{
+              marginTop: 4,
+              fontSize: 11,
+              fontFamily: "var(--font-mono)",
+              opacity: typeof value === "string" && value.includes("{}") ? 1 : 0.6,
+            }}
+          />
+          {typeof value === "string" && value.includes("{}") && (
+            <div style={{ fontSize: 10, color: "var(--text-secondary)", marginTop: 2 }}>
+              {"Preview: " + value.replace("{}", treatAsSensitive ? "••••" : (linkedFrom.value ?? "…"))}
+            </div>
           )}
-        </div>
+        </>
       )}
 
       {!linkedFrom && (

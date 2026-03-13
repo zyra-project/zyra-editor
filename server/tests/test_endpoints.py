@@ -17,6 +17,11 @@ from fastapi.testclient import TestClient
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
+# Set ZYRA_DATA_DIR to a temp dir before importing app so startup doesn't
+# create a run_history.db in the working directory.
+_test_data_dir = tempfile.mkdtemp(prefix="zyra-test-")
+os.environ.setdefault("ZYRA_DATA_DIR", _test_data_dir)
+
 from main import app
 from run_history import save_run, init_db
 
@@ -431,8 +436,9 @@ class TestCacheLookupEndpoint:
         # Look up the cache key for step-a's request
         cur = db.execute("SELECT cache_key FROM run_steps WHERE node_id = 'step-a'")
         row = cur.fetchone()
-        if row and row[0]:
-            response = client.get(f"/v1/cache/lookup?key={row[0]}")
-            assert response.status_code == 200
-            data = response.json()
-            assert data["hit"] is True
+        assert row is not None, "run_steps row for step-a should exist"
+        assert row[0], "cache_key should be non-empty"
+        response = client.get(f"/v1/cache/lookup?key={row[0]}")
+        assert response.status_code == 200
+        data = response.json()
+        assert data["hit"] is True

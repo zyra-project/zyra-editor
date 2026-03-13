@@ -97,6 +97,13 @@ pnpm typecheck
 - **Monorepo:** pnpm workspaces, Node 18+
 - **No test framework configured yet**
 
+## Security
+
+- Secret node values are **never written to pipeline YAML** — only the env var name is persisted
+- Secret values in `localStorage` are **encrypted at rest** (AES-256-GCM via Web Crypto API, key derived with PBKDF2 from page origin)
+- Client-side `${NAME}` resolution in `useExecution.ts` means the server never sees secret template syntax
+- See `docs/security.md` for full details on encryption, threat model, and implementation files
+
 ## Conventions
 
 - ESM throughout (`"type": "module"` in all package.json files)

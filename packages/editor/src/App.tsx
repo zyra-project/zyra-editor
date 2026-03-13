@@ -124,16 +124,63 @@ function resolveControlDisplayValue(
 }
 
 const SECRETS_STORAGE_KEY = "zyra-secrets";
+const SECRETS_KEY_NAME = "zyra-secrets-key";
 
-/** Persist secret values to localStorage keyed by env var name. */
-function saveSecrets(nodes: Node[]) {
+// ── Encrypted localStorage helpers (AES-GCM via Web Crypto) ──────────────────
+
+/** Derive a stable AES-GCM key from the page origin using PBKDF2. */
+async function getSecretsKey(): Promise<CryptoKey> {
+  const enc = new TextEncoder();
+  const keyMaterial = await crypto.subtle.importKey(
+    "raw", enc.encode(SECRETS_KEY_NAME + location.origin),
+    "PBKDF2", false, ["deriveKey"],
+  );
+  return crypto.subtle.deriveKey(
+    { name: "PBKDF2", salt: enc.encode("zyra-salt"), iterations: 100_000, hash: "SHA-256" },
+    keyMaterial,
+    { name: "AES-GCM", length: 256 },
+    false,
+    ["encrypt", "decrypt"],
+  );
+}
+
+async function encryptSecrets(data: Record<string, string>): Promise<string> {
+  const key = await getSecretsKey();
+  const iv = crypto.getRandomValues(new Uint8Array(12));
+  const ciphertext = await crypto.subtle.encrypt(
+    { name: "AES-GCM", iv },
+    key,
+    new TextEncoder().encode(JSON.stringify(data)),
+  );
+  // Store as base64: iv (12 bytes) + ciphertext
+  const combined = new Uint8Array(iv.length + ciphertext.byteLength);
+  combined.set(iv);
+  combined.set(new Uint8Array(ciphertext), iv.length);
+  return btoa(String.fromCharCode(...combined));
+}
+
+async function decryptSecrets(stored: string): Promise<Record<string, string>> {
+  const key = await getSecretsKey();
+  const raw = Uint8Array.from(atob(stored), (c) => c.charCodeAt(0));
+  const iv = raw.slice(0, 12);
+  const ciphertext = raw.slice(12);
+  const plaintext = await crypto.subtle.decrypt(
+    { name: "AES-GCM", iv },
+    key,
+    ciphertext,
+  );
+  return JSON.parse(new TextDecoder().decode(plaintext));
+}
+
+/** Persist secret values to localStorage (encrypted). */
+async function saveSecrets(nodes: Node[]) {
   try {
     const secrets: Record<string, string> = {};
     // Load existing secrets first so we don't lose unrelated ones
     try {
       const stored = localStorage.getItem(SECRETS_STORAGE_KEY);
-      if (stored) Object.assign(secrets, JSON.parse(stored));
-    } catch { /* ignore */ }
+      if (stored) Object.assign(secrets, await decryptSecrets(stored));
+    } catch { /* ignore — may be legacy plaintext or corrupt */ }
     for (const n of nodes) {
       const d = n.data as ZyraNodeData | undefined;
       if (d?.stageDef.stage !== "control" || d.stageDef.command !== "secret") continue;
@@ -143,16 +190,26 @@ function saveSecrets(nodes: Node[]) {
         secrets[name] = value;
       }
     }
-    localStorage.setItem(SECRETS_STORAGE_KEY, JSON.stringify(secrets));
+    localStorage.setItem(SECRETS_STORAGE_KEY, await encryptSecrets(secrets));
   } catch { /* ignore */ }
 }
 
-/** Restore secret values from localStorage into node argValues. */
-function restoreSecrets(nodes: Node[]) {
+/** Restore secret values from localStorage (encrypted) into node argValues. */
+async function restoreSecrets(nodes: Node[]) {
   try {
     const stored = localStorage.getItem(SECRETS_STORAGE_KEY);
     if (!stored) return;
-    const secrets: Record<string, string> = JSON.parse(stored);
+    let secrets: Record<string, string>;
+    try {
+      secrets = await decryptSecrets(stored);
+    } catch {
+      // Migrate legacy plaintext format
+      try {
+        secrets = JSON.parse(stored);
+        // Re-save encrypted
+        localStorage.setItem(SECRETS_STORAGE_KEY, await encryptSecrets(secrets));
+      } catch { return; }
+    }
     for (const n of nodes) {
       const d = n.data as ZyraNodeData | undefined;
       if (d?.stageDef.stage !== "control" || d.stageDef.command !== "secret") continue;
@@ -334,7 +391,7 @@ function Editor() {
     try { localStorage.setItem("zyra-resources", JSON.stringify(resources)); } catch { /* ignore */ }
   }, [resources]);
   // Persist secret values whenever nodes change
-  useEffect(() => { saveSecrets(nodes); }, [nodes]);
+  useEffect(() => { void saveSecrets(nodes); }, [nodes]);
   const [paletteCollapsed, setPaletteCollapsed] = useState(false);
   const [plannerIntent, setPlannerIntent] = useState("");
   const [plannerHistory, setPlannerHistory] = useState<PlanHistoryEntry[]>([]);
@@ -557,7 +614,7 @@ function Editor() {
 
   // YAML -> canvas
   const handlePipelineChange = useCallback(
-    (newPipeline: Pipeline) => {
+    async (newPipeline: Pipeline) => {
       const graph = pipelineToGraph(newPipeline, manifest.stages);
       const stageMap = new Map(
         manifest.stages.map((s: StageDef) => [`${s.stage}/${s.command}`, s]),
@@ -657,7 +714,7 @@ function Editor() {
       nodeIdCounter = maxNum;
 
       // Restore secret values from localStorage before setting nodes
-      restoreSecrets(newNodes);
+      await restoreSecrets(newNodes);
       setNodes(newNodes);
       setEdges(newEdges);
       // Restore resources from pipeline

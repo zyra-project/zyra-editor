@@ -453,6 +453,67 @@ describe("graphToPipeline — control node inlining", () => {
     const pipeline = graphToPipeline(graph, STAGES);
     expect(pipeline.steps[0].args.token).toBe("${MY_TOKEN}");
   });
+
+  it("interpolates wired value into {} placeholder in existing arg", () => {
+    const graph: Graph = {
+      nodes: [
+        {
+          id: "sec1",
+          stageCommand: "control/secret",
+          argValues: { name: "API_KEY", value: "abc123" },
+        },
+        {
+          id: "fetch",
+          stageCommand: "acquire/http",
+          argValues: { header: "X-API-Key: {}", param: "api_key={}" },
+        },
+      ],
+      edges: [
+        {
+          sourceNode: "sec1",
+          sourcePort: "value",
+          targetNode: "fetch",
+          targetPort: "arg:header",
+        },
+        {
+          sourceNode: "sec1",
+          sourcePort: "value",
+          targetNode: "fetch",
+          targetPort: "arg:param",
+        },
+      ],
+    };
+    const pipeline = graphToPipeline(graph, STAGES);
+    expect(pipeline.steps[0].args.header).toBe("X-API-Key: ${API_KEY}");
+    expect(pipeline.steps[0].args.param).toBe("api_key=${API_KEY}");
+  });
+
+  it("replaces entire arg when no {} placeholder is present (backward compat)", () => {
+    const graph: Graph = {
+      nodes: [
+        {
+          id: "sec1",
+          stageCommand: "control/secret",
+          argValues: { name: "TOKEN", value: "secret" },
+        },
+        {
+          id: "fetch",
+          stageCommand: "acquire/http",
+          argValues: { token: "old-value" },
+        },
+      ],
+      edges: [
+        {
+          sourceNode: "sec1",
+          sourcePort: "value",
+          targetNode: "fetch",
+          targetPort: "arg:token",
+        },
+      ],
+    };
+    const pipeline = graphToPipeline(graph, STAGES);
+    expect(pipeline.steps[0].args.token).toBe("${TOKEN}");
+  });
 });
 
 // ── graphToPipeline — transitive dependencies ────────────────────────────────
