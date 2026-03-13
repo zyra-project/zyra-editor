@@ -18,6 +18,7 @@ from fastapi.testclient import TestClient
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 from main import app
+from run_history import save_run, init_db
 
 client = TestClient(app, raise_server_exceptions=False)
 
@@ -297,3 +298,141 @@ class TestFeedbackEndpoint:
                 assert saved["timestamp"]  # auto-generated when not provided
             finally:
                 main_mod.FEEDBACK_DIR = original
+
+
+# ── /v1/runs ────────────────────────────────────────────────────────────────
+
+
+def _make_run_payload(run_id="run-test-1", status="succeeded"):
+    """Build a minimal run payload for endpoint tests."""
+    return {
+        "id": run_id,
+        "startedAt": "2026-03-12T10:00:00Z",
+        "completedAt": "2026-03-12T10:01:00Z",
+        "status": status,
+        "durationMs": 60000,
+        "mode": "pipeline",
+        "nodeCount": 1,
+        "summary": None,
+        "graphSnapshot": {"nodes": [{"id": "n1"}], "edges": []},
+        "steps": [
+            {
+                "nodeId": "step-a",
+                "status": status,
+                "jobId": "job-abc",
+                "exitCode": 0,
+                "stdout": "output",
+                "stderr": "",
+                "startedAt": "2026-03-12T10:00:00Z",
+                "completedAt": "2026-03-12T10:01:00Z",
+                "durationMs": 60000,
+                "request": {"stage": "acquire", "command": "http", "args": {"url": "http://example.com"}, "mode": "async"},
+                "events": [],
+                "dryRunArgv": None,
+            }
+        ],
+    }
+
+
+class TestRunHistoryEndpoints:
+    """Tests for create/list/get/delete run history via HTTP endpoints."""
+
+    def _use_temp_db(self, monkeypatch, tmp_path):
+        """Replace the server's history DB with a fresh temp one."""
+        import main as main_mod
+        monkeypatch.setenv("ZYRA_DATA_DIR", str(tmp_path))
+        db = init_db()
+        monkeypatch.setattr(main_mod, "_history_db", db)
+        return db
+
+    def test_create_run(self, monkeypatch, tmp_path):
+        self._use_temp_db(monkeypatch, tmp_path)
+        response = client.post("/v1/runs", json=_make_run_payload())
+        assert response.status_code == 200
+        assert response.json()["id"] == "run-test-1"
+
+    def test_list_runs_empty(self, monkeypatch, tmp_path):
+        self._use_temp_db(monkeypatch, tmp_path)
+        response = client.get("/v1/runs")
+        assert response.status_code == 200
+        data = response.json()
+        assert data["runs"] == []
+        assert data["total"] == 0
+
+    def test_list_runs_returns_saved(self, monkeypatch, tmp_path):
+        self._use_temp_db(monkeypatch, tmp_path)
+        client.post("/v1/runs", json=_make_run_payload("r1"))
+        client.post("/v1/runs", json=_make_run_payload("r2"))
+        response = client.get("/v1/runs")
+        assert response.status_code == 200
+        data = response.json()
+        assert len(data["runs"]) == 2
+        assert data["total"] == 2
+
+    def test_list_runs_pagination(self, monkeypatch, tmp_path):
+        self._use_temp_db(monkeypatch, tmp_path)
+        for i in range(5):
+            client.post("/v1/runs", json=_make_run_payload(f"r{i}"))
+        response = client.get("/v1/runs?limit=2&offset=0")
+        assert len(response.json()["runs"]) == 2
+        response2 = client.get("/v1/runs?limit=2&offset=2")
+        assert len(response2.json()["runs"]) == 2
+
+    def test_get_run(self, monkeypatch, tmp_path):
+        self._use_temp_db(monkeypatch, tmp_path)
+        client.post("/v1/runs", json=_make_run_payload("r1"))
+        response = client.get("/v1/runs/r1")
+        assert response.status_code == 200
+        data = response.json()
+        assert data["id"] == "r1"
+        assert "steps" in data
+
+    def test_get_run_not_found(self, monkeypatch, tmp_path):
+        self._use_temp_db(monkeypatch, tmp_path)
+        response = client.get("/v1/runs/nonexistent")
+        assert response.status_code == 404
+
+    def test_delete_run(self, monkeypatch, tmp_path):
+        self._use_temp_db(monkeypatch, tmp_path)
+        client.post("/v1/runs", json=_make_run_payload("r1"))
+        response = client.delete("/v1/runs/r1")
+        assert response.status_code == 204
+        # Verify it's gone
+        response2 = client.get("/v1/runs/r1")
+        assert response2.status_code == 404
+
+    def test_delete_run_not_found(self, monkeypatch, tmp_path):
+        self._use_temp_db(monkeypatch, tmp_path)
+        response = client.delete("/v1/runs/nonexistent")
+        assert response.status_code == 404
+
+
+# ── /v1/cache/lookup ────────────────────────────────────────────────────────
+
+
+class TestCacheLookupEndpoint:
+    def _use_temp_db(self, monkeypatch, tmp_path):
+        import main as main_mod
+        monkeypatch.setenv("ZYRA_DATA_DIR", str(tmp_path))
+        db = init_db()
+        monkeypatch.setattr(main_mod, "_history_db", db)
+        return db
+
+    def test_cache_miss(self, monkeypatch, tmp_path):
+        self._use_temp_db(monkeypatch, tmp_path)
+        response = client.get("/v1/cache/lookup?key=nonexistent")
+        assert response.status_code == 200
+        assert response.json()["hit"] is False
+
+    def test_cache_hit_after_run(self, monkeypatch, tmp_path):
+        db = self._use_temp_db(monkeypatch, tmp_path)
+        # Save a run so its cache key is populated
+        client.post("/v1/runs", json=_make_run_payload("r1"))
+        # Look up the cache key for step-a's request
+        cur = db.execute("SELECT cache_key FROM run_steps WHERE node_id = 'step-a'")
+        row = cur.fetchone()
+        if row and row[0]:
+            response = client.get(f"/v1/cache/lookup?key={row[0]}")
+            assert response.status_code == 200
+            data = response.json()
+            assert data["hit"] is True

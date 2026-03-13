@@ -233,9 +233,25 @@ _jobs_mod.start_job = _patched_start_job
 
 app = create_app()
 
-# Initialise the run-history SQLite database.
-_history_db = init_db()
+# Run-history SQLite database — initialised on startup, not at import time.
+_history_db = None
 _history_lock = threading.Lock()
+
+
+def _init_history_db():
+    global _history_db
+    _history_db = init_db()
+
+
+def _close_history_db():
+    global _history_db
+    if _history_db is not None:
+        _history_db.close()
+        _history_db = None
+
+
+app.router.on_startup.append(_init_history_db)
+app.router.on_shutdown.append(_close_history_db)
 
 # Allow the Vite dev server during development
 app.add_middleware(

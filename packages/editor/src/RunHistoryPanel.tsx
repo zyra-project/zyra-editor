@@ -218,7 +218,10 @@ function RunListItem({
 
   return (
     <div
+      role="button"
+      tabIndex={0}
       onClick={onSelect}
+      onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); onSelect(); } }}
       style={{
         padding: "10px 16px",
         borderBottom: "1px solid var(--border-default)",
