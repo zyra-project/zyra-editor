@@ -1,19 +1,8 @@
 /**
- * Tests for the formatDuration helper used in NodeDetailPanel.
- *
- * Since formatDuration is not exported from NodeDetailPanel, we replicate
- * the logic here to validate the expected behavior contract.
+ * Tests for the formatDuration helper exported from NodeDetailPanel.
  */
 import { describe, it, expect } from "vitest";
-
-// Mirror of the formatDuration function in NodeDetailPanel.tsx
-function formatDuration(ms: number): string {
-  const secs = Math.round(ms / 1000);
-  if (secs < 60) return `${secs}s`;
-  const mins = Math.floor(secs / 60);
-  const rem = secs % 60;
-  return `${mins}m ${rem}s`;
-}
+import { formatDuration } from "../NodeDetailPanel";
 
 describe("formatDuration", () => {
   it("formats 0ms as '0s'", () => {

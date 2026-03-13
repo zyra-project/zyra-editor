@@ -260,10 +260,18 @@ export function useExecution(
       if (Object.keys(secrets).length > 0) resolvedArgs = resolveSecretRefs(resolvedArgs, secrets);
       const resolvedReq = resolvedArgs !== req.args ? { ...req, args: resolvedArgs } : req;
 
+      // ── Compute cache key (used for both lookup and persistence) ──
+      let nodeCacheKey: string | undefined;
+      try {
+        nodeCacheKey = await computeCacheKey(resolvedReq);
+      } catch {
+        // Cache key computation failed — proceed without caching
+      }
+
       // ── Cache check (single-node) ─────────────────────────────
-      if (useCacheRef.current && !forceRerunRef.current.has(nodeId)) {
+      if (useCacheRef.current && nodeCacheKey && !forceRerunRef.current.has(nodeId)) {
         try {
-          const cacheKey = await computeCacheKey(resolvedReq);
+          const cacheKey = nodeCacheKey;
           const cached = await lookupCache(cacheKey);
           if (cached.hit) {
             const now = Date.now();
@@ -276,6 +284,7 @@ export function useExecution(
               submittedRequest: resolvedReq,
               startedAt: now,
               completedAt: now,
+              cacheKey,
             });
             emitEvent(nodeId, "cache-hit", "Using cached result");
             persistRun("single-node");
@@ -304,7 +313,7 @@ export function useExecution(
       }
 
       const now = Date.now();
-      updateNode(nodeId, { ...emptyRunState(), status: "running", submittedRequest: resolvedReq, startedAt: now });
+      updateNode(nodeId, { ...emptyRunState(), status: "running", submittedRequest: resolvedReq, startedAt: now, cacheKey: nodeCacheKey });
       emitEvent(nodeId, "submitted", `Submitted ${resolvedReq.stage}/${resolvedReq.command}`);
 
       try {
@@ -526,7 +535,7 @@ export function useExecution(
         for (const step of pipeline.steps) {
           const pre = preResolved?.get(step.name);
           if (pre && (pre.status === "succeeded" || pre.status === "cached")) {
-            init.set(step.name, { ...pre, status: "cached" });
+            init.set(step.name, pre);
           } else {
             init.set(step.name, { ...emptyRunState(), status: "queued" });
           }
@@ -601,11 +610,18 @@ export function useExecution(
           if (Object.keys(pipelineSecrets).length > 0) resolvedFinalArgs = resolveSecretRefs(resolvedFinalArgs, pipelineSecrets);
           const resolvedFinalReq = resolvedFinalArgs !== finalReq.args ? { ...finalReq, args: resolvedFinalArgs } : finalReq;
 
+          // ── Compute cache key (used for both lookup and persistence) ──
+          let pipelineCacheKey: string | undefined;
+          try {
+            pipelineCacheKey = await computeCacheKey(resolvedFinalReq);
+          } catch {
+            // Cache key computation failed — proceed without caching
+          }
+
           // ── Cache check ────────────────────────────────────────
-          if (useCacheRef.current && !forceRerunRef.current.has(nodeId)) {
+          if (useCacheRef.current && pipelineCacheKey && !forceRerunRef.current.has(nodeId)) {
             try {
-              const cacheKey = await computeCacheKey(resolvedFinalReq);
-              const cached = await lookupCache(cacheKey);
+              const cached = await lookupCache(pipelineCacheKey);
               if (cached.hit) {
                 const cachedAt = Date.now();
                 updateNode(nodeId, {
@@ -616,6 +632,7 @@ export function useExecution(
                   submittedRequest: resolvedFinalReq,
                   startedAt: cachedAt,
                   completedAt: cachedAt,
+                  cacheKey: pipelineCacheKey,
                 });
                 emitEvent(nodeId, "cache-hit", "Using cached result");
                 resolved.set(nodeId, "succeeded");
@@ -627,7 +644,7 @@ export function useExecution(
           }
 
           const stepStartedAt = Date.now();
-          updateNode(nodeId, { status: "running", submittedRequest: resolvedFinalReq, startedAt: stepStartedAt });
+          updateNode(nodeId, { status: "running", submittedRequest: resolvedFinalReq, startedAt: stepStartedAt, cacheKey: pipelineCacheKey });
           emitEvent(nodeId, "submitted", `Submitted ${resolvedFinalReq.stage}/${resolvedFinalReq.command}`);
 
           try {

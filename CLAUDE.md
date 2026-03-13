@@ -94,8 +94,8 @@ pnpm typecheck
 - **Frontend:** React 18, TypeScript 5.4, Vite 5.4, @xyflow/react 12
 - **Backend:** FastAPI, Uvicorn, Python 3.11
 - **Containerization:** Docker (Linux ffmpeg for glob support, which Windows ffmpeg lacks)
-- **Monorepo:** pnpm workspaces, Node 18+
-- **No test framework configured yet**
+- **Monorepo:** pnpm workspaces, Node 20+
+- **Testing:** Vitest (TypeScript/editor), Pytest (Python/server)
 
 ## Security
 

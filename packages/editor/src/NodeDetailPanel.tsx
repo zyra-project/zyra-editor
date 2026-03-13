@@ -910,7 +910,7 @@ function RunningIndicator({ startedAt }: { startedAt?: number }) {
   );
 }
 
-function formatDuration(ms: number): string {
+export function formatDuration(ms: number): string {
   const secs = Math.round(ms / 1000);
   if (secs < 60) return `${secs}s`;
   const mins = Math.floor(secs / 60);

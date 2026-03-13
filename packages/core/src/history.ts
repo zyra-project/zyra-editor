@@ -28,6 +28,7 @@ export interface RunStepRecord {
   request?: RunStepRequest;
   events: RunEvent[];
   dryRunArgv?: string;
+  cacheKey?: string;
 }
 
 /** Snapshot of the React Flow canvas at execution time. */
@@ -111,6 +112,7 @@ export function buildRunRecord(
       request: redactRequest(ns.submittedRequest, secrets),
       events: ns.events,
       dryRunArgv: ns.dryRunArgv,
+      cacheKey: ns.cacheKey,
     });
     if (ns.startedAt && ns.startedAt < earliest) earliest = ns.startedAt;
     if (ns.completedAt && ns.completedAt > latest) latest = ns.completedAt;

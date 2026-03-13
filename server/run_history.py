@@ -158,8 +158,10 @@ def save_run(conn: sqlite3.Connection, run: dict[str, Any]) -> None:
             ),
         )
         for step in run.get("steps", []):
-            cache_key = None
-            if step.get("request"):
+            # Prefer client-provided cacheKey (computed from unredacted request)
+            # over server-side recomputation (which would hash redacted args).
+            cache_key = step.get("cacheKey")
+            if not cache_key and step.get("request"):
                 cache_key = _compute_cache_key(step["request"])
             cur.execute(
                 """

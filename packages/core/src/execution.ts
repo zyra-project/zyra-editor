@@ -80,6 +80,8 @@ export interface NodeRunState {
   startedAt?: number;
   /** Epoch ms when the run reached a terminal state. */
   completedAt?: number;
+  /** Pre-computed cache key (SHA-256 of canonical request before redaction). */
+  cacheKey?: string;
 }
 
 export function emptyRunState(): NodeRunState {

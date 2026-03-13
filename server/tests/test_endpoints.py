@@ -26,7 +26,7 @@ os.environ["ZYRA_DATA_DIR"] = _test_data_dir
 _atexit.register(lambda: _shutil.rmtree(_test_data_dir, ignore_errors=True))
 
 from main import app
-from run_history import save_run, init_db
+from run_history import init_db
 
 client = TestClient(app, raise_server_exceptions=False)
 
@@ -346,11 +346,16 @@ class TestRunHistoryEndpoints:
     """Tests for create/list/get/delete run history via HTTP endpoints."""
 
     def _use_temp_db(self, monkeypatch, tmp_path):
-        """Replace the server's history DB with a fresh temp one."""
+        """Replace the server's history DB with a fresh temp one.
+
+        Uses monkeypatch finalizer to ensure the connection is closed after
+        each test, preventing leaked DB connections.
+        """
         import main as main_mod
         monkeypatch.setenv("ZYRA_DATA_DIR", str(tmp_path))
         db = init_db()
         monkeypatch.setattr(main_mod, "_history_db", db)
+        monkeypatch.callback(db.close)
         return db
 
     def test_create_run(self, monkeypatch, tmp_path):
