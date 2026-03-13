@@ -79,6 +79,12 @@ function resolveControlDisplayValue(
     return expr != null && expr !== "" ? `$.${expr}` : null;
   }
 
+  // Secret nodes: show env var reference instead of the actual value
+  if (cmd === "secret") {
+    const name = args.name;
+    return name ? `\${${name}}` : "••••••••";
+  }
+
   // Data-value control nodes: resolve from matching arg key
   let val = portKey !== "value" && args[portKey] !== undefined
     ? args[portKey]
@@ -115,6 +121,47 @@ function resolveControlDisplayValue(
   if (fallback != null && fallback !== "") return String(fallback);
 
   return null;
+}
+
+const SECRETS_STORAGE_KEY = "zyra-secrets";
+
+/** Persist secret values to localStorage keyed by env var name. */
+function saveSecrets(nodes: Node[]) {
+  try {
+    const secrets: Record<string, string> = {};
+    // Load existing secrets first so we don't lose unrelated ones
+    try {
+      const stored = localStorage.getItem(SECRETS_STORAGE_KEY);
+      if (stored) Object.assign(secrets, JSON.parse(stored));
+    } catch { /* ignore */ }
+    for (const n of nodes) {
+      const d = n.data as ZyraNodeData | undefined;
+      if (d?.stageDef.stage !== "control" || d.stageDef.command !== "secret") continue;
+      const name = d.argValues.name;
+      const value = d.argValues.value;
+      if (typeof name === "string" && name && typeof value === "string" && value) {
+        secrets[name] = value;
+      }
+    }
+    localStorage.setItem(SECRETS_STORAGE_KEY, JSON.stringify(secrets));
+  } catch { /* ignore */ }
+}
+
+/** Restore secret values from localStorage into node argValues. */
+function restoreSecrets(nodes: Node[]) {
+  try {
+    const stored = localStorage.getItem(SECRETS_STORAGE_KEY);
+    if (!stored) return;
+    const secrets: Record<string, string> = JSON.parse(stored);
+    for (const n of nodes) {
+      const d = n.data as ZyraNodeData | undefined;
+      if (d?.stageDef.stage !== "control" || d.stageDef.command !== "secret") continue;
+      const name = d.argValues.name;
+      if (typeof name === "string" && name in secrets && !d.argValues.value) {
+        d.argValues.value = secrets[name];
+      }
+    }
+  } catch { /* ignore */ }
 }
 
 let nodeIdCounter = 0;
@@ -286,6 +333,8 @@ function Editor() {
   useEffect(() => {
     try { localStorage.setItem("zyra-resources", JSON.stringify(resources)); } catch { /* ignore */ }
   }, [resources]);
+  // Persist secret values whenever nodes change
+  useEffect(() => { saveSecrets(nodes); }, [nodes]);
   const [paletteCollapsed, setPaletteCollapsed] = useState(false);
   const [plannerIntent, setPlannerIntent] = useState("");
   const [plannerHistory, setPlannerHistory] = useState<PlanHistoryEntry[]>([]);
@@ -607,6 +656,8 @@ function Editor() {
       }, nodeIdCounter);
       nodeIdCounter = maxNum;
 
+      // Restore secret values from localStorage before setting nodes
+      restoreSecrets(newNodes);
       setNodes(newNodes);
       setEdges(newEdges);
       // Restore resources from pipeline
