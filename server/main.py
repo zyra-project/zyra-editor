@@ -2091,13 +2091,19 @@ async def save_run_endpoint(payload: RunPayload):
 @app.get("/v1/runs")
 async def list_runs_endpoint(limit: int = 50, offset: int = 0):
     """List recent run summaries (no step details)."""
-    return await asyncio.to_thread(list_runs, _history_db, limit, offset)
+    def _list():
+        with _history_lock:
+            return list_runs(_history_db, limit, offset)
+    return await asyncio.to_thread(_list)
 
 
 @app.get("/v1/runs/{run_id}")
 async def get_run_endpoint(run_id: str):
     """Get full run detail including all steps."""
-    result = await asyncio.to_thread(get_run, _history_db, run_id)
+    def _get():
+        with _history_lock:
+            return get_run(_history_db, run_id)
+    result = await asyncio.to_thread(_get)
     if result is None:
         raise HTTPException(status_code=404, detail="Run not found")
     return result
@@ -2117,7 +2123,10 @@ async def delete_run_endpoint(run_id: str):
 @app.get("/v1/cache/lookup")
 async def cache_lookup_endpoint(key: str):
     """Look up a cached step result by cache key."""
-    result = await asyncio.to_thread(lookup_cache, _history_db, key)
+    def _lookup():
+        with _history_lock:
+            return lookup_cache(_history_db, key)
+    result = await asyncio.to_thread(_lookup)
     if result:
         return {"hit": True, **result}
     return {"hit": False}

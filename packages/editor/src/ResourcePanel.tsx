@@ -14,6 +14,7 @@ export function ResourcePanel({ resources, onChange, onClose }: ResourcePanelPro
   const [editingIdx, setEditingIdx] = useState<number | null>(null);
   const errors = validateResources(resources);
   const errorNames = new Set(errors.map((e) => e.name));
+  const errorMessages = new Map(errors.map((e) => [e.name, e.message]));
 
   const handleAdd = useCallback(() => {
     const base = "new_resource";
@@ -246,6 +247,19 @@ export function ResourcePanel({ resources, onChange, onClose }: ResourcePanelPro
               >
                 {"${res:" + r.name + "}"}
               </div>
+
+              {/* Validation error */}
+              {hasError && (
+                <div
+                  style={{
+                    marginTop: 4,
+                    fontSize: 10,
+                    color: "var(--accent-red)",
+                  }}
+                >
+                  {errorMessages.get(r.name)}
+                </div>
+              )}
             </div>
           );
         })}

@@ -216,20 +216,27 @@ export function useExecution(
       // Use async mode with WebSocket streaming for live log output
       const req: RunStepRequest = { ...requests[stepIndex], mode: "async" };
 
+      // Resolve resource references in args before cache check and submission
+      const resolvedReq = resourceMapRef.current
+        ? { ...req, args: resolveRequestResources(req.args, resourceMapRef.current) }
+        : req;
+
       // ── Cache check (single-node) ─────────────────────────────
       if (useCacheRef.current && !forceRerunRef.current.has(nodeId)) {
         try {
-          const cacheKey = await computeCacheKey(req);
+          const cacheKey = await computeCacheKey(resolvedReq);
           const cached = await lookupCache(cacheKey);
           if (cached.hit) {
+            const now = Date.now();
             updateNode(nodeId, {
               ...emptyRunState(),
               status: "cached",
               stdout: cached.stdout ?? "",
               stderr: cached.stderr ?? "",
               exitCode: cached.exit_code ?? 0,
-              submittedRequest: req,
-              completedAt: Date.now(),
+              submittedRequest: resolvedReq,
+              startedAt: now,
+              completedAt: now,
             });
             emitEvent(nodeId, "cache-hit", "Using cached result");
             return null;
@@ -254,11 +261,6 @@ export function useExecution(
           return null;
         }
       }
-
-      // Resolve resource references in args before submission
-      const resolvedReq = resourceMapRef.current
-        ? { ...req, args: resolveRequestResources(req.args, resourceMapRef.current) }
-        : req;
 
       const now = Date.now();
       updateNode(nodeId, { ...emptyRunState(), status: "running", submittedRequest: resolvedReq, startedAt: now });
@@ -550,19 +552,26 @@ export function useExecution(
           // Inject any values from upstream Extract nodes into this step's args
           const finalReq = injectExtractValues(nodeId, req, graph);
 
+          // Resolve resource references in args before cache check and submission
+          const resolvedFinalReq = resourceMapRef.current
+            ? { ...finalReq, args: resolveRequestResources(finalReq.args, resourceMapRef.current) }
+            : finalReq;
+
           // ── Cache check ────────────────────────────────────────
           if (useCacheRef.current && !forceRerunRef.current.has(nodeId)) {
             try {
-              const cacheKey = await computeCacheKey(finalReq);
+              const cacheKey = await computeCacheKey(resolvedFinalReq);
               const cached = await lookupCache(cacheKey);
               if (cached.hit) {
+                const cachedAt = Date.now();
                 updateNode(nodeId, {
                   status: "cached",
                   stdout: cached.stdout ?? "",
                   stderr: cached.stderr ?? "",
                   exitCode: cached.exit_code ?? 0,
-                  submittedRequest: finalReq,
-                  completedAt: Date.now(),
+                  submittedRequest: resolvedFinalReq,
+                  startedAt: cachedAt,
+                  completedAt: cachedAt,
                 });
                 emitEvent(nodeId, "cache-hit", "Using cached result");
                 resolved.set(nodeId, "succeeded");
@@ -572,11 +581,6 @@ export function useExecution(
               // Cache lookup failed — proceed with normal execution
             }
           }
-
-          // Resolve resource references in args before submission
-          const resolvedFinalReq = resourceMapRef.current
-            ? { ...finalReq, args: resolveRequestResources(finalReq.args, resourceMapRef.current) }
-            : finalReq;
 
           const stepStartedAt = Date.now();
           updateNode(nodeId, { status: "running", submittedRequest: resolvedFinalReq, startedAt: stepStartedAt });
