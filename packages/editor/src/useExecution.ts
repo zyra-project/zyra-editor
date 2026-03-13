@@ -61,6 +61,40 @@ async function cancellableSleep(
   return true;
 }
 
+/** Regex matching ${NAME} secret references injected by the serializer. */
+const SECRET_REF = /\$\{([A-Za-z_][A-Za-z0-9_]*)\}/g;
+
+/**
+ * Build a map of env-var-name → secret-value from control/secret nodes in the graph.
+ * Used to resolve ${NAME} references before server submission so secrets
+ * don't need to be in the server's environment.
+ */
+function buildSecretMap(graph: Graph): Record<string, string> {
+  const map: Record<string, string> = {};
+  for (const n of graph.nodes) {
+    if (n.stageCommand !== "control/secret") continue;
+    const name = n.argValues.name;
+    const value = n.argValues.value;
+    if (typeof name === "string" && name && typeof value === "string" && value) {
+      map[name] = value;
+    }
+  }
+  return map;
+}
+
+/** Resolve ${NAME} secret references in request args using the secret map. */
+function resolveSecretRefs(args: Record<string, unknown>, secrets: Record<string, string>): Record<string, unknown> {
+  const out: Record<string, unknown> = {};
+  for (const [k, v] of Object.entries(args)) {
+    if (typeof v === "string") {
+      out[k] = v.replace(SECRET_REF, (match, name) => (name in secrets ? secrets[name] : match));
+    } else {
+      out[k] = v;
+    }
+  }
+  return out;
+}
+
 export function useExecution(
   getGraphSnapshot?: () => GraphSnapshot | undefined,
   useCache = false,
@@ -216,10 +250,12 @@ export function useExecution(
       // Use async mode with WebSocket streaming for live log output
       const req: RunStepRequest = { ...requests[stepIndex], mode: "async" };
 
-      // Resolve resource references in args before cache check and submission
-      const resolvedReq = resourceMapRef.current
-        ? { ...req, args: resolveRequestResources(req.args, resourceMapRef.current) }
-        : req;
+      // Resolve resource and secret references in args before cache check and submission
+      let resolvedArgs = req.args;
+      if (resourceMapRef.current) resolvedArgs = resolveRequestResources(resolvedArgs, resourceMapRef.current);
+      const secrets = buildSecretMap(graph);
+      if (Object.keys(secrets).length > 0) resolvedArgs = resolveSecretRefs(resolvedArgs, secrets);
+      const resolvedReq = resolvedArgs !== req.args ? { ...req, args: resolvedArgs } : req;
 
       // ── Cache check (single-node) ─────────────────────────────
       if (useCacheRef.current && !forceRerunRef.current.has(nodeId)) {
@@ -471,6 +507,7 @@ export function useExecution(
 
       try {
         const { requests, pipeline } = graphToRunRequests(graph, stages);
+        const pipelineSecrets = buildSecretMap(graph);
 
         // Build dependency map: nodeId → set of nodeIds it depends on
         const deps = new Map<string, string[]>();
@@ -552,10 +589,11 @@ export function useExecution(
           // Inject any values from upstream Extract nodes into this step's args
           const finalReq = injectExtractValues(nodeId, req, graph);
 
-          // Resolve resource references in args before cache check and submission
-          const resolvedFinalReq = resourceMapRef.current
-            ? { ...finalReq, args: resolveRequestResources(finalReq.args, resourceMapRef.current) }
-            : finalReq;
+          // Resolve resource and secret references in args before cache check and submission
+          let resolvedFinalArgs = finalReq.args;
+          if (resourceMapRef.current) resolvedFinalArgs = resolveRequestResources(resolvedFinalArgs, resourceMapRef.current);
+          if (Object.keys(pipelineSecrets).length > 0) resolvedFinalArgs = resolveSecretRefs(resolvedFinalArgs, pipelineSecrets);
+          const resolvedFinalReq = resolvedFinalArgs !== finalReq.args ? { ...finalReq, args: resolvedFinalArgs } : finalReq;
 
           // ── Cache check ────────────────────────────────────────
           if (useCacheRef.current && !forceRerunRef.current.has(nodeId)) {
