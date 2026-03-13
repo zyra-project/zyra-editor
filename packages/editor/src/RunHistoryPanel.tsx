@@ -1,3 +1,4 @@
+import type { MouseEvent } from "react";
 import { useState, useEffect, useCallback } from "react";
 import type { RunSummary, RunHistoryRecord, GraphSnapshot, RunEvent } from "@zyra/core";
 import { STATUS_COLORS } from "@zyra/core";
@@ -48,7 +49,7 @@ export function RunHistoryPanel({ onClose, onRestoreGraph, refreshKey }: Props) 
     }
   };
 
-  const handleDelete = async (e: React.MouseEvent, runId: string) => {
+  const handleDelete = async (e: MouseEvent, runId: string) => {
     e.stopPropagation();
     try {
       await deleteRunHistory(runId);
@@ -211,7 +212,7 @@ function RunListItem({
 }: {
   run: RunSummary;
   onSelect: () => void;
-  onDelete: (e: React.MouseEvent) => void;
+  onDelete: (e: MouseEvent) => void;
 }) {
   const statusColor = (STATUS_COLORS as Record<string, string>)[run.status] ?? "#555";
   const ago = formatRelativeTime(run.startedAt);

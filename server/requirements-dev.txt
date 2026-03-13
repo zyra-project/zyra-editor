@@ -1,0 +1,4 @@
+# Test / development dependencies (not shipped in production image)
+-r requirements.txt
+httpx>=0.27,<1
+pytest>=8.0,<9

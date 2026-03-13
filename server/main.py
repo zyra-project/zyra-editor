@@ -2078,6 +2078,7 @@ class RunStepPayload(BaseModel):
     request: dict | None = None
     events: list[dict] = Field(default_factory=list)
     dryRunArgv: str | None = None
+    cacheKey: str | None = None
 
 
 class RunPayload(BaseModel):

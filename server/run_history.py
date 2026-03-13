@@ -76,11 +76,14 @@ def _migrate_cache_key(conn: sqlite3.Connection) -> None:
     columns = {row[1] for row in cur.fetchall()}
     if "cache_key" not in columns:
         conn.execute("ALTER TABLE run_steps ADD COLUMN cache_key TEXT")
-        conn.execute(
-            "CREATE INDEX IF NOT EXISTS idx_run_steps_cache_key "
-            "ON run_steps(cache_key)"
-        )
         conn.commit()
+    # Always ensure the index exists (covers DBs where column was added
+    # by a previous build but the index was not created).
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_run_steps_cache_key "
+        "ON run_steps(cache_key)"
+    )
+    conn.commit()
 
 
 def _compute_cache_key(request_dict: dict[str, Any]) -> str:

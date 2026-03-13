@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useMemo } from "react";
-import type { ArgDef, PortDef, NodeRunStatus, ArgValidationError, RunEvent } from "@zyra/core";
+import type { ArgDef, PortDef, NodeRunStatus, RunEvent } from "@zyra/core";
 import { STATUS_COLORS, getEffectivePorts, validateArgs } from "@zyra/core";
 import type { ZyraNodeData } from "./ZyraNode";
 import { isSensitive } from "./ZyraNode";
