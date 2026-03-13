@@ -22,7 +22,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 import atexit as _atexit
 import shutil as _shutil
 _test_data_dir = tempfile.mkdtemp(prefix="zyra-test-")
-os.environ.setdefault("ZYRA_DATA_DIR", _test_data_dir)
+os.environ["ZYRA_DATA_DIR"] = _test_data_dir
 _atexit.register(lambda: _shutil.rmtree(_test_data_dir, ignore_errors=True))
 
 from main import app

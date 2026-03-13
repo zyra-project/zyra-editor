@@ -61,7 +61,7 @@ os.environ.setdefault("ZYRA_VERBOSITY", "info")
 
 import logging
 import requests as http_requests
-from fastapi import HTTPException, Request, WebSocket, WebSocketDisconnect
+from fastapi import HTTPException, Query, Request, WebSocket, WebSocketDisconnect
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 from starlette.middleware.cors import CORSMiddleware
@@ -2094,10 +2094,12 @@ class RunPayload(BaseModel):
 
 
 def _require_history_db():
-    """Return the history DB connection, lazily initializing if needed."""
+    """Return the history DB connection, lazily initializing under lock if needed."""
     global _history_db
     if _history_db is None:
-        _history_db = init_db()
+        with _history_lock:
+            if _history_db is None:
+                _history_db = init_db()
     return _history_db
 
 
@@ -2114,7 +2116,10 @@ async def save_run_endpoint(payload: RunPayload):
 
 
 @app.get("/v1/runs")
-async def list_runs_endpoint(limit: int = 50, offset: int = 0):
+async def list_runs_endpoint(
+    limit: int = Query(default=50, ge=1, le=500),
+    offset: int = Query(default=0, ge=0),
+):
     """List recent run summaries (no step details)."""
     db = _require_history_db()
     def _list():

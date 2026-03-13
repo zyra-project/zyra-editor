@@ -39,7 +39,10 @@ function parseResources(raw: unknown): PipelineResource[] | undefined {
       if (!item || typeof item !== "object") continue;
       const obj = item as Record<string, unknown>;
       const name = typeof obj.name === "string" ? obj.name : undefined;
-      const value = typeof obj.value === "string" ? obj.value : undefined;
+      const rawVal = obj.value;
+      const value = typeof rawVal === "string" ? rawVal
+        : typeof rawVal === "number" || typeof rawVal === "boolean" ? String(rawVal)
+        : undefined;
       if (!name || value === undefined) continue;
       const res: PipelineResource = { name, value };
       if (typeof obj.description === "string" && obj.description) res.description = obj.description;
