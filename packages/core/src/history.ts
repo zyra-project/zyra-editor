@@ -45,8 +45,41 @@ export interface RunHistoryRecord extends RunSummary {
 // ── Pure helper: build a run record from a run-state map ─────────────
 
 /**
+ * Redact known secret values from a string, replacing each occurrence
+ * with "***REDACTED***".
+ */
+function redactString(text: string, secrets: string[]): string {
+  let result = text;
+  for (const secret of secrets) {
+    if (secret && result.includes(secret)) {
+      result = result.split(secret).join("***REDACTED***");
+    }
+  }
+  return result;
+}
+
+/**
+ * Redact secret values from a RunStepRequest's args.
+ * Returns a new request with sensitive arg values replaced.
+ */
+function redactRequest(
+  req: RunStepRequest | undefined,
+  secrets: string[],
+): RunStepRequest | undefined {
+  if (!req || secrets.length === 0) return req;
+  const redactedArgs: Record<string, unknown> = {};
+  for (const [k, v] of Object.entries(req.args)) {
+    redactedArgs[k] = typeof v === "string" ? redactString(v, secrets) : v;
+  }
+  return { ...req, args: redactedArgs };
+}
+
+/**
  * Convert a Map<nodeId, NodeRunState> into a RunHistoryRecord.
  * Returns `undefined` if there are no actionable steps (all idle/queued/dry-run).
+ *
+ * When `secretValues` is provided, all occurrences of those values are
+ * redacted from stdout, stderr, and request args before persisting.
  *
  * This is extracted as a pure function so it can be unit-tested without React.
  */
@@ -54,7 +87,9 @@ export function buildRunRecord(
   runState: Map<string, NodeRunState>,
   mode: "pipeline" | "single-node",
   graphSnapshot?: GraphSnapshot,
+  secretValues?: string[],
 ): RunHistoryRecord | undefined {
+  const secrets = secretValues?.filter((v) => v.length > 0) ?? [];
   const steps: RunStepRecord[] = [];
   let earliest = Infinity;
   let latest = 0;
@@ -68,12 +103,12 @@ export function buildRunRecord(
       status: ns.status,
       jobId: ns.jobId,
       exitCode: ns.exitCode,
-      stdout: ns.stdout,
-      stderr: ns.stderr,
+      stdout: secrets.length > 0 ? redactString(ns.stdout, secrets) : ns.stdout,
+      stderr: secrets.length > 0 ? redactString(ns.stderr, secrets) : ns.stderr,
       startedAt: ns.startedAt ? new Date(ns.startedAt).toISOString() : undefined,
       completedAt: ns.completedAt ? new Date(ns.completedAt).toISOString() : undefined,
       durationMs: ns.startedAt && ns.completedAt ? ns.completedAt - ns.startedAt : undefined,
-      request: ns.submittedRequest,
+      request: redactRequest(ns.submittedRequest, secrets),
       events: ns.events,
       dryRunArgv: ns.dryRunArgv,
     });

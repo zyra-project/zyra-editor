@@ -128,20 +128,24 @@ const SECRETS_KEY_NAME = "zyra-secrets-key";
 
 // ── Encrypted localStorage helpers (AES-GCM via Web Crypto) ──────────────────
 
-/** Derive a stable AES-GCM key from the page origin using PBKDF2. */
-async function getSecretsKey(): Promise<CryptoKey> {
+/** Cached derived key — avoids repeating PBKDF2 on every save. */
+let _cachedKeyPromise: Promise<CryptoKey> | null = null;
+
+/** Derive a stable AES-GCM key from the page origin using PBKDF2 (cached). */
+function getSecretsKey(): Promise<CryptoKey> {
+  if (_cachedKeyPromise) return _cachedKeyPromise;
   const enc = new TextEncoder();
-  const keyMaterial = await crypto.subtle.importKey(
+  _cachedKeyPromise = crypto.subtle.importKey(
     "raw", enc.encode(SECRETS_KEY_NAME + location.origin),
     "PBKDF2", false, ["deriveKey"],
-  );
-  return crypto.subtle.deriveKey(
+  ).then((keyMaterial) => crypto.subtle.deriveKey(
     { name: "PBKDF2", salt: enc.encode("zyra-salt"), iterations: 100_000, hash: "SHA-256" },
     keyMaterial,
     { name: "AES-GCM", length: 256 },
     false,
     ["encrypt", "decrypt"],
-  );
+  ));
+  return _cachedKeyPromise;
 }
 
 async function encryptSecrets(data: Record<string, string>): Promise<string> {
@@ -390,8 +394,11 @@ function Editor() {
   useEffect(() => {
     try { localStorage.setItem("zyra-resources", JSON.stringify(resources)); } catch { /* ignore */ }
   }, [resources]);
-  // Persist secret values whenever nodes change
-  useEffect(() => { void saveSecrets(nodes); }, [nodes]);
+  // Persist secret values whenever nodes change (debounced to avoid jank during drag/typing)
+  useEffect(() => {
+    const timer = setTimeout(() => { void saveSecrets(nodes); }, 500);
+    return () => clearTimeout(timer);
+  }, [nodes]);
   const [paletteCollapsed, setPaletteCollapsed] = useState(false);
   const [plannerIntent, setPlannerIntent] = useState("");
   const [plannerHistory, setPlannerHistory] = useState<PlanHistoryEntry[]>([]);
@@ -403,7 +410,14 @@ function Editor() {
   const graphEdgesRef = useRef(edges);
   graphEdgesRef.current = edges;
   const getGraphSnapshot = useCallback(() => ({
-    nodes: graphNodesRef.current,
+    // Redact plaintext secret values from the snapshot so they are not persisted
+    nodes: graphNodesRef.current.map((n) => {
+      const d = n.data as ZyraNodeData | undefined;
+      if (d?.stageDef.stage === "control" && d.stageDef.command === "secret") {
+        return { ...n, data: { ...d, argValues: { ...d.argValues, value: "***REDACTED***" } } };
+      }
+      return n;
+    }),
     edges: graphEdgesRef.current,
   }), []);
   const resourceMap = useMemo(() => toResourceMap(resources), [resources]);

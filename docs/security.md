@@ -58,12 +58,24 @@ This encryption does **not** protect against:
 
 For high-security environments, secrets should be managed externally (e.g., environment variables on the server, a vault service) rather than stored in the browser.
 
+### Run History Redaction
+
+When pipeline runs are persisted to the server's SQLite database, all known secret values are **automatically redacted** from:
+
+- **stdout / stderr** — CLI output that may echo request headers or parameters
+- **Request args** — the `RunStepRequest.args` stored for cache key computation and debugging
+
+Each occurrence of a secret value is replaced with `***REDACTED***` before the record is sent to the server. This is handled by `buildRunRecord()` in `@zyra/core`, which accepts the current secret values and scrubs them from all text fields.
+
+Note: secrets may still appear transiently in **WebSocket log frames** streamed during execution, since those are forwarded in real-time from the CLI subprocess. The redaction applies only to the persisted run history.
+
 ### Implementation Files
 
 | File | Role |
 |------|------|
 | `packages/editor/src/App.tsx` | `saveSecrets()`, `restoreSecrets()`, `encryptSecrets()`, `decryptSecrets()`, `getSecretsKey()` |
-| `packages/editor/src/useExecution.ts` | `buildSecretMap()`, `resolveSecretRefs()` — client-side resolution before server submission |
+| `packages/editor/src/useExecution.ts` | `buildSecretMap()`, `resolveSecretRefs()` — client-side resolution before server submission; passes secret values to `buildRunRecord` for redaction |
+| `packages/core/src/history.ts` | `buildRunRecord()` — redacts secret values from stdout, stderr, and request args before persistence |
 | `packages/core/src/serializer.ts` | Strips secret values from YAML, emits `${NAME}` references, preserves `format` on control edges |
 | `packages/core/src/deserializer.ts` | Restores `format` strings from `_controls` edges into target node `argValues` |
 | `packages/editor/src/NodeDetailPanel.tsx` | Format input UI for linked args with `{}` placeholder |

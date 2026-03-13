@@ -179,3 +179,66 @@ describe("buildRunRecord", () => {
     expect(step.events).toBe(events);
   });
 });
+
+describe("buildRunRecord — secret redaction", () => {
+  it("redacts secret values from stdout and stderr", () => {
+    const map = new Map<string, NodeRunState>();
+    map.set("a", makeState({
+      status: "succeeded",
+      startedAt: 1000,
+      completedAt: 2000,
+      stdout: "Connecting with key=sk-secret-123 to server",
+      stderr: "DEBUG: Authorization: sk-secret-123",
+    }));
+    const record = buildRunRecord(map, "single-node", undefined, ["sk-secret-123"]);
+    expect(record).toBeDefined();
+    const step = record!.steps[0];
+    expect(step.stdout).toBe("Connecting with key=***REDACTED*** to server");
+    expect(step.stderr).toBe("DEBUG: Authorization: ***REDACTED***");
+    expect(step.stdout).not.toContain("sk-secret-123");
+    expect(step.stderr).not.toContain("sk-secret-123");
+  });
+
+  it("redacts secret values from request args", () => {
+    const map = new Map<string, NodeRunState>();
+    map.set("a", makeState({
+      status: "succeeded",
+      startedAt: 1000,
+      completedAt: 2000,
+      submittedRequest: {
+        stage: "search",
+        command: "zyra search api",
+        args: { header: "X-API-Key: my-secret", param: "api_key=my-secret" },
+        mode: "async",
+      },
+    }));
+    const record = buildRunRecord(map, "single-node", undefined, ["my-secret"]);
+    const step = record!.steps[0];
+    expect(step.request?.args.header).toBe("X-API-Key: ***REDACTED***");
+    expect(step.request?.args.param).toBe("api_key=***REDACTED***");
+  });
+
+  it("handles multiple secret values", () => {
+    const map = new Map<string, NodeRunState>();
+    map.set("a", makeState({
+      status: "succeeded",
+      startedAt: 1000,
+      completedAt: 2000,
+      stdout: "key1=aaa key2=bbb",
+    }));
+    const record = buildRunRecord(map, "single-node", undefined, ["aaa", "bbb"]);
+    expect(record!.steps[0].stdout).toBe("key1=***REDACTED*** key2=***REDACTED***");
+  });
+
+  it("passes through unchanged when no secrets provided", () => {
+    const map = new Map<string, NodeRunState>();
+    map.set("a", makeState({
+      status: "succeeded",
+      startedAt: 1000,
+      completedAt: 2000,
+      stdout: "plain output",
+    }));
+    const record = buildRunRecord(map, "single-node");
+    expect(record!.steps[0].stdout).toBe("plain output");
+  });
+});

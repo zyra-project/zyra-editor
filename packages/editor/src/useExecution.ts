@@ -119,6 +119,7 @@ export function useExecution(
   const resourceMapRef = useRef(resourceMap);
   resourceMapRef.current = resourceMap;
   const forceRerunRef = useRef<Set<string>>(new Set());
+  const secretValuesRef = useRef<string[]>([]);
 
   const updateNode = useCallback(
     (nodeId: string, patch: Partial<NodeRunState>) => {
@@ -146,11 +147,12 @@ export function useExecution(
     [],
   );
 
-  /** Persist a completed run to the server (fire-and-forget). */
+  /** Persist a completed run to the server (fire-and-forget).
+   *  Secret values are redacted from stdout, stderr, and request args. */
   const persistRun = useCallback(
     (mode: "pipeline" | "single-node") => {
       const snapshot = runStateRef.current;
-      const record = buildRunRecord(snapshot, mode, getGraphSnapshot?.());
+      const record = buildRunRecord(snapshot, mode, getGraphSnapshot?.(), secretValuesRef.current);
       if (!record) return;
 
       saveRunHistory(record).catch(() => {
@@ -254,6 +256,7 @@ export function useExecution(
       let resolvedArgs = req.args;
       if (resourceMapRef.current) resolvedArgs = resolveRequestResources(resolvedArgs, resourceMapRef.current);
       const secrets = buildSecretMap(graph);
+      secretValuesRef.current = Object.values(secrets);
       if (Object.keys(secrets).length > 0) resolvedArgs = resolveSecretRefs(resolvedArgs, secrets);
       const resolvedReq = resolvedArgs !== req.args ? { ...req, args: resolvedArgs } : req;
 
@@ -510,6 +513,7 @@ export function useExecution(
       try {
         const { requests, pipeline } = graphToRunRequests(graph, stages);
         const pipelineSecrets = buildSecretMap(graph);
+        secretValuesRef.current = Object.values(pipelineSecrets);
 
         // Build dependency map: nodeId → set of nodeIds it depends on
         const deps = new Map<string, string[]>();

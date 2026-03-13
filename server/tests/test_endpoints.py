@@ -19,8 +19,11 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 # Set ZYRA_DATA_DIR to a temp dir before importing app so startup doesn't
 # create a run_history.db in the working directory.
+import atexit as _atexit
+import shutil as _shutil
 _test_data_dir = tempfile.mkdtemp(prefix="zyra-test-")
 os.environ.setdefault("ZYRA_DATA_DIR", _test_data_dir)
+_atexit.register(lambda: _shutil.rmtree(_test_data_dir, ignore_errors=True))
 
 from main import app
 from run_history import save_run, init_db
