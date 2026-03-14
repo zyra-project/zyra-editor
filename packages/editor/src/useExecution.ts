@@ -75,7 +75,7 @@ function buildSecretMap(graph: Graph): Record<string, string> {
     if (n.stageCommand !== "control/secret") continue;
     const name = n.argValues.name;
     const value = n.argValues.value;
-    if (typeof name === "string" && name && typeof value === "string" && value) {
+    if (typeof name === "string" && name && typeof value === "string" && value && value !== "***REDACTED***") {
       map[name] = value;
     }
   }

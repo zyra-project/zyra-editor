@@ -1318,8 +1318,10 @@ function Editor() {
       {historyOpen && (
         <RunHistoryPanel
           onClose={() => setHistoryOpen(false)}
-          onRestoreGraph={(snapshot) => {
-            setNodes(snapshot.nodes as Node[]);
+          onRestoreGraph={async (snapshot) => {
+            const restoredNodes = snapshot.nodes as Node[];
+            await restoreSecrets(restoredNodes);
+            setNodes(restoredNodes);
             setEdges(snapshot.edges as Edge[]);
           }}
           refreshKey={historyRefreshKey}

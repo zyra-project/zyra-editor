@@ -347,8 +347,15 @@ class TestRunHistoryEndpoints:
 
     @pytest.fixture(autouse=True)
     def _history_db(self, monkeypatch, tmp_path):
-        """Provide a fresh temp DB, closed automatically after the test."""
+        """Provide a fresh temp DB, closed automatically after the test.
+
+        Closes any startup-created connection before replacing it to
+        avoid leaking the sqlite handle created by TestClient(app).
+        """
         import main as main_mod
+        old_db = getattr(main_mod, "_history_db", None)
+        if old_db is not None:
+            old_db.close()
         monkeypatch.setenv("ZYRA_DATA_DIR", str(tmp_path))
         self._db = init_db()
         monkeypatch.setattr(main_mod, "_history_db", self._db)
@@ -415,8 +422,15 @@ class TestRunHistoryEndpoints:
 class TestCacheLookupEndpoint:
     @pytest.fixture(autouse=True)
     def _history_db(self, monkeypatch, tmp_path):
-        """Provide a fresh temp DB, closed automatically after the test."""
+        """Provide a fresh temp DB, closed automatically after the test.
+
+        Closes any startup-created connection before replacing it to
+        avoid leaking the sqlite handle created by TestClient(app).
+        """
         import main as main_mod
+        old_db = getattr(main_mod, "_history_db", None)
+        if old_db is not None:
+            old_db.close()
         monkeypatch.setenv("ZYRA_DATA_DIR", str(tmp_path))
         self._db = init_db()
         monkeypatch.setattr(main_mod, "_history_db", self._db)
