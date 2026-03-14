@@ -1,0 +1,68 @@
+
+</div><!-- /.presentation -->
+
+<script>
+(function() {
+  // ── Scroll-triggered fade-in ──
+  var observer = new IntersectionObserver(function(entries) {
+    entries.forEach(function(entry) {
+      if (entry.isIntersecting) {
+        entry.target.classList.add('visible');
+      }
+    });
+  }, { threshold: 0.1, rootMargin: '0px 0px -40px 0px' });
+
+  document.querySelectorAll('.fade-in').forEach(function(el) {
+    observer.observe(el);
+  });
+
+  // ── Editor iframe fallback ──
+  var iframe = document.getElementById('editorFrame');
+  var fallback = document.getElementById('demoFallback');
+  var loaded = false;
+
+  function checkEditor() {
+    fetch('http://localhost:5173/health', { mode: 'no-cors' })
+      .then(function() {
+        // no-cors means we can't read the response, but if it doesn't throw, the server is up
+        if (!loaded) {
+          loaded = true;
+          iframe.style.display = 'block';
+          fallback.classList.remove('active');
+        }
+      })
+      .catch(function() {
+        if (!loaded) {
+          iframe.style.display = 'none';
+          fallback.classList.add('active');
+        }
+      });
+  }
+
+  // Check on load and retry a few times
+  iframe.addEventListener('load', function() {
+    loaded = true;
+  });
+
+  iframe.addEventListener('error', function() {
+    iframe.style.display = 'none';
+    fallback.classList.add('active');
+  });
+
+  // Initial check after a short delay
+  setTimeout(checkEditor, 1500);
+  // Retry periodically in case the server starts later
+  var retryCount = 0;
+  var retryInterval = setInterval(function() {
+    if (loaded || retryCount > 10) {
+      clearInterval(retryInterval);
+      return;
+    }
+    retryCount++;
+    checkEditor();
+  }, 3000);
+})();
+</script>
+
+</body>
+</html>

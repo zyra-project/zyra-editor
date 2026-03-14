@@ -1,0 +1,72 @@
+  <!-- ════════════════════════════════════════════════════
+       SECTION 1: HERO
+       ════════════════════════════════════════════════════ -->
+  <div class="hero">
+
+    <!-- Data-viz texture background -->
+    <div class="hero-texture">
+      <svg xmlns="http://www.w3.org/2000/svg" preserveAspectRatio="none">
+        <defs>
+          <pattern id="dotgrid" x="0" y="0" width="28" height="28" patternUnits="userSpaceOnUse">
+            <circle cx="14" cy="14" r="1" fill="#1A5A69" opacity="0.07"/>
+          </pattern>
+          <pattern id="contour" x="0" y="0" width="360" height="360" patternUnits="userSpaceOnUse">
+            <ellipse cx="180" cy="180" rx="160" ry="105" fill="none" stroke="#1A5A69" stroke-width="0.6" opacity="0.06"/>
+            <ellipse cx="180" cy="180" rx="120" ry="78" fill="none" stroke="#1A5A69" stroke-width="0.5" opacity="0.05"/>
+            <ellipse cx="180" cy="180" rx="80" ry="50" fill="none" stroke="#1A5A69" stroke-width="0.45" opacity="0.045"/>
+          </pattern>
+        </defs>
+        <rect width="100%" height="100%" fill="url(#contour)"/>
+        <rect width="100%" height="100%" fill="url(#dotgrid)"/>
+        <path d="M20,60 Q140,30 280,55 Q420,85 540,50 Q680,15 820,45" fill="none" stroke="#5F9DAE" stroke-width="0.7" opacity="0.045"/>
+        <path d="M10,100 Q150,70 300,95 Q440,125 560,90 Q700,55 840,80" fill="none" stroke="#5F9DAE" stroke-width="0.6" opacity="0.04"/>
+      </svg>
+    </div>
+
+    <!-- Logos -->
+    <div class="hero-logos">
+      <div>
+        <img src="noaa-logo.svg" alt="NOAA — National Oceanic and Atmospheric Administration" class="hero-logo">
+      </div>
+      <div>
+        <img src="Global%20Systems%20Laboratory%203%20Lines%20Dark%403x.png" alt="NOAA Global Systems Laboratory" class="hero-logo">
+      </div>
+    </div>
+
+    <div class="hero-project-name">Zyra <span>Editor</span></div>
+    <h1 class="hero-title">A Visual Node Editor for Scientific Data&nbsp;Pipelines</h1>
+    <p class="hero-subtitle">
+      Drag, connect, and run data processing workflows — powered by the Zyra framework.
+      A manifest-driven visual interface for orchestrating CLI pipelines in the browser.
+    </p>
+
+    <div class="author-block">
+      <span class="author-name">Eric Hackathorn</span>
+      <span class="author-org">NOAA Global Systems Laboratory</span>
+      <span class="author-orcid">
+        <span class="orcid-dot">iD</span>
+        0000-0002-9693-2093
+      </span>
+    </div>
+
+    <div class="badges">
+      <a href="https://github.com/zyra-project/zyra-editor" class="badge">
+        <span class="badge-pip pip-gh"><svg width="10" height="10" viewBox="0 0 16 16" fill="white"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.01 8.01 0 0016 8c0-4.42-3.58-8-8-8z"/></svg></span>
+        <span class="badge-label">GitHub</span>
+        <span class="badge-value">zyra-project/zyra-editor</span>
+      </a>
+      <span class="badge">
+        <span class="badge-pip pip-lic"><svg width="9" height="9" viewBox="0 0 10 10" fill="none"><circle cx="5" cy="5" r="4" stroke="white" stroke-width="1.2" fill="none"/><path d="M3.5 5.5 L4.5 6.5 L7 4" stroke="white" stroke-width="1" fill="none" stroke-linecap="round" stroke-linejoin="round"/></svg></span>
+        <span class="badge-label">License</span>
+        <span class="badge-value">Apache-2.0</span>
+      </span>
+      <span class="badge">
+        <span class="badge-pip" style="background:var(--ocean-blue);font-size:9px;">TS</span>
+        <span class="badge-label">Lang</span>
+        <span class="badge-value">TypeScript + React</span>
+      </span>
+    </div>
+  </div>
+
+  <div class="section-transition"></div>
+

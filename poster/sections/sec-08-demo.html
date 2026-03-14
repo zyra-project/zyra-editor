@@ -1,0 +1,39 @@
+  <!-- ════════════════════════════════════════════════════
+       SECTION 7: LIVE DEMO
+       ════════════════════════════════════════════════════ -->
+  <div class="demo-section fade-in">
+    <div class="section-tag">
+      <div class="diamond"></div>
+      <span>Interactive Demo</span>
+    </div>
+    <h2>Try It Live</h2>
+    <p class="demo-instructions">
+      The editor is embedded below. If it's not loading, start the containers with
+      <code>docker compose up --build</code> and reload this page.
+      The editor runs at <code>localhost:5173</code>.
+    </p>
+
+    <div class="demo-frame-wrap">
+      <div class="demo-frame-titlebar">
+        <div class="demo-frame-dot demo-frame-dot--red"></div>
+        <div class="demo-frame-dot demo-frame-dot--yellow"></div>
+        <div class="demo-frame-dot demo-frame-dot--green"></div>
+        <div class="demo-frame-url">localhost:5173 &mdash; Zyra Editor</div>
+      </div>
+      <iframe
+        id="editorFrame"
+        class="demo-iframe"
+        src="http://localhost:5173"
+        loading="lazy"
+        title="Zyra Editor — Live Demo"
+        sandbox="allow-scripts allow-same-origin allow-forms allow-popups"
+      ></iframe>
+      <div class="demo-fallback" id="demoFallback">
+        <p style="font-size:18px;color:var(--mist);margin-bottom:16px;">The editor is not running.</p>
+        <p style="color:var(--neutral-600);margin-bottom:20px;">Start the development server to see the live demo:</p>
+        <code>docker compose up --build</code>
+        <p style="margin-top:16px;color:var(--neutral-700);font-size:13px;">Then reload this page. The editor will appear here.</p>
+      </div>
+    </div>
+  </div>
+
