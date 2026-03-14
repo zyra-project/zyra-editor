@@ -36,7 +36,32 @@ export type NodeRunStatus =
   | "running"
   | "succeeded"
   | "failed"
-  | "canceled";
+  | "canceled"
+  | "cached";
+
+// ── Structured run events ────────────────────────────────────────
+
+export type RunEventType =
+  | "submitted"
+  | "job-accepted"
+  | "ws-connected"
+  | "ws-disconnected"
+  | "poll-fallback"
+  | "completed"
+  | "canceled"
+  | "error"
+  | "cache-hit";
+
+/** A single structured event in a node's execution timeline. */
+export interface RunEvent {
+  type: RunEventType;
+  /** Epoch milliseconds (Date.now()). */
+  timestamp: number;
+  /** Human-readable description. */
+  message?: string;
+  /** Optional structured payload. */
+  detail?: Record<string, unknown>;
+}
 
 /** Per-node execution state tracked by the editor. */
 export interface NodeRunState {
@@ -49,10 +74,18 @@ export interface NodeRunState {
   dryRunArgv?: string;
   /** The request that was submitted to the server (for debugging). */
   submittedRequest?: RunStepRequest;
+  /** Structured event timeline for this run. */
+  events: RunEvent[];
+  /** Epoch ms when the run started (status → running). */
+  startedAt?: number;
+  /** Epoch ms when the run reached a terminal state. */
+  completedAt?: number;
+  /** Pre-computed cache key (SHA-256 of canonical request before redaction). */
+  cacheKey?: string;
 }
 
 export function emptyRunState(): NodeRunState {
-  return { status: "idle", stdout: "", stderr: "" };
+  return { status: "idle", stdout: "", stderr: "", events: [] };
 }
 
 /** Canonical status → hex color mapping shared across all UI components. */
@@ -64,4 +97,5 @@ export const STATUS_COLORS: Record<NodeRunStatus, string> = {
   succeeded: "#3fb950",
   failed: "#f85149",
   canceled: "#d29922",
+  cached: "#8b949e",
 };

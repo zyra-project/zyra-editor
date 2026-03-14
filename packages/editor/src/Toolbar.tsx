@@ -10,6 +10,7 @@ interface ToolbarProps {
   onRun: () => void;
   onCancel: () => void;
   onReset: () => void;
+  onRetryFromFailure: () => void;
   running: boolean;
   nodeCount: number;
   runState: RunStateMap;
@@ -17,6 +18,15 @@ interface ToolbarProps {
   onToggleYaml: () => void;
   plannerOpen: boolean;
   onTogglePlanner: () => void;
+  historyOpen: boolean;
+  onToggleHistory: () => void;
+  useCache: boolean;
+  onToggleCache: () => void;
+  lineageMode: boolean;
+  onToggleLineage: () => void;
+  resourcesOpen: boolean;
+  onToggleResources: () => void;
+  resourceCount: number;
   theme: Theme;
   onToggleTheme: () => void;
   backendStatus: BackendStatus & { refresh: () => void };
@@ -28,6 +38,7 @@ export function Toolbar({
   onRun,
   onCancel,
   onReset,
+  onRetryFromFailure,
   running,
   nodeCount,
   runState,
@@ -35,6 +46,15 @@ export function Toolbar({
   onToggleYaml,
   plannerOpen,
   onTogglePlanner,
+  historyOpen,
+  onToggleHistory,
+  useCache,
+  onToggleCache,
+  lineageMode,
+  onToggleLineage,
+  resourcesOpen,
+  onToggleResources,
+  resourceCount,
   theme,
   onToggleTheme,
   backendStatus,
@@ -44,7 +64,7 @@ export function Toolbar({
   const counts = { succeeded: 0, failed: 0, running: 0, total: 0 };
   for (const [, state] of runState) {
     counts.total++;
-    if (state.status === "succeeded") counts.succeeded++;
+    if (state.status === "succeeded" || state.status === "cached") counts.succeeded++;
     else if (state.status === "failed") counts.failed++;
     else if (state.status === "running") counts.running++;
   }
@@ -122,6 +142,16 @@ export function Toolbar({
             Clear
           </button>
         )}
+
+        {hasRun && !running && counts.failed > 0 && (
+          <button
+            className="zyra-btn zyra-btn--warning"
+            onClick={onRetryFromFailure}
+            title="Re-run from the failed node(s), skipping already-succeeded steps"
+          >
+            Retry from Failure
+          </button>
+        )}
       </div>
 
       {/* AI Planner toggle */}
@@ -147,6 +177,104 @@ export function Toolbar({
       >
         <span style={{ fontSize: 14 }}>{"\u2728"}</span>
         Plan
+      </button>
+
+      {/* Run History toggle */}
+      <button
+        onClick={onToggleHistory}
+        title="Run History — browse past pipeline executions"
+        aria-expanded={historyOpen}
+        style={{
+          background: historyOpen ? "var(--accent-blue)" : "none",
+          border: "1px solid var(--border-default)",
+          borderRadius: "var(--radius-md)",
+          color: historyOpen ? "#fff" : "var(--text-secondary)",
+          cursor: "pointer",
+          padding: "4px 10px",
+          fontSize: 12,
+          lineHeight: 1,
+          display: "flex",
+          alignItems: "center",
+          gap: 5,
+          fontFamily: "var(--font-sans)",
+          fontWeight: 500,
+        }}
+      >
+        <span style={{ fontSize: 14 }}>{"\u{1f552}"}</span>
+        History
+      </button>
+
+      {/* Cache toggle */}
+      <button
+        onClick={onToggleCache}
+        title="When enabled, skip re-execution of nodes whose inputs haven't changed"
+        style={{
+          background: useCache ? "var(--accent-blue)" : "none",
+          border: "1px solid var(--border-default)",
+          borderRadius: "var(--radius-md)",
+          color: useCache ? "#fff" : "var(--text-secondary)",
+          cursor: "pointer",
+          padding: "4px 10px",
+          fontSize: 12,
+          lineHeight: 1,
+          display: "flex",
+          alignItems: "center",
+          gap: 5,
+          fontFamily: "var(--font-sans)",
+          fontWeight: 500,
+        }}
+      >
+        <span style={{ fontSize: 14 }}>{"\u26A1"}</span>
+        Cache{useCache ? ": ON" : ": OFF"}
+      </button>
+
+      {/* Lineage toggle */}
+      <button
+        onClick={onToggleLineage}
+        title="When enabled, selecting a node highlights its upstream and downstream data flow"
+        style={{
+          background: lineageMode ? "var(--accent-blue)" : "none",
+          border: "1px solid var(--border-default)",
+          borderRadius: "var(--radius-md)",
+          color: lineageMode ? "#fff" : "var(--text-secondary)",
+          cursor: "pointer",
+          padding: "4px 10px",
+          fontSize: 12,
+          lineHeight: 1,
+          display: "flex",
+          alignItems: "center",
+          gap: 5,
+          fontFamily: "var(--font-sans)",
+          fontWeight: 500,
+        }}
+      >
+        <span style={{ fontSize: 14 }}>{"\u{1f517}"}</span>
+        Lineage{lineageMode ? ": ON" : ": OFF"}
+      </button>
+
+      {/* Resources toggle */}
+      <button
+        onClick={onToggleResources}
+        title="Pipeline Resources — define named values referenced across nodes via ${res:name}"
+        aria-expanded={resourcesOpen}
+        style={{
+          background: resourcesOpen ? "var(--accent-blue)" : "none",
+          border: "1px solid var(--border-default)",
+          borderRadius: "var(--radius-md)",
+          color: resourcesOpen ? "#fff" : "var(--text-secondary)",
+          cursor: "pointer",
+          padding: "4px 10px",
+          fontSize: 12,
+          lineHeight: 1,
+          display: "flex",
+          alignItems: "center",
+          gap: 5,
+          fontFamily: "var(--font-sans)",
+          fontWeight: 500,
+        }}
+      >
+        <span style={{ fontSize: 14 }}>{"\u{1f4e6}"}</span>
+        Resources{resourceCount > 0 ? `: ${resourceCount}` : ""}
       </button>
 
       {/* Spacer */}

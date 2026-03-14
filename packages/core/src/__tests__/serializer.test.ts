@@ -453,6 +453,67 @@ describe("graphToPipeline — control node inlining", () => {
     const pipeline = graphToPipeline(graph, STAGES);
     expect(pipeline.steps[0].args.token).toBe("${MY_TOKEN}");
   });
+
+  it("interpolates wired value into {} placeholder in existing arg", () => {
+    const graph: Graph = {
+      nodes: [
+        {
+          id: "sec1",
+          stageCommand: "control/secret",
+          argValues: { name: "API_KEY", value: "abc123" },
+        },
+        {
+          id: "fetch",
+          stageCommand: "acquire/http",
+          argValues: { header: "X-API-Key: {}", param: "api_key={}" },
+        },
+      ],
+      edges: [
+        {
+          sourceNode: "sec1",
+          sourcePort: "value",
+          targetNode: "fetch",
+          targetPort: "arg:header",
+        },
+        {
+          sourceNode: "sec1",
+          sourcePort: "value",
+          targetNode: "fetch",
+          targetPort: "arg:param",
+        },
+      ],
+    };
+    const pipeline = graphToPipeline(graph, STAGES);
+    expect(pipeline.steps[0].args.header).toBe("X-API-Key: ${API_KEY}");
+    expect(pipeline.steps[0].args.param).toBe("api_key=${API_KEY}");
+  });
+
+  it("replaces entire arg when no {} placeholder is present (backward compat)", () => {
+    const graph: Graph = {
+      nodes: [
+        {
+          id: "sec1",
+          stageCommand: "control/secret",
+          argValues: { name: "TOKEN", value: "secret" },
+        },
+        {
+          id: "fetch",
+          stageCommand: "acquire/http",
+          argValues: { token: "old-value" },
+        },
+      ],
+      edges: [
+        {
+          sourceNode: "sec1",
+          sourcePort: "value",
+          targetNode: "fetch",
+          targetPort: "arg:token",
+        },
+      ],
+    };
+    const pipeline = graphToPipeline(graph, STAGES);
+    expect(pipeline.steps[0].args.token).toBe("${TOKEN}");
+  });
 });
 
 // ── graphToPipeline — transitive dependencies ────────────────────────────────
@@ -484,5 +545,40 @@ describe("graphToPipeline — transitive dependencies", () => {
     const pipeline = graphToPipeline(graph, stages);
     const stepB = pipeline.steps.find((s) => s.name === "b")!;
     expect(stepB.depends_on).toContain("a");
+  });
+});
+
+// ── Pipeline.resources ──────────────────────────────────────────────────────
+
+describe("Pipeline.resources", () => {
+  it("Pipeline type accepts resources field", () => {
+    const pipeline: Pipeline = {
+      version: "1",
+      steps: [{ name: "a", command: "acquire/http", args: { path: "${res:work_dir}" } }],
+      resources: [
+        { name: "work_dir", value: "/data/output" },
+        { name: "s3_bucket", value: "s3://my-bucket", description: "Main bucket" },
+      ],
+    };
+    expect(pipeline.resources).toHaveLength(2);
+    expect(pipeline.resources![0].name).toBe("work_dir");
+    expect(pipeline.resources![1].description).toBe("Main bucket");
+  });
+
+  it("Pipeline without resources has undefined field", () => {
+    const pipeline: Pipeline = {
+      version: "1",
+      steps: [{ name: "a", command: "acquire/http", args: {} }],
+    };
+    expect(pipeline.resources).toBeUndefined();
+  });
+
+  it("graphToPipeline does not populate resources (set externally)", () => {
+    const graph: Graph = {
+      nodes: [{ id: "a", stageCommand: "acquire/http", argValues: {} }],
+      edges: [],
+    };
+    const pipeline = graphToPipeline(graph, STAGES);
+    expect(pipeline.resources).toBeUndefined();
   });
 });

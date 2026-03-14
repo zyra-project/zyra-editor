@@ -304,6 +304,7 @@ html, body, #root {
 .zyra-btn--primary { background: var(--btn-primary); }
 .zyra-btn--info { background: var(--btn-info); }
 .zyra-btn--danger { background: var(--btn-danger); }
+.zyra-btn--warning { background: var(--accent-yellow); }
 .zyra-btn--neutral {
   background: var(--btn-neutral);
   color: var(--text-primary);

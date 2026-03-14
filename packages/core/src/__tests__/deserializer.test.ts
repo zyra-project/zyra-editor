@@ -445,3 +445,101 @@ describe("pipelineToGraph — _argWires reconstruction", () => {
     expect(edges.every((e) => e.sourcePort !== "argout:nonexistent_arg")).toBe(true);
   });
 });
+
+// ── format placeholder round-trip ─────────────────────────────────────────────
+
+describe("pipelineToGraph — format placeholder round-trip", () => {
+  it("restores {} format strings from _controls edges into target node argValues", () => {
+    const stages: StageDef[] = [
+      makeStageDef("acquire", "http", {
+        args: [
+          { key: "header", label: "Header", type: "string", required: false },
+          { key: "param", label: "Param", type: "string", required: false },
+        ],
+      }),
+      makeStageDef("process", "filter"),
+      makeStageDef("export", "csv"),
+      makeStageDef("control", "secret", {
+        stage: "control",
+        command: "secret",
+        cli: "",
+        inputs: [],
+        outputs: [{ id: "value", label: "Value", types: ["string"] }],
+        args: [
+          { key: "name", label: "Name", type: "string", required: true },
+          { key: "value", label: "Value", type: "string", required: true },
+        ],
+      }),
+    ];
+
+    const pipeline: Pipeline = {
+      version: "1",
+      steps: [
+        {
+          name: "fetch",
+          command: "zyra acquire http",
+          args: { header: "X-API-Key: ${API_KEY}", param: "api_key=${API_KEY}" },
+        },
+      ],
+      _controls: [
+        {
+          id: "sec1",
+          stageCommand: "control/secret",
+          argValues: { name: "API_KEY" },
+          edges: [
+            { targetNode: "fetch", targetPort: "arg:header", format: "X-API-Key: {}" },
+            { targetNode: "fetch", targetPort: "arg:param", format: "api_key={}" },
+          ],
+        },
+      ],
+    };
+
+    const { nodes } = pipelineToGraph(pipeline, stages);
+    const fetch = nodes.find((n) => n.id === "fetch")!;
+    expect(fetch.argValues.header).toBe("X-API-Key: {}");
+    expect(fetch.argValues.param).toBe("api_key={}");
+  });
+
+  it("leaves arg value as-is when no format is specified on control edge", () => {
+    const stages: StageDef[] = [
+      ...STAGES,
+      makeStageDef("control", "secret", {
+        stage: "control",
+        command: "secret",
+        cli: "",
+        inputs: [],
+        outputs: [{ id: "value", label: "Value", types: ["string"] }],
+        args: [
+          { key: "name", label: "Name", type: "string", required: true },
+          { key: "value", label: "Value", type: "string", required: true },
+        ],
+      }),
+    ];
+
+    const pipeline: Pipeline = {
+      version: "1",
+      steps: [
+        {
+          name: "fetch",
+          command: "zyra acquire http",
+          args: { token: "${MY_TOKEN}" },
+        },
+      ],
+      _controls: [
+        {
+          id: "sec1",
+          stageCommand: "control/secret",
+          argValues: { name: "MY_TOKEN" },
+          edges: [
+            { targetNode: "fetch", targetPort: "arg:token" },
+          ],
+        },
+      ],
+    };
+
+    const { nodes } = pipelineToGraph(pipeline, stages);
+    const fetch = nodes.find((n) => n.id === "fetch")!;
+    // Without format, the inlined value from step.args is kept
+    expect(fetch.argValues.token).toBe("${MY_TOKEN}");
+  });
+});

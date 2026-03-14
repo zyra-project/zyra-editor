@@ -15,8 +15,8 @@ import {
   BackgroundVariant,
 } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
-import type { StageDef, ArgDef, PortDef, Graph, GraphNode, GraphEdge, Pipeline, PipelineStep, PipelineGroup, NodeRunStatus } from "@zyra/core";
-import { portsCompatible, getEffectivePorts, graphToPipeline, pipelineToGraph, resolvePeriodISO } from "@zyra/core";
+import type { StageDef, ArgDef, PortDef, Graph, GraphNode, GraphEdge, Pipeline, PipelineStep, PipelineGroup, NodeRunStatus, PipelineResource } from "@zyra/core";
+import { portsCompatible, getEffectivePorts, graphToPipeline, pipelineToGraph, resolvePeriodISO, validateArgs, computeLineage, toResourceMap } from "@zyra/core";
 import { ManifestProvider, useManifest } from "./ManifestLoader";
 import { NodePalette } from "./NodePalette";
 import { ZyraNode, type ZyraNodeData } from "./ZyraNode";
@@ -28,6 +28,8 @@ import { useExecution } from "./useExecution";
 import { YamlPanel, normalizePipeline } from "./YamlPanel";
 import { parseOptions } from "./ChoiceOptionsEditor";
 import { PlannerPanel, type PlanHistoryEntry, type PlanBatch } from "./PlannerPanel";
+import { RunHistoryPanel } from "./RunHistoryPanel";
+import { ResourcePanel } from "./ResourcePanel";
 import yaml from "js-yaml";
 import { useTheme } from "./useTheme";
 import { useBackendStatus } from "./useBackendStatus";
@@ -77,6 +79,12 @@ function resolveControlDisplayValue(
     return expr != null && expr !== "" ? `$.${expr}` : null;
   }
 
+  // Secret nodes: show env var reference instead of the actual value
+  if (cmd === "secret") {
+    const name = args.name;
+    return name ? `\${${name}}` : "••••••••";
+  }
+
   // Data-value control nodes: resolve from matching arg key
   let val = portKey !== "value" && args[portKey] !== undefined
     ? args[portKey]
@@ -113,6 +121,108 @@ function resolveControlDisplayValue(
   if (fallback != null && fallback !== "") return String(fallback);
 
   return null;
+}
+
+const SECRETS_STORAGE_KEY = "zyra-secrets";
+const SECRETS_KEY_NAME = "zyra-secrets-key";
+
+// ── Encrypted localStorage helpers (AES-GCM via Web Crypto) ──────────────────
+
+/** Cached derived key — avoids repeating PBKDF2 on every save. */
+let _cachedKeyPromise: Promise<CryptoKey> | null = null;
+
+/** Derive a stable AES-GCM key from the page origin using PBKDF2 (cached). */
+function getSecretsKey(): Promise<CryptoKey> {
+  if (_cachedKeyPromise) return _cachedKeyPromise;
+  const enc = new TextEncoder();
+  _cachedKeyPromise = crypto.subtle.importKey(
+    "raw", enc.encode(SECRETS_KEY_NAME + location.origin),
+    "PBKDF2", false, ["deriveKey"],
+  ).then((keyMaterial) => crypto.subtle.deriveKey(
+    { name: "PBKDF2", salt: enc.encode("zyra-salt"), iterations: 100_000, hash: "SHA-256" },
+    keyMaterial,
+    { name: "AES-GCM", length: 256 },
+    false,
+    ["encrypt", "decrypt"],
+  ));
+  return _cachedKeyPromise;
+}
+
+async function encryptSecrets(data: Record<string, string>): Promise<string> {
+  const key = await getSecretsKey();
+  const iv = crypto.getRandomValues(new Uint8Array(12));
+  const ciphertext = await crypto.subtle.encrypt(
+    { name: "AES-GCM", iv },
+    key,
+    new TextEncoder().encode(JSON.stringify(data)),
+  );
+  // Store as base64: iv (12 bytes) + ciphertext
+  const combined = new Uint8Array(iv.length + ciphertext.byteLength);
+  combined.set(iv);
+  combined.set(new Uint8Array(ciphertext), iv.length);
+  return btoa(String.fromCharCode(...combined));
+}
+
+async function decryptSecrets(stored: string): Promise<Record<string, string>> {
+  const key = await getSecretsKey();
+  const raw = Uint8Array.from(atob(stored), (c) => c.charCodeAt(0));
+  const iv = raw.slice(0, 12);
+  const ciphertext = raw.slice(12);
+  const plaintext = await crypto.subtle.decrypt(
+    { name: "AES-GCM", iv },
+    key,
+    ciphertext,
+  );
+  return JSON.parse(new TextDecoder().decode(plaintext));
+}
+
+/** Persist secret values to localStorage (encrypted). */
+async function saveSecrets(nodes: Node[]) {
+  try {
+    const secrets: Record<string, string> = {};
+    // Load existing secrets first so we don't lose unrelated ones
+    try {
+      const stored = localStorage.getItem(SECRETS_STORAGE_KEY);
+      if (stored) Object.assign(secrets, await decryptSecrets(stored));
+    } catch { /* ignore — may be legacy plaintext or corrupt */ }
+    for (const n of nodes) {
+      const d = n.data as ZyraNodeData | undefined;
+      if (d?.stageDef.stage !== "control" || d.stageDef.command !== "secret") continue;
+      const name = d.argValues.name;
+      const value = d.argValues.value;
+      if (typeof name === "string" && name && typeof value === "string" && value) {
+        secrets[name] = value;
+      }
+    }
+    localStorage.setItem(SECRETS_STORAGE_KEY, await encryptSecrets(secrets));
+  } catch { /* ignore */ }
+}
+
+/** Restore secret values from localStorage (encrypted) into node argValues. */
+async function restoreSecrets(nodes: Node[]) {
+  try {
+    const stored = localStorage.getItem(SECRETS_STORAGE_KEY);
+    if (!stored) return;
+    let secrets: Record<string, string>;
+    try {
+      secrets = await decryptSecrets(stored);
+    } catch {
+      // Migrate legacy plaintext format
+      try {
+        secrets = JSON.parse(stored);
+        // Re-save encrypted
+        localStorage.setItem(SECRETS_STORAGE_KEY, await encryptSecrets(secrets));
+      } catch { return; }
+    }
+    for (const n of nodes) {
+      const d = n.data as ZyraNodeData | undefined;
+      if (d?.stageDef.stage !== "control" || d.stageDef.command !== "secret") continue;
+      const name = d.argValues.name;
+      if (typeof name === "string" && name in secrets && !d.argValues.value) {
+        d.argValues.value = secrets[name];
+      }
+    }
+  } catch { /* ignore */ }
 }
 
 let nodeIdCounter = 0;
@@ -270,12 +380,56 @@ function Editor() {
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
   const [yamlOpen, setYamlOpen] = useState(false);
   const [plannerOpen, setPlannerOpen] = useState(false);
+  const [historyOpen, setHistoryOpen] = useState(false);
+  const [useCache, setUseCache] = useState(true);
+  const [lineageMode, setLineageMode] = useState(false);
+  const [resourcesOpen, setResourcesOpen] = useState(false);
+  const [resources, setResources] = useState<PipelineResource[]>(() => {
+    try {
+      const stored = localStorage.getItem("zyra-resources");
+      if (stored) return JSON.parse(stored) as PipelineResource[];
+    } catch { /* ignore */ }
+    return [];
+  });
+  useEffect(() => {
+    try { localStorage.setItem("zyra-resources", JSON.stringify(resources)); } catch { /* ignore */ }
+  }, [resources]);
+  // Persist secret values whenever nodes change (debounced to avoid jank during drag/typing)
+  useEffect(() => {
+    const timer = setTimeout(() => { void saveSecrets(nodes); }, 500);
+    return () => clearTimeout(timer);
+  }, [nodes]);
   const [paletteCollapsed, setPaletteCollapsed] = useState(false);
   const [plannerIntent, setPlannerIntent] = useState("");
   const [plannerHistory, setPlannerHistory] = useState<PlanHistoryEntry[]>([]);
   const [planBatches, setPlanBatches] = useState<PlanBatch[]>([]);
   const backendStatus = useBackendStatus();
-  const exec = useExecution();
+  // Ref for stable graph snapshot callback (nodesRef is declared further down for lock checks)
+  const graphNodesRef = useRef(nodes);
+  graphNodesRef.current = nodes;
+  const graphEdgesRef = useRef(edges);
+  graphEdgesRef.current = edges;
+  const getGraphSnapshot = useCallback(() => ({
+    // Redact plaintext secret values from the snapshot so they are not persisted
+    nodes: graphNodesRef.current.map((n) => {
+      const d = n.data as ZyraNodeData | undefined;
+      if (d?.stageDef.stage === "control" && d.stageDef.command === "secret") {
+        return { ...n, data: { ...d, argValues: { ...d.argValues, value: "***REDACTED***" } } };
+      }
+      return n;
+    }),
+    edges: graphEdgesRef.current,
+  }), []);
+  const resourceMap = useMemo(() => toResourceMap(resources), [resources]);
+  const exec = useExecution(getGraphSnapshot, useCache, resourceMap);
+  const [historyRefreshKey, setHistoryRefreshKey] = useState(0);
+  const prevRunningRef = useRef(false);
+  useEffect(() => {
+    if (prevRunningRef.current && !exec.running) {
+      setHistoryRefreshKey((k) => k + 1);
+    }
+    prevRunningRef.current = exec.running;
+  }, [exec.running]);
   const reactFlowWrapper = useRef<HTMLDivElement>(null);
   const { screenToFlowPosition, setCenter } = useReactFlow();
 
@@ -377,7 +531,13 @@ function Editor() {
     return { connectedInputMap: inMap, connectedOutputMap: outMap };
   }, [edges, nodes]);
 
-  // Inject run status + connected port sets into node data (skip group nodes)
+  // Compute lineage (upstream/downstream) for the selected node
+  const lineage = useMemo(() => {
+    if (!lineageMode || !selectedNodeId) return null;
+    return computeLineage(selectedNodeId, edges);
+  }, [lineageMode, selectedNodeId, edges]);
+
+  // Inject run status + connected port sets + lineage into node data (skip group nodes)
   const nodesWithStatus = useMemo(() => {
     return nodes.map((n) => {
       if (n.type === "group") return n;
@@ -387,12 +547,24 @@ function Editor() {
       const newArgv = rs?.dryRunArgv;
       const connIn = connectedInputMap.get(n.id);
       const connOut = connectedOutputMap.get(n.id);
+      // Lineage props
+      const dim = lineage != null
+        && n.id !== selectedNodeId
+        && !lineage.upstream.has(n.id)
+        && !lineage.downstream.has(n.id);
+      const role = lineage == null ? undefined
+        : n.id === selectedNodeId ? "selected" as const
+        : lineage.upstream.has(n.id) ? "upstream" as const
+        : lineage.downstream.has(n.id) ? "downstream" as const
+        : undefined;
       if (
         d.runStatus === newStatus &&
         d.dryRunArgv === newArgv &&
         d.onRunNode === onRunNode &&
         d.connectedInputPorts === connIn &&
-        d.connectedOutputPorts === connOut
+        d.connectedOutputPorts === connOut &&
+        d.lineageDim === dim &&
+        d.lineageRole === role
       ) {
         return n;
       }
@@ -405,15 +577,20 @@ function Editor() {
           onRunNode,
           connectedInputPorts: connIn,
           connectedOutputPorts: connOut,
+          lineageDim: dim,
+          lineageRole: role,
         },
       };
     });
-  }, [nodes, exec.runState, onRunNode, connectedInputMap, connectedOutputMap]);
+  }, [nodes, exec.runState, onRunNode, connectedInputMap, connectedOutputMap, lineage, selectedNodeId]);
 
   // Pipeline from current canvas state
   const pipeline = useMemo<Pipeline>(() => {
     try {
       const p = graphToPipeline(toGraph(nodes, edges), manifest.stages);
+
+      // Include resources in pipeline output
+      if (resources.length > 0) p.resources = resources;
 
       // Serialize group boxes into _groups (editor-only metadata)
       const groupNodes = nodes.filter((n) => n.type === "group");
@@ -447,11 +624,11 @@ function Editor() {
     } catch {
       return { version: "1", steps: [] };
     }
-  }, [nodes, edges, manifest.stages]);
+  }, [nodes, edges, manifest.stages, resources]);
 
   // YAML -> canvas
   const handlePipelineChange = useCallback(
-    (newPipeline: Pipeline) => {
+    async (newPipeline: Pipeline) => {
       const graph = pipelineToGraph(newPipeline, manifest.stages);
       const stageMap = new Map(
         manifest.stages.map((s: StageDef) => [`${s.stage}/${s.command}`, s]),
@@ -550,8 +727,12 @@ function Editor() {
       }, nodeIdCounter);
       nodeIdCounter = maxNum;
 
+      // Restore secret values from localStorage before setting nodes
+      await restoreSecrets(newNodes);
       setNodes(newNodes);
       setEdges(newEdges);
+      // Restore resources from pipeline
+      setResources(newPipeline.resources ?? []);
     },
     [manifest.stages, nodes, setNodes, setEdges, exec.running],
   );
@@ -786,12 +967,52 @@ function Editor() {
   }, [nodes, edges, manifest.stages, exec.dryRun]);
 
   const handleRun = useCallback(() => {
+    // Validate all nodes before running
+    const errors: string[] = [];
+    for (const n of nodes) {
+      if (n.type === "group") continue;
+      const d = n.data as ZyraNodeData;
+      const linkedKeys = new Set(
+        edges
+          .filter((e) => e.target === n.id && e.targetHandle?.startsWith("arg:"))
+          .map((e) => e.targetHandle!.slice(4)),
+      );
+      const nodeErrors = validateArgs(d.stageDef.args, d.argValues, linkedKeys);
+      if (nodeErrors.length > 0) {
+        const label = d.nodeLabel || d.stageDef.label;
+        errors.push(`${label}: ${nodeErrors.map((ve) => ve.message).join(", ")}`);
+      }
+    }
+    if (errors.length > 0) {
+      alert(`Validation errors:\n\n${errors.join("\n")}`);
+      return;
+    }
     const graph = toGraph(nodes, edges);
     exec.runPipeline(graph, manifest.stages);
   }, [nodes, edges, manifest.stages, exec.runPipeline]);
 
+  const handleRetryFromFailure = useCallback(() => {
+    const graph = toGraph(nodes, edges);
+    exec.retryFromFailure(graph, manifest.stages);
+  }, [nodes, edges, manifest.stages, exec.retryFromFailure]);
+
   const handleRunNode = useCallback(
     async (nodeId: string) => {
+      // Validate this node before running
+      const n = nodes.find((nd) => nd.id === nodeId);
+      if (n && n.type !== "group") {
+        const d = n.data as ZyraNodeData;
+        const linkedKeys = new Set(
+          edges
+            .filter((e) => e.target === nodeId && e.targetHandle?.startsWith("arg:"))
+            .map((e) => e.targetHandle!.slice(4)),
+        );
+        const nodeErrors = validateArgs(d.stageDef.args, d.argValues, linkedKeys);
+        if (nodeErrors.length > 0) {
+          alert(`Validation errors:\n\n${nodeErrors.map((ve) => ve.message).join("\n")}`);
+          return;
+        }
+      }
       const graph = toGraph(nodes, edges);
       const err = await exec.runSingleNode(nodeId, graph, manifest.stages);
       if (err) {
@@ -893,6 +1114,8 @@ function Editor() {
           setYamlOpen(false);
         } else if (plannerOpen) {
           setPlannerOpen(false);
+        } else if (historyOpen) {
+          setHistoryOpen(false);
         } else if (selectedNodeId) {
           setSelectedNodeId(null);
         }
@@ -919,7 +1142,7 @@ function Editor() {
     }
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [selectedNodeId, yamlOpen, plannerOpen, handleOpenFile]);
+  }, [selectedNodeId, yamlOpen, plannerOpen, historyOpen, handleOpenFile]);
 
   const selectedNode = nodes.find((n) => n.id === selectedNodeId);
 
@@ -972,6 +1195,26 @@ function Editor() {
       });
   }, [selectedNodeId, edges, nodes, exec.runState]);
 
+  // Lineage-aware edge styling: color upstream/downstream, dim unrelated
+  const edgesWithLineage = useMemo(() => {
+    if (!lineage) return edges;
+    const sel = selectedNodeId!;
+    return edges.map((e) => {
+      const isUpstream = lineage.upstream.has(e.source)
+        && (lineage.upstream.has(e.target) || e.target === sel);
+      const isDownstream = (lineage.downstream.has(e.target))
+        && (lineage.downstream.has(e.source) || e.source === sel);
+      if (isUpstream) {
+        return { ...e, style: { stroke: "#da8ee7", strokeWidth: 2.5 }, animated: false };
+      }
+      if (isDownstream) {
+        return { ...e, style: { stroke: "#39d353", strokeWidth: 2.5 }, animated: false };
+      }
+      // Unrelated edge — dim it
+      return { ...e, style: { stroke: "var(--accent-blue)", strokeWidth: 1, opacity: 0.15 }, animated: false };
+    });
+  }, [edges, lineage, selectedNodeId]);
+
   return (
     <div className="zyra-editor">
       <Toolbar
@@ -980,6 +1223,7 @@ function Editor() {
         onRun={handleRun}
         onCancel={exec.cancelAll}
         onReset={exec.reset}
+        onRetryFromFailure={handleRetryFromFailure}
         running={exec.running}
         nodeCount={nodes.filter((n) => n.type !== "group").length}
         runState={exec.runState}
@@ -987,6 +1231,15 @@ function Editor() {
         onToggleYaml={() => setYamlOpen((v) => !v)}
         plannerOpen={plannerOpen}
         onTogglePlanner={() => setPlannerOpen((v) => !v)}
+        historyOpen={historyOpen}
+        onToggleHistory={() => setHistoryOpen((v) => !v)}
+        useCache={useCache}
+        onToggleCache={() => setUseCache((v) => !v)}
+        lineageMode={lineageMode}
+        onToggleLineage={() => setLineageMode((v) => !v)}
+        resourcesOpen={resourcesOpen}
+        onToggleResources={() => setResourcesOpen((v) => !v)}
+        resourceCount={resources.length}
         theme={theme}
         onToggleTheme={toggleTheme}
         backendStatus={backendStatus}
@@ -1002,7 +1255,7 @@ function Editor() {
       <div className="zyra-canvas" ref={reactFlowWrapper}>
         <ReactFlow
           nodes={nodesWithStatus}
-          edges={edges}
+          edges={edgesWithLineage}
           onNodesChange={onNodesChange}
           onEdgesChange={onEdgesChange}
           onConnect={onConnect}
@@ -1051,6 +1304,29 @@ function Editor() {
         onClearNode={exec.clearNode}
         onSelectNode={handleSelectNode}
       />
+
+      {/* Resources Panel */}
+      {resourcesOpen && (
+        <ResourcePanel
+          resources={resources}
+          onChange={setResources}
+          onClose={() => setResourcesOpen(false)}
+        />
+      )}
+
+      {/* Run History Panel */}
+      {historyOpen && (
+        <RunHistoryPanel
+          onClose={() => setHistoryOpen(false)}
+          onRestoreGraph={async (snapshot) => {
+            const restoredNodes = snapshot.nodes as Node[];
+            await restoreSecrets(restoredNodes);
+            setNodes(restoredNodes);
+            setEdges(snapshot.edges as Edge[]);
+          }}
+          refreshKey={historyRefreshKey}
+        />
+      )}
 
       {/* AI Planner Panel */}
       {plannerOpen && (

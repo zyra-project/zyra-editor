@@ -138,7 +138,7 @@ export const MOCK_MANIFEST: Manifest = {
           key: "start_date",
           label: "Start Date",
           type: "date",
-          required: true,
+          required: false,
           placeholder: "2025-01-01",
           description: "Start date (YYYY-MM-DD)",
         },

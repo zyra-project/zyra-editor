@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef, useMemo } from "react";
-import type { ArgDef, PortDef, NodeRunStatus } from "@zyra/core";
-import { STATUS_COLORS, getEffectivePorts } from "@zyra/core";
+import type { ArgDef, PortDef, NodeRunStatus, RunEvent } from "@zyra/core";
+import { STATUS_COLORS, getEffectivePorts, validateArgs } from "@zyra/core";
 import type { ZyraNodeData } from "./ZyraNode";
 import { isSensitive } from "./ZyraNode";
 import type { NodeRunState } from "@zyra/core";
@@ -202,6 +202,17 @@ function SettingsTab({
     }
   }
 
+  // Validate args against their definitions
+  const validationErrors = useMemo(
+    () => validateArgs(stageDef.args, argValues, new Set(linkedArgs.keys())),
+    [stageDef.args, argValues, [...linkedArgs.keys()].sort().join(",")],
+  );
+  const errorsByKey = useMemo(() => {
+    const map = new Map<string, string>();
+    for (const e of validationErrors) map.set(e.key, e.message);
+    return map;
+  }, [validationErrors]);
+
   return (
     <>
       {stageDef.args.length === 0 && extraKeys.length === 0 && (
@@ -282,6 +293,7 @@ function SettingsTab({
             linkedFrom={linkedFrom}
             onChange={(v) => onArgChange(nodeId, arg.key, v)}
             forceSecret={isSecretVariable}
+            error={errorsByKey.get(arg.key)}
           />
         );
       })}
@@ -615,9 +627,20 @@ function OutputTab({
             </div>
           )}
 
-          {/* Running indicator */}
-          {runState.status === "running" && <RunningIndicator />}
+          {/* Duration */}
+          {runState.startedAt && runState.completedAt && (
+            <div style={{ fontSize: 11, color: "var(--text-muted)", marginBottom: 8, fontFamily: "var(--font-mono)" }}>
+              Duration: {formatDuration(runState.completedAt - runState.startedAt)}
+            </div>
+          )}
 
+          {/* Running indicator */}
+          {runState.status === "running" && <RunningIndicator startedAt={runState.startedAt} />}
+
+          {/* Event timeline */}
+          {runState.events.length > 0 && (
+            <EventTimeline events={runState.events} startedAt={runState.startedAt} />
+          )}
 
         </div>
       ) : (
@@ -651,6 +674,7 @@ function ArgField({
   linkedFrom,
   onChange,
   forceSecret,
+  error,
 }: {
   arg: ArgDef;
   value: string | number | boolean | undefined;
@@ -659,6 +683,8 @@ function ArgField({
   onChange: (v: string | number | boolean) => void;
   /** Override: treat this field as a secret (password input) regardless of name/label. */
   forceSecret?: boolean;
+  /** Validation error message for this field. */
+  error?: string;
 }) {
   const id = `arg-${arg.key}`;
 
@@ -691,65 +717,100 @@ function ArgField({
         </div>
       )}
 
-      {/* Linked from another node — show read-only badge with optional value preview */}
+      {/* Linked from another node — show read-only badge with optional format input */}
       {linkedFrom && (
-        <div style={{
-          display: "flex",
-          alignItems: "center",
-          gap: 6,
-          padding: "6px 8px",
-          background: "var(--bg-primary)",
-          borderRadius: "var(--radius-sm)",
-          border: "1px solid var(--accent-blue)",
-          fontSize: 11,
-          color: "var(--accent-blue)",
-          overflow: "hidden",
-        }}>
-          <span style={{ fontSize: 9, opacity: 0.7, flexShrink: 0 }}>linked</span>
-          <span style={{ fontWeight: 600, flexShrink: 0 }}>{linkedFrom.label}</span>
-          {linkedFrom.value && (
-            <span
-              style={{
-                color: "var(--text-secondary)",
-                fontFamily: "var(--font-mono)",
-                fontSize: 10,
-                overflow: "hidden",
-                textOverflow: "ellipsis",
-                whiteSpace: "nowrap",
-                flexShrink: 1,
-                minWidth: 0,
-              }}
-              title={treatAsSensitive ? "Linked value hidden (sensitive)" : linkedFrom.value}
-            >
-              {treatAsSensitive ? "••••••••" : linkedFrom.value}
-            </span>
+        <>
+          <div style={{
+            display: "flex",
+            alignItems: "center",
+            gap: 6,
+            padding: "6px 8px",
+            background: "var(--bg-primary)",
+            borderRadius: "var(--radius-sm)",
+            border: "1px solid var(--accent-blue)",
+            fontSize: 11,
+            color: "var(--accent-blue)",
+            overflow: "hidden",
+          }}>
+            <span style={{ fontSize: 9, opacity: 0.7, flexShrink: 0 }}>linked</span>
+            <span style={{ fontWeight: 600, flexShrink: 0 }}>{linkedFrom.label}</span>
+            {linkedFrom.value && (
+              <span
+                style={{
+                  color: "var(--text-secondary)",
+                  fontFamily: "var(--font-mono)",
+                  fontSize: 10,
+                  overflow: "hidden",
+                  textOverflow: "ellipsis",
+                  whiteSpace: "nowrap",
+                  flexShrink: 1,
+                  minWidth: 0,
+                }}
+                title={treatAsSensitive ? "Linked value hidden (sensitive)" : linkedFrom.value}
+              >
+                {treatAsSensitive ? "••••••••" : linkedFrom.value}
+              </span>
+            )}
+          </div>
+          <input
+            className="zyra-input"
+            value={typeof value === "string" ? value : ""}
+            onChange={(e) => onChange(e.target.value)}
+            placeholder="Format: e.g. X-API-Key: {}"
+            title="Use {} as a placeholder for the linked value"
+            style={{
+              marginTop: 4,
+              fontSize: 11,
+              fontFamily: "var(--font-mono)",
+              opacity: typeof value === "string" && value.includes("{}") ? 1 : 0.6,
+            }}
+          />
+          {typeof value === "string" && value.includes("{}") && (
+            <div style={{ fontSize: 10, color: "var(--text-secondary)", marginTop: 2 }}>
+              {"Preview: " + value.replace("{}", treatAsSensitive ? "••••" : (linkedFrom.value ?? "…"))}
+            </div>
           )}
-        </div>
+        </>
       )}
 
       {!linkedFrom && (
         arg.type === "enum" && arg.options ? (
-          <select
-            id={id}
-            className="zyra-input"
-            value={(value as string) ?? arg.default ?? ""}
-            onChange={(e) => onChange(e.target.value)}
-          >
-            <option value="" disabled>Select...</option>
-            {arg.options.map((opt: string) => (
-              <option key={opt} value={opt}>{opt}</option>
-            ))}
-          </select>
+          <>
+            <select
+              id={id}
+              className="zyra-input"
+              value={(value as string) ?? arg.default ?? ""}
+              onChange={(e) => onChange(e.target.value)}
+              style={error ? { borderColor: "var(--accent-red)" } : undefined}
+            >
+              <option value="" disabled>Select...</option>
+              {arg.options.map((opt: string) => (
+                <option key={opt} value={opt}>{opt}</option>
+              ))}
+            </select>
+            {error && (
+              <div style={{ fontSize: 11, color: "var(--accent-red)", marginTop: 4 }}>
+                {error}
+              </div>
+            )}
+          </>
         ) : arg.type === "date" ? (
-          <input
-            id={id}
-            className="zyra-input"
-            type="date"
-            value={(value as string) ?? ""}
-            placeholder={arg.placeholder ?? ""}
-            onChange={(e) => onChange(e.target.value)}
-            style={{ colorScheme: "dark" }}
-          />
+          <>
+            <input
+              id={id}
+              className="zyra-input"
+              type="date"
+              value={(value as string) ?? ""}
+              placeholder={arg.placeholder ?? ""}
+              onChange={(e) => onChange(e.target.value)}
+              style={{ colorScheme: "dark", ...(error ? { borderColor: "var(--accent-red)" } : {}) }}
+            />
+            {error && (
+              <div style={{ fontSize: 11, color: "var(--accent-red)", marginTop: 4 }}>
+                {error}
+              </div>
+            )}
+          </>
         ) : arg.type === "boolean" ? (
           (() => {
             const effectiveValue = value !== undefined ? !!value : !!arg.default;
@@ -783,11 +844,16 @@ function ArgField({
                   onChange(e.target.value);
                 }
               }}
-              style={durationInvalid ? { borderColor: "var(--accent-red)" } : undefined}
+              style={(durationInvalid || error) ? { borderColor: "var(--accent-red)" } : undefined}
             />
             {durationInvalid && (
               <div style={{ fontSize: 11, color: "var(--accent-red)", marginTop: 4 }}>
                 Invalid ISO 8601 duration. Use format like P1D, P2W, P1M, P1Y6M, PT12H.
+              </div>
+            )}
+            {error && !durationInvalid && (
+              <div style={{ fontSize: 11, color: "var(--accent-red)", marginTop: 4 }}>
+                {error}
               </div>
             )}
           </>
@@ -830,15 +896,82 @@ function StatusBadge({ status }: { status: NodeRunStatus }) {
   );
 }
 
-function RunningIndicator() {
-  const [elapsed, setElapsed] = useState(0);
+function RunningIndicator({ startedAt }: { startedAt?: number }) {
+  const [now, setNow] = useState(Date.now());
   useEffect(() => {
-    const t = setInterval(() => setElapsed((s) => s + 1), 1000);
+    const t = setInterval(() => setNow(Date.now()), 1000);
     return () => clearInterval(t);
   }, []);
+  const elapsed = startedAt ? Math.floor((now - startedAt) / 1000) : 0;
   return (
     <div style={{ color: "var(--accent-blue)", fontSize: 11, fontFamily: "var(--font-mono)" }}>
-      Running… {elapsed < 60 ? `${elapsed}s` : `${Math.floor(elapsed / 60)}m ${elapsed % 60}s`}
+      Running… {formatDuration(elapsed * 1000)}
+    </div>
+  );
+}
+
+export function formatDuration(ms: number): string {
+  const secs = Math.round(ms / 1000);
+  if (secs < 60) return `${secs}s`;
+  const mins = Math.floor(secs / 60);
+  const rem = secs % 60;
+  return `${mins}m ${rem}s`;
+}
+
+const EVENT_ICONS: Record<string, string> = {
+  submitted: "\u25b6",     // play
+  "job-accepted": "\u2611", // checkbox
+  "ws-connected": "\u21c4", // arrows
+  "ws-disconnected": "\u2716", // x
+  "poll-fallback": "\u21bb", // loop
+  completed: "\u2714",     // check
+  canceled: "\u2014",      // dash
+  error: "\u26a0",         // warning
+};
+
+function EventTimeline({ events, startedAt }: { events: RunEvent[]; startedAt?: number }) {
+  const [expanded, setExpanded] = useState(false);
+  const base = startedAt ?? events[0]?.timestamp ?? 0;
+
+  return (
+    <div style={{ borderTop: "1px solid var(--border-default)", paddingTop: 8, marginTop: 8 }}>
+      <button
+        onClick={() => setExpanded(!expanded)}
+        style={{
+          background: "none",
+          border: "none",
+          color: "var(--text-secondary)",
+          fontSize: 11,
+          cursor: "pointer",
+          padding: 0,
+          fontFamily: "var(--font-mono)",
+        }}
+      >
+        {expanded ? "\u25bc" : "\u25b6"} Events ({events.length})
+      </button>
+      {expanded && (
+        <div style={{ marginTop: 6 }}>
+          {events.map((ev, i) => {
+            const offset = ((ev.timestamp - base) / 1000).toFixed(1);
+            return (
+              <div key={i} style={{
+                fontSize: 11,
+                fontFamily: "var(--font-mono)",
+                color: ev.type === "error" ? "var(--accent-red)" : "var(--text-secondary)",
+                padding: "2px 0",
+                display: "flex",
+                gap: 6,
+              }}>
+                <span style={{ color: "var(--text-muted)", minWidth: 45, textAlign: "right", flexShrink: 0 }}>
+                  +{offset}s
+                </span>
+                <span>{EVENT_ICONS[ev.type] ?? "\u2022"}</span>
+                <span>{ev.message ?? ev.type}</span>
+              </div>
+            );
+          })}
+        </div>
+      )}
     </div>
   );
 }

@@ -6,9 +6,13 @@ import type {
   PipelineStep,
   NodeRunState,
   RunStepRequest,
+  RunEventType,
+  RunEvent,
+  GraphSnapshot,
 } from "@zyra/core";
-import { emptyRunState, extractByPath, graphToRunRequests, graphToPipeline, stepToCliPreview } from "@zyra/core";
-import { postRun, getJobStatus, connectJobWs, cancelJob } from "./api";
+import { emptyRunState, extractByPath, graphToRunRequests, graphToPipeline, stepToCliPreview, buildRunRecord, computeCacheKey, resolveRequestResources } from "@zyra/core";
+import type { ResourceMap } from "@zyra/core";
+import { postRun, getJobStatus, connectJobWs, cancelJob, saveRunHistory, lookupCache } from "./api";
 
 export type RunStateMap = Map<string, NodeRunState>;
 
@@ -29,6 +33,10 @@ export interface ExecutionControls {
   reset: () => void;
   /** Clear execution state for a single node. */
   clearNode: (nodeId: string) => void;
+  /** Mark a node to skip cache on the next run. */
+  forceRerunNode: (nodeId: string) => void;
+  /** Re-run from failed nodes, skipping already-succeeded steps. */
+  retryFromFailure: (graph: Graph, stages: StageDef[]) => Promise<void>;
 }
 
 /** Max consecutive poll failures before marking a node as failed. */
@@ -53,13 +61,65 @@ async function cancellableSleep(
   return true;
 }
 
-export function useExecution(): ExecutionControls {
-  const [runState, setRunState] = useState<RunStateMap>(new Map());
+/** Regex matching ${NAME} secret references injected by the serializer. */
+const SECRET_REF = /\$\{([A-Za-z_][A-Za-z0-9_]*)\}/g;
+
+/**
+ * Build a map of env-var-name → secret-value from control/secret nodes in the graph.
+ * Used to resolve ${NAME} references before server submission so secrets
+ * don't need to be in the server's environment.
+ */
+function buildSecretMap(graph: Graph): Record<string, string> {
+  const map: Record<string, string> = {};
+  for (const n of graph.nodes) {
+    if (n.stageCommand !== "control/secret") continue;
+    const name = n.argValues.name;
+    const value = n.argValues.value;
+    if (typeof name === "string" && name && typeof value === "string" && value && value !== "***REDACTED***") {
+      map[name] = value;
+    }
+  }
+  return map;
+}
+
+/** Resolve ${NAME} secret references in request args using the secret map. */
+function resolveSecretRefs(args: Record<string, unknown>, secrets: Record<string, string>): Record<string, unknown> {
+  const out: Record<string, unknown> = {};
+  for (const [k, v] of Object.entries(args)) {
+    if (typeof v === "string") {
+      out[k] = v.replace(SECRET_REF, (match, name) => (name in secrets ? secrets[name] : match));
+    } else {
+      out[k] = v;
+    }
+  }
+  return out;
+}
+
+export function useExecution(
+  getGraphSnapshot?: () => GraphSnapshot | undefined,
+  useCache = false,
+  resourceMap?: ResourceMap,
+): ExecutionControls {
+  const [runState, _setRunState] = useState<RunStateMap>(new Map());
+  const runStateRef = useRef<RunStateMap>(runState);
+  // Wrapper that eagerly updates the ref so persistRun always sees the latest state.
+  const setRunState: typeof _setRunState = useCallback((action) => {
+    const prev = runStateRef.current;
+    const next = typeof action === "function" ? action(prev) : action;
+    runStateRef.current = next;
+    _setRunState(next);
+  }, []);
   const [running, setRunning] = useState(false);
   const cancelledRef = useRef(false);
   const runGenRef = useRef(0); // generation counter to detect stale runs
   const activeJobsRef = useRef<Map<string, string>>(new Map()); // nodeId → jobId
   const wsRefs = useRef<WebSocket[]>([]);
+  const useCacheRef = useRef(useCache);
+  useCacheRef.current = useCache;
+  const resourceMapRef = useRef(resourceMap);
+  resourceMapRef.current = resourceMap;
+  const forceRerunRef = useRef<Set<string>>(new Set());
+  const secretValuesRef = useRef<string[]>([]);
 
   const updateNode = useCallback(
     (nodeId: string, patch: Partial<NodeRunState>) => {
@@ -71,6 +131,35 @@ export function useExecution(): ExecutionControls {
       });
     },
     [],
+  );
+
+  /** Append a structured event to a node's event timeline. */
+  const emitEvent = useCallback(
+    (nodeId: string, type: RunEventType, message?: string, detail?: Record<string, unknown>) => {
+      const event: RunEvent = { type, timestamp: Date.now(), message, detail };
+      setRunState((prev) => {
+        const next = new Map(prev);
+        const cur = next.get(nodeId) ?? emptyRunState();
+        next.set(nodeId, { ...cur, events: [...cur.events, event] });
+        return next;
+      });
+    },
+    [],
+  );
+
+  /** Persist a completed run to the server (fire-and-forget).
+   *  Secret values are redacted from stdout, stderr, and request args. */
+  const persistRun = useCallback(
+    (mode: "pipeline" | "single-node") => {
+      const snapshot = runStateRef.current;
+      const record = buildRunRecord(snapshot, mode, getGraphSnapshot?.(), secretValuesRef.current);
+      if (!record) return;
+
+      saveRunHistory(record).catch(() => {
+        // Silently ignore — history is best-effort
+      });
+    },
+    [getGraphSnapshot],
   );
 
   // ── Dry run ────────────────────────────────────────────────────
@@ -147,7 +236,7 @@ export function useExecution(): ExecutionControls {
         const unmet: string[] = [];
         for (const dep of deps) {
           const depState = runState.get(dep);
-          if (!depState || depState.status !== "succeeded") {
+          if (!depState || (depState.status !== "succeeded" && depState.status !== "cached")) {
             unmet.push(dep);
           }
         }
@@ -162,6 +251,51 @@ export function useExecution(): ExecutionControls {
 
       // Use async mode with WebSocket streaming for live log output
       const req: RunStepRequest = { ...requests[stepIndex], mode: "async" };
+
+      // Resolve resource and secret references in args before cache check and submission
+      let resolvedArgs = req.args;
+      if (resourceMapRef.current) resolvedArgs = resolveRequestResources(resolvedArgs, resourceMapRef.current);
+      const secrets = buildSecretMap(graph);
+      secretValuesRef.current = Object.values(secrets);
+      if (Object.keys(secrets).length > 0) resolvedArgs = resolveSecretRefs(resolvedArgs, secrets);
+      const resolvedReq = resolvedArgs !== req.args ? { ...req, args: resolvedArgs } : req;
+
+      // ── Compute cache key (used for both lookup and persistence) ──
+      let nodeCacheKey: string | undefined;
+      try {
+        nodeCacheKey = await computeCacheKey(resolvedReq);
+      } catch {
+        // Cache key computation failed — proceed without caching
+      }
+
+      // ── Cache check (single-node) ─────────────────────────────
+      if (useCacheRef.current && nodeCacheKey && !forceRerunRef.current.has(nodeId)) {
+        try {
+          const cacheKey = nodeCacheKey;
+          const cached = await lookupCache(cacheKey);
+          if (cached.hit) {
+            const now = Date.now();
+            updateNode(nodeId, {
+              ...emptyRunState(),
+              status: "cached",
+              stdout: cached.stdout ?? "",
+              stderr: cached.stderr ?? "",
+              exitCode: cached.exit_code ?? 0,
+              submittedRequest: resolvedReq,
+              startedAt: now,
+              completedAt: now,
+              cacheKey,
+            });
+            emitEvent(nodeId, "cache-hit", "Using cached result");
+            persistRun("single-node");
+            if (runGenRef.current === gen) setRunning(false);
+            return null;
+          }
+        } catch {
+          // Cache lookup failed — proceed with normal execution
+        }
+      }
+      forceRerunRef.current.delete(nodeId);
 
       // Respect delay/throttle for single-node runs (consistent with full pipeline runs)
       const delaySecs = step.delay_seconds;
@@ -178,18 +312,23 @@ export function useExecution(): ExecutionControls {
         }
       }
 
-      updateNode(nodeId, { ...emptyRunState(), status: "running", submittedRequest: req });
+      const now = Date.now();
+      updateNode(nodeId, { ...emptyRunState(), status: "running", submittedRequest: resolvedReq, startedAt: now, cacheKey: nodeCacheKey });
+      emitEvent(nodeId, "submitted", `Submitted ${resolvedReq.stage}/${resolvedReq.command}`);
 
       try {
-        const res = await postRun(req);
+        const res = await postRun(resolvedReq);
 
         if (res.status === "error") {
+          const doneAt = Date.now();
           updateNode(nodeId, {
             status: "failed",
             stdout: res.stdout ?? "",
             stderr: res.stderr ?? "",
             exitCode: res.exit_code,
+            completedAt: doneAt,
           });
+          emitEvent(nodeId, "error", "Server returned error", { exit_code: res.exit_code });
           return null;
         }
 
@@ -197,17 +336,21 @@ export function useExecution(): ExecutionControls {
         if (!jobId) {
           // Sync fallback — server returned result directly
           const exitOk = (res.exit_code ?? 0) === 0;
+          const doneAt = Date.now();
           updateNode(nodeId, {
             status: exitOk ? "succeeded" : "failed",
             stdout: res.stdout ?? "",
             stderr: res.stderr ?? "",
             exitCode: res.exit_code,
+            completedAt: doneAt,
           });
+          emitEvent(nodeId, "completed", exitOk ? "Completed successfully" : "Failed", { exit_code: res.exit_code });
           return null;
         }
 
         activeJobsRef.current.set(nodeId, jobId);
         updateNode(nodeId, { jobId });
+        emitEvent(nodeId, "job-accepted", `Job ${jobId} accepted`, { jobId });
 
         // Stream logs via WebSocket
         await new Promise<void>((resolve) => {
@@ -231,6 +374,7 @@ export function useExecution(): ExecutionControls {
 
           ws.onopen = () => {
             appendStderr("[ws] Connected to job stream\n");
+            emitEvent(nodeId, "ws-connected", "WebSocket connected");
           };
 
           ws.onmessage = (ev) => {
@@ -267,14 +411,18 @@ export function useExecution(): ExecutionControls {
                 status === "failed" ||
                 status === "canceled"
               ) {
-                updateNode(nodeId, { status, exitCode });
+                const doneAt = Date.now();
+                updateNode(nodeId, { status, exitCode, completedAt: doneAt });
+                emitEvent(nodeId, "completed", `Run ${status}`, { status, exit_code: exitCode });
                 ws.close();
                 done = true;
                 resolve();
               } else if (exitCode !== undefined && !done) {
                 // Final payload with exit_code but no explicit status
                 const s = exitCode === 0 ? "succeeded" : "failed";
-                updateNode(nodeId, { status: s, exitCode });
+                const doneAt = Date.now();
+                updateNode(nodeId, { status: s, exitCode, completedAt: doneAt });
+                emitEvent(nodeId, "completed", `Run ${s}`, { status: s, exit_code: exitCode });
                 ws.close();
                 done = true;
                 resolve();
@@ -290,6 +438,7 @@ export function useExecution(): ExecutionControls {
             if (cancelledRef.current || runGenRef.current !== gen) return;
             fallbackStarted = true;
             appendStderr("[ws] Connection closed, falling back to polling\n");
+            emitEvent(nodeId, "poll-fallback", "Fell back to HTTP polling");
             (async () => {
               let consecutiveFailures = 0;
               while (!cancelledRef.current && runGenRef.current === gen) {
@@ -306,17 +455,22 @@ export function useExecution(): ExecutionControls {
                     status.status === "failed" ||
                     status.status === "canceled"
                   ) {
-                    updateNode(nodeId, { status: status.status });
+                    const doneAt = Date.now();
+                    updateNode(nodeId, { status: status.status, completedAt: doneAt });
+                    emitEvent(nodeId, "completed", `Run ${status.status}`, { status: status.status, exit_code: status.exit_code });
                     resolve();
                     return;
                   }
                 } catch {
                   consecutiveFailures++;
                   if (consecutiveFailures >= MAX_POLL_FAILURES) {
+                    const doneAt = Date.now();
                     updateNode(nodeId, {
                       status: "failed",
                       stderr: `Lost connection to job ${jobId}\n`,
+                      completedAt: doneAt,
                     });
+                    emitEvent(nodeId, "error", `Lost connection after ${MAX_POLL_FAILURES} failures`);
                     resolve();
                     return;
                   }
@@ -333,27 +487,32 @@ export function useExecution(): ExecutionControls {
           };
           ws.onclose = () => {
             removeWsRef();
+            if (!done) emitEvent(nodeId, "ws-disconnected", "WebSocket disconnected");
             startPollingFallback();
           };
         });
       } catch (err) {
+        const doneAt = Date.now();
         updateNode(nodeId, {
           status: "failed",
           stderr: err instanceof Error ? err.message : String(err),
+          completedAt: doneAt,
         });
+        emitEvent(nodeId, "error", err instanceof Error ? err.message : String(err));
       } finally {
         activeJobsRef.current.delete(nodeId);
+        persistRun("single-node");
         if (runGenRef.current === gen) setRunning(false);
       }
       return null;
     },
-    [runState, updateNode],
+    [runState, updateNode, emitEvent, persistRun],
   );
 
   // ── Full pipeline run ──────────────────────────────────────────
 
   const runPipeline = useCallback(
-    async (graph: Graph, stages: StageDef[]) => {
+    async (graph: Graph, stages: StageDef[], preResolved?: Map<string, NodeRunState>) => {
       setRunning(true);
       cancelledRef.current = false;
       const gen = ++runGenRef.current;
@@ -362,6 +521,8 @@ export function useExecution(): ExecutionControls {
 
       try {
         const { requests, pipeline } = graphToRunRequests(graph, stages);
+        const pipelineSecrets = buildSecretMap(graph);
+        secretValuesRef.current = Object.values(pipelineSecrets);
 
         // Build dependency map: nodeId → set of nodeIds it depends on
         const deps = new Map<string, string[]>();
@@ -369,15 +530,28 @@ export function useExecution(): ExecutionControls {
           deps.set(step.name, step.depends_on ?? []);
         }
 
-        // Initialise all nodes as queued
+        // Initialise all nodes — use preResolved data for retry-from-failure
         const init = new Map<string, NodeRunState>();
         for (const step of pipeline.steps) {
-          init.set(step.name, { ...emptyRunState(), status: "queued" });
+          const pre = preResolved?.get(step.name);
+          if (pre && (pre.status === "succeeded" || pre.status === "cached")) {
+            init.set(step.name, pre);
+          } else {
+            init.set(step.name, { ...emptyRunState(), status: "queued" });
+          }
         }
         setRunState(init);
 
         // Track resolved status locally (state updates are async)
         const resolved = new Map<string, "succeeded" | "failed" | "canceled">();
+        // Pre-seed resolved map for nodes carried over from a previous run
+        if (preResolved) {
+          for (const [nodeId, ns] of preResolved) {
+            if (ns.status === "succeeded" || ns.status === "cached") {
+              resolved.set(nodeId, "succeeded");
+            }
+          }
+        }
 
         /** Wait until all dependencies of a node are resolved. */
         function waitForDeps(nodeId: string): Promise<boolean> {
@@ -429,18 +603,63 @@ export function useExecution(): ExecutionControls {
 
           // Inject any values from upstream Extract nodes into this step's args
           const finalReq = injectExtractValues(nodeId, req, graph);
-          updateNode(nodeId, { status: "running", submittedRequest: finalReq });
+
+          // Resolve resource and secret references in args before cache check and submission
+          let resolvedFinalArgs = finalReq.args;
+          if (resourceMapRef.current) resolvedFinalArgs = resolveRequestResources(resolvedFinalArgs, resourceMapRef.current);
+          if (Object.keys(pipelineSecrets).length > 0) resolvedFinalArgs = resolveSecretRefs(resolvedFinalArgs, pipelineSecrets);
+          const resolvedFinalReq = resolvedFinalArgs !== finalReq.args ? { ...finalReq, args: resolvedFinalArgs } : finalReq;
+
+          // ── Compute cache key (used for both lookup and persistence) ──
+          let pipelineCacheKey: string | undefined;
+          try {
+            pipelineCacheKey = await computeCacheKey(resolvedFinalReq);
+          } catch {
+            // Cache key computation failed — proceed without caching
+          }
+
+          // ── Cache check ────────────────────────────────────────
+          if (useCacheRef.current && pipelineCacheKey && !forceRerunRef.current.has(nodeId)) {
+            try {
+              const cached = await lookupCache(pipelineCacheKey);
+              if (cached.hit) {
+                const cachedAt = Date.now();
+                updateNode(nodeId, {
+                  status: "cached",
+                  stdout: cached.stdout ?? "",
+                  stderr: cached.stderr ?? "",
+                  exitCode: cached.exit_code ?? 0,
+                  submittedRequest: resolvedFinalReq,
+                  startedAt: cachedAt,
+                  completedAt: cachedAt,
+                  cacheKey: pipelineCacheKey,
+                });
+                emitEvent(nodeId, "cache-hit", "Using cached result");
+                resolved.set(nodeId, "succeeded");
+                return;
+              }
+            } catch {
+              // Cache lookup failed — proceed with normal execution
+            }
+          }
+
+          const stepStartedAt = Date.now();
+          updateNode(nodeId, { status: "running", submittedRequest: resolvedFinalReq, startedAt: stepStartedAt, cacheKey: pipelineCacheKey });
+          emitEvent(nodeId, "submitted", `Submitted ${resolvedFinalReq.stage}/${resolvedFinalReq.command}`);
 
           try {
-            const res = await postRun(finalReq);
+            const res = await postRun(resolvedFinalReq);
 
             if (res.status === "error") {
+              const doneAt = Date.now();
               updateNode(nodeId, {
                 status: "failed",
                 stdout: res.stdout ?? "",
                 stderr: res.stderr ?? "",
                 exitCode: res.exit_code,
+                completedAt: doneAt,
               });
+              emitEvent(nodeId, "error", "Server returned error", { exit_code: res.exit_code });
               resolved.set(nodeId, "failed");
               return;
             }
@@ -449,18 +668,22 @@ export function useExecution(): ExecutionControls {
             if (!jobId) {
               // Sync fallback — already completed
               const exitOk = (res.exit_code ?? 0) === 0;
+              const doneAt = Date.now();
               updateNode(nodeId, {
                 status: exitOk ? "succeeded" : "failed",
                 stdout: res.stdout ?? "",
                 stderr: res.stderr ?? "",
                 exitCode: res.exit_code,
+                completedAt: doneAt,
               });
+              emitEvent(nodeId, "completed", exitOk ? "Completed successfully" : "Failed", { exit_code: res.exit_code });
               resolved.set(nodeId, exitOk ? "succeeded" : "failed");
               return;
             }
 
             activeJobsRef.current.set(nodeId, jobId);
             updateNode(nodeId, { jobId });
+            emitEvent(nodeId, "job-accepted", `Job ${jobId} accepted`, { jobId });
 
             // Stream logs via WebSocket
             await new Promise<void>((resolve) => {
@@ -472,12 +695,22 @@ export function useExecution(): ExecutionControls {
                 if (idx !== -1) wsRefs.current.splice(idx, 1);
               };
 
+              ws.onopen = () => {
+                emitEvent(nodeId, "ws-connected", "WebSocket connected");
+              };
+
+              let wsDone = false;
               ws.onmessage = (ev) => {
                 try {
                   const msg = JSON.parse(ev.data);
-                  const stdoutChunk = msg.params?.stdout ?? "";
-                  const stderrChunk = msg.params?.stderr ?? "";
-                  if (stdoutChunk || stderrChunk) {
+                  // Skip keepalive frames
+                  if (msg.keepalive) return;
+
+                  const stdoutChunk = msg.stdout ?? msg.params?.stdout ?? "";
+                  const stderrChunk = msg.stderr ?? msg.params?.stderr ?? "";
+                  // Filter out the server's initial "listening" frame
+                  const isListeningFrame = stderrChunk === "listening" && !stdoutChunk;
+                  if (!isListeningFrame && (stdoutChunk || stderrChunk)) {
                     setRunState((prev) => {
                       const next = new Map(prev);
                       const cur = next.get(nodeId) ?? emptyRunState();
@@ -489,17 +722,43 @@ export function useExecution(): ExecutionControls {
                       return next;
                     });
                   }
-                  if (
-                    msg.params?.status === "succeeded" ||
-                    msg.params?.status === "failed" ||
-                    msg.params?.status === "canceled"
-                  ) {
-                    updateNode(nodeId, {
-                      status: msg.params.status,
-                      exitCode: msg.params.exit_code,
+                  // Log progress updates
+                  if (msg.progress !== undefined && msg.progress < 1.0) {
+                    setRunState((prev) => {
+                      const next = new Map(prev);
+                      const cur = next.get(nodeId) ?? emptyRunState();
+                      next.set(nodeId, { ...cur, stderr: cur.stderr + `[ws] Progress: ${Math.round(msg.progress * 100)}%\n` });
+                      return next;
                     });
-                    resolved.set(nodeId, msg.params.status);
+                  }
+                  // Check for terminal status
+                  const status = msg.status ?? msg.params?.status;
+                  const exitCode = msg.exit_code ?? msg.params?.exit_code;
+                  if (
+                    status === "succeeded" ||
+                    status === "failed" ||
+                    status === "canceled"
+                  ) {
+                    const doneAt = Date.now();
+                    updateNode(nodeId, {
+                      status,
+                      exitCode,
+                      completedAt: doneAt,
+                    });
+                    emitEvent(nodeId, "completed", `Run ${status}`, { status, exit_code: exitCode });
+                    resolved.set(nodeId, status);
                     ws.close();
+                    wsDone = true;
+                    resolve();
+                  } else if (exitCode !== undefined && !wsDone) {
+                    // Final payload with exit_code but no explicit status
+                    const s = exitCode === 0 ? "succeeded" : "failed";
+                    const doneAt = Date.now();
+                    updateNode(nodeId, { status: s, exitCode, completedAt: doneAt });
+                    emitEvent(nodeId, "completed", `Run ${s}`, { status: s, exit_code: exitCode });
+                    resolved.set(nodeId, s);
+                    ws.close();
+                    wsDone = true;
                     resolve();
                   }
                 } catch {
@@ -511,6 +770,7 @@ export function useExecution(): ExecutionControls {
               const startPollingFallback = () => {
                 if (fallbackStarted || resolved.has(nodeId)) return;
                 fallbackStarted = true;
+                emitEvent(nodeId, "poll-fallback", "Fell back to HTTP polling");
                 pollUntilDone(nodeId, jobId).then(resolve);
               };
 
@@ -520,14 +780,18 @@ export function useExecution(): ExecutionControls {
 
               ws.onclose = () => {
                 removeWsRef();
+                if (!resolved.has(nodeId)) emitEvent(nodeId, "ws-disconnected", "WebSocket disconnected");
                 startPollingFallback();
               };
             });
           } catch (err) {
+            const doneAt = Date.now();
             updateNode(nodeId, {
               status: "failed",
               stderr: err instanceof Error ? err.message : String(err),
+              completedAt: doneAt,
             });
+            emitEvent(nodeId, "error", err instanceof Error ? err.message : String(err));
             resolved.set(nodeId, "failed");
           }
         }
@@ -549,17 +813,22 @@ export function useExecution(): ExecutionControls {
                 status.status === "failed" ||
                 status.status === "canceled"
               ) {
-                updateNode(nodeId, { status: status.status });
+                const doneAt = Date.now();
+                updateNode(nodeId, { status: status.status, completedAt: doneAt });
+                emitEvent(nodeId, "completed", `Run ${status.status}`, { status: status.status, exit_code: status.exit_code });
                 resolved.set(nodeId, status.status);
                 return;
               }
             } catch {
               consecutiveFailures++;
               if (consecutiveFailures >= MAX_POLL_FAILURES) {
+                const doneAt = Date.now();
                 updateNode(nodeId, {
                   status: "failed",
                   stderr: `Lost connection to job ${jobId} after ${MAX_POLL_FAILURES} failed status checks`,
+                  completedAt: doneAt,
                 });
+                emitEvent(nodeId, "error", `Lost connection after ${MAX_POLL_FAILURES} failures`);
                 resolved.set(nodeId, "failed");
                 return;
               }
@@ -579,7 +848,12 @@ export function useExecution(): ExecutionControls {
             (e: GraphEdge) => e.targetNode === en.id && e.targetPort === "input",
           );
           deps.set(en.id, inputEdge ? [inputEdge.sourceNode] : []);
-          init.set(en.id, { ...emptyRunState(), status: "queued" });
+          const pre = preResolved?.get(en.id);
+          if (pre && (pre.status === "succeeded" || pre.status === "cached")) {
+            init.set(en.id, { ...pre, status: "cached" });
+          } else {
+            init.set(en.id, { ...emptyRunState(), status: "queued" });
+          }
         }
         // Re-set state to include extract nodes in the initial map
         if (extractNodes.length > 0) setRunState(new Map(init));
@@ -663,19 +937,87 @@ export function useExecution(): ExecutionControls {
           return { ...req, args: { ...req.args, ...patches } };
         }
 
-        // Launch all steps — they each wait for their deps internally
-        const promises = pipeline.steps.map((step: PipelineStep, i: number) =>
-          runStep(step.name, requests[i], step.delay_seconds),
-        );
-        const extractPromises = extractNodes.map((en) =>
-          runExtractNode(en.id, graph),
-        );
+        // Launch all steps — skip already-resolved nodes (from retry)
+        const promises = pipeline.steps
+          .map((step: PipelineStep, i: number) => ({ step, i }))
+          .filter(({ step }) => !resolved.has(step.name))
+          .map(({ step, i }) => runStep(step.name, requests[i], step.delay_seconds));
+        const extractPromises = extractNodes
+          .filter((en) => !resolved.has(en.id))
+          .map((en) => runExtractNode(en.id, graph));
         await Promise.all([...promises, ...extractPromises]);
+        persistRun("pipeline");
+        forceRerunRef.current.clear();
       } finally {
         if (runGenRef.current === gen) setRunning(false);
       }
     },
-    [updateNode],
+    [updateNode, emitEvent, persistRun],
+  );
+
+  // ── Retry from failure ───────────────────────────────────────────
+
+  const retryFromFailure = useCallback(
+    async (graph: Graph, stages: StageDef[]) => {
+      const prevState = runStateRef.current;
+
+      // Build the pipeline to get dependency info
+      const { pipeline } = graphToRunRequests(graph, stages);
+
+      // Build forward adjacency: nodeId → nodes that depend on it
+      const downstream = new Map<string, Set<string>>();
+      for (const step of pipeline.steps) {
+        for (const dep of step.depends_on ?? []) {
+          if (!downstream.has(dep)) downstream.set(dep, new Set());
+          downstream.get(dep)!.add(step.name);
+        }
+      }
+      // Include extract node dependencies
+      for (const en of graph.nodes.filter((n) => n.stageCommand === "control/extract")) {
+        const inputEdge = graph.edges.find(
+          (e: GraphEdge) => e.targetNode === en.id && e.targetPort === "input",
+        );
+        if (inputEdge) {
+          if (!downstream.has(inputEdge.sourceNode)) downstream.set(inputEdge.sourceNode, new Set());
+          downstream.get(inputEdge.sourceNode)!.add(en.id);
+        }
+      }
+
+      // Find all failed nodes and BFS forward to build the dirty set
+      const dirtySet = new Set<string>();
+      const queue: string[] = [];
+      for (const [nodeId, ns] of prevState) {
+        if (ns.status === "failed") {
+          dirtySet.add(nodeId);
+          queue.push(nodeId);
+        }
+      }
+      while (queue.length > 0) {
+        const current = queue.shift()!;
+        for (const child of downstream.get(current) ?? []) {
+          if (!dirtySet.has(child)) {
+            dirtySet.add(child);
+            queue.push(child);
+          }
+        }
+      }
+
+      // Build preResolved map: succeeded/cached nodes NOT in dirty set
+      const preResolved = new Map<string, NodeRunState>();
+      for (const [nodeId, ns] of prevState) {
+        if (!dirtySet.has(nodeId) && (ns.status === "succeeded" || ns.status === "cached")) {
+          preResolved.set(nodeId, ns);
+        }
+      }
+
+      // Force dirty nodes to bypass cache
+      for (const nodeId of dirtySet) {
+        forceRerunRef.current.add(nodeId);
+      }
+
+      await runPipeline(graph, stages, preResolved);
+    },
+    [runPipeline],
   );
 
   // ── Cancel ─────────────────────────────────────────────────────
@@ -688,13 +1030,15 @@ export function useExecution(): ExecutionControls {
     }
     wsRefs.current = [];
 
+    const doneAt = Date.now();
     for (const [nodeId, jobId] of activeJobsRef.current) {
       cancelJob(jobId).catch(() => {});
-      updateNode(nodeId, { status: "canceled" });
+      updateNode(nodeId, { status: "canceled", completedAt: doneAt });
+      emitEvent(nodeId, "canceled", "Canceled by user");
     }
     activeJobsRef.current = new Map();
     setRunning(false);
-  }, [updateNode]);
+  }, [updateNode, emitEvent]);
 
   // ── Reset ──────────────────────────────────────────────────────
 
@@ -724,5 +1068,11 @@ export function useExecution(): ExecutionControls {
     });
   }, []);
 
-  return { runState, running, dryRun, runPipeline, runSingleNode, cancelAll, reset, clearNode };
+  // ── Force re-run (bypass cache for a specific node) ──────────────
+
+  const forceRerunNode = useCallback((nodeId: string) => {
+    forceRerunRef.current.add(nodeId);
+  }, []);
+
+  return { runState, running, dryRun, runPipeline, runSingleNode, cancelAll, reset, clearNode, forceRerunNode, retryFromFailure };
 }

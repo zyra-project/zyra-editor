@@ -3,8 +3,9 @@ export type {
   StageDef,
   PortDef,
   ArgDef,
+  ArgValidationError,
 } from "./manifest.js";
-export { portsCompatible, argToPort, argToOutputPort, getImplicitOutputs, getEffectivePorts } from "./manifest.js";
+export { portsCompatible, argToPort, argToOutputPort, getImplicitOutputs, getEffectivePorts, validateArgs } from "./manifest.js";
 
 export type {
   Graph,
@@ -27,6 +28,8 @@ export type {
   RunStepResponse,
   JobStatus,
   NodeRunStatus,
+  RunEventType,
+  RunEvent,
   NodeRunState,
 } from "./execution.js";
 export { emptyRunState, STATUS_COLORS } from "./execution.js";
@@ -37,3 +40,26 @@ export { graphToRunRequests, stepToCliPreview } from "./pipeline.js";
 export { pipelineToGraph } from "./deserializer.js";
 
 export { extractByPath } from "./extract.js";
+
+export { canonicalizeRequest, computeCacheKey } from "./cache.js";
+
+export type {
+  RunSummary,
+  RunStepRecord,
+  GraphSnapshot,
+  RunHistoryRecord,
+} from "./history.js";
+export { buildRunRecord } from "./history.js";
+
+export type { LineageResult } from "./lineage.js";
+export { computeLineage } from "./lineage.js";
+
+export type { PipelineResource, ResourceMap } from "./resources.js";
+export {
+  toResourceMap,
+  findResourceRefs,
+  resolveResourceRefs,
+  resolveArgsResources,
+  resolveRequestResources,
+  validateResources,
+} from "./resources.js";

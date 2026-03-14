@@ -1,4 +1,5 @@
 import type { StageDef } from "./manifest.js";
+import type { PipelineResource } from "./resources.js";
 
 /** Map human-readable period enum values to ISO 8601 durations. */
 export const PERIOD_TO_ISO: Record<string, string> = {
@@ -117,7 +118,7 @@ export interface PipelineControl {
   label?: string;
   argValues: Record<string, string | number | boolean>;
   /** Edges from this control node to downstream nodes. */
-  edges: { sourcePort?: string; targetNode: string; targetPort: string }[];
+  edges: { sourcePort?: string; targetNode: string; targetPort: string; format?: string }[];
   /** Edges from upstream nodes into this control node (e.g. Extract's input). */
   inputEdges?: { sourceNode: string; sourcePort: string; targetPort?: string }[];
   _layout?: { x: number; y: number; w?: number; h?: number };
@@ -142,6 +143,8 @@ export interface Pipeline {
   version: string;
   /** Recurring execution schedule (from a control/cron node). */
   schedule?: PipelineSchedule;
+  /** Named pipeline-level resources, referenced in args via ${res:name}. */
+  resources?: PipelineResource[];
   steps: PipelineStep[];
   /** Editor-only group box layout — not used by the Zyra CLI. */
   _groups?: PipelineGroup[];
@@ -564,11 +567,21 @@ export function graphToPipeline(
     const stage = stageMap.get(node.stageCommand);
     const deps = parentMap.get(id) ?? [];
 
-    // Merge node's own argValues with any inlined values from control nodes
+    // Merge node's own argValues with any inlined values from control nodes.
+    // If the existing arg contains a {} placeholder, interpolate the inlined
+    // value into it (e.g. "X-API-Key: {}" + "${SECRET}" → "X-API-Key: ${SECRET}").
+    // Otherwise replace the entire value (backward-compatible default).
     const mergedArgs = { ...node.argValues };
     const inlined = inlinedArgs.get(id);
     if (inlined) {
-      for (const [k, v] of inlined) mergedArgs[k] = v;
+      for (const [k, v] of inlined) {
+        const existing = mergedArgs[k];
+        if (typeof existing === "string" && typeof v === "string" && existing.includes("{}")) {
+          mergedArgs[k] = existing.replace("{}", v);
+        } else {
+          mergedArgs[k] = v;
+        }
+      }
     }
 
     const step: PipelineStep = {
@@ -606,11 +619,22 @@ export function graphToPipeline(
     const ctrlEdges = graph.edges
       .filter((e) => e.sourceNode === n.id)
       .map((e) => {
-        const edge: { targetNode: string; targetPort: string; sourcePort?: string } = {
+        const edge: { targetNode: string; targetPort: string; sourcePort?: string; format?: string } = {
           targetNode: e.targetNode,
           targetPort: e.targetPort,
         };
         if (e.sourcePort) edge.sourcePort = e.sourcePort;
+        // Preserve {} format strings so they survive YAML round-trips
+        if (e.targetPort.startsWith("arg:")) {
+          const argKey = e.targetPort.slice(4);
+          const targetNode = nodeMap.get(e.targetNode);
+          if (targetNode) {
+            const existing = targetNode.argValues[argKey];
+            if (typeof existing === "string" && existing.includes("{}")) {
+              edge.format = existing;
+            }
+          }
+        }
         return edge;
       });
     // Strip plaintext secret values from the YAML — only keep the variable name

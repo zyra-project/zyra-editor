@@ -23,6 +23,10 @@ export interface ZyraNodeData {
   connectedInputPorts?: Map<string, string>;
   /** Set of port IDs that have outgoing edges (for implicit output visibility). */
   connectedOutputPorts?: Set<string>;
+  /** When lineage mode is active, dim nodes not in the selected node's lineage. */
+  lineageDim?: boolean;
+  /** Lineage role: "selected" | "upstream" | "downstream" | undefined */
+  lineageRole?: "selected" | "upstream" | "downstream";
   [key: string]: unknown;
 }
 
@@ -37,12 +41,13 @@ const statusIndicator: Record<
   succeeded: { color: STATUS_COLORS.succeeded, label: "\u2713" },
   failed: { color: STATUS_COLORS.failed, label: "\u2717" },
   canceled: { color: STATUS_COLORS.canceled, label: "\u2014" },
+  cached: { color: STATUS_COLORS.cached, label: "C" },
 };
 
 export function ZyraNode({ id, data, selected }: NodeProps) {
   const {
     stageDef, argValues, nodeLabel, runStatus, dryRunArgv, onRunNode,
-    connectedInputPorts, connectedOutputPorts,
+    connectedInputPorts, connectedOutputPorts, lineageDim, lineageRole,
   } = data as unknown as ZyraNodeData;
   const indicator = statusIndicator[runStatus ?? "idle"];
   const [hovered, setHovered] = useState(false);
@@ -124,7 +129,10 @@ export function ZyraNode({ id, data, selected }: NodeProps) {
       onMouseLeave={() => setHovered(false)}
       style={{
         background: "var(--bg-node)",
-        border: selected ? "2px solid var(--node-selected)" : "1px solid var(--border-strong)",
+        border: selected ? "2px solid var(--node-selected)"
+          : lineageRole === "upstream" ? "2px solid #da8ee7"
+          : lineageRole === "downstream" ? "2px solid #39d353"
+          : "1px solid var(--border-strong)",
         borderRadius: "var(--radius-lg)",
         minWidth: 180,
         width: "100%",
@@ -133,8 +141,11 @@ export function ZyraNode({ id, data, selected }: NodeProps) {
         fontSize: 13,
         color: "var(--text-bright)",
         overflow: "hidden",
-        boxShadow: `0 2px 8px var(--node-shadow)`,
-        transition: "border-color 0.15s, box-shadow 0.15s",
+        boxShadow: lineageRole === "upstream" ? "0 0 8px rgba(218,142,231,0.4)"
+          : lineageRole === "downstream" ? "0 0 8px rgba(57,211,83,0.4)"
+          : "0 2px 8px var(--node-shadow)",
+        transition: "border-color 0.15s, box-shadow 0.15s, opacity 0.2s",
+        opacity: lineageDim ? 0.25 : 1,
         display: "flex",
         flexDirection: "column" as const,
       }}

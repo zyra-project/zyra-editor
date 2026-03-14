@@ -12,6 +12,7 @@ import os
 import re
 import subprocess
 import sys
+import threading
 from pathlib import Path
 
 # Load .env file from the server directory (or project root) so that
@@ -60,12 +61,14 @@ os.environ.setdefault("ZYRA_VERBOSITY", "info")
 
 import logging
 import requests as http_requests
-from fastapi import HTTPException, Request, WebSocket, WebSocketDisconnect
+from fastapi import HTTPException, Query, Request, WebSocket, WebSocketDisconnect
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 from starlette.middleware.cors import CORSMiddleware
 from zyra.api.server import create_app
 from zyra.api.workers import jobs as _jobs_mod
+
+from run_history import init_db, save_run, list_runs, get_run, delete_run, lookup_cache
 
 # Monkey-patch start_job so that logging handlers are reset inside the
 # captured-stdio context.  Without this, logging.basicConfig() (called
@@ -229,6 +232,26 @@ def _patched_start_job(*args, **kwargs):
 _jobs_mod.start_job = _patched_start_job
 
 app = create_app()
+
+# Run-history SQLite database — initialised on startup, not at import time.
+_history_db = None
+_history_lock = threading.Lock()
+
+
+def _init_history_db():
+    global _history_db
+    _history_db = init_db()
+
+
+def _close_history_db():
+    global _history_db
+    if _history_db is not None:
+        _history_db.close()
+        _history_db = None
+
+
+app.router.on_startup.append(_init_history_db)
+app.router.on_shutdown.append(_close_history_db)
 
 # Allow the Vite dev server during development
 app.add_middleware(
@@ -2037,6 +2060,111 @@ def get_manifest(request: Request):
     resp.raise_for_status()
     data = resp.json()
     return _commands_to_manifest(data.get("commands", {}))
+
+
+# ── Run history endpoints ─────────────────────────────────────────
+
+
+class RunStepPayload(BaseModel):
+    nodeId: str
+    status: str
+    jobId: str | None = None
+    exitCode: int | None = None
+    stdout: str = ""
+    stderr: str = ""
+    startedAt: str | None = None
+    completedAt: str | None = None
+    durationMs: int | None = None
+    request: dict | None = None
+    events: list[dict] = Field(default_factory=list)
+    dryRunArgv: str | None = None
+    cacheKey: str | None = None
+
+
+class RunPayload(BaseModel):
+    id: str
+    startedAt: str
+    completedAt: str | None = None
+    status: str
+    durationMs: int | None = None
+    mode: str
+    nodeCount: int
+    summary: str | None = None
+    graphSnapshot: dict | None = None
+    steps: list[RunStepPayload] = Field(default_factory=list)
+
+
+def _require_history_db():
+    """Return the history DB connection, lazily initializing under lock if needed."""
+    global _history_db
+    if _history_db is None:
+        with _history_lock:
+            if _history_db is None:
+                _history_db = init_db()
+    return _history_db
+
+
+@app.post("/v1/runs")
+async def save_run_endpoint(payload: RunPayload):
+    """Persist a completed run record."""
+    db = _require_history_db()
+    data = payload.model_dump()
+    def _save():
+        with _history_lock:
+            save_run(db, data)
+    await asyncio.to_thread(_save)
+    return {"id": data["id"]}
+
+
+@app.get("/v1/runs")
+async def list_runs_endpoint(
+    limit: int = Query(default=50, ge=1, le=500),
+    offset: int = Query(default=0, ge=0),
+):
+    """List recent run summaries (no step details)."""
+    db = _require_history_db()
+    def _list():
+        with _history_lock:
+            return list_runs(db, limit, offset)
+    return await asyncio.to_thread(_list)
+
+
+@app.get("/v1/runs/{run_id}")
+async def get_run_endpoint(run_id: str):
+    """Get full run detail including all steps."""
+    db = _require_history_db()
+    def _get():
+        with _history_lock:
+            return get_run(db, run_id)
+    result = await asyncio.to_thread(_get)
+    if result is None:
+        raise HTTPException(status_code=404, detail="Run not found")
+    return result
+
+
+@app.delete("/v1/runs/{run_id}", status_code=204)
+async def delete_run_endpoint(run_id: str):
+    """Delete a run and its steps."""
+    db = _require_history_db()
+    def _delete():
+        with _history_lock:
+            return delete_run(db, run_id)
+    found = await asyncio.to_thread(_delete)
+    if not found:
+        raise HTTPException(status_code=404, detail="Run not found")
+
+
+@app.get("/v1/cache/lookup")
+async def cache_lookup_endpoint(key: str):
+    """Look up a cached step result by cache key."""
+    db = _require_history_db()
+    def _lookup():
+        with _history_lock:
+            return lookup_cache(db, key)
+    result = await asyncio.to_thread(_lookup)
+    if result:
+        return {"hit": True, **result}
+    return {"hit": False}
 
 
 # Serve the built React editor in production

@@ -17,7 +17,16 @@ from fastapi.testclient import TestClient
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
+# Set ZYRA_DATA_DIR to a temp dir before importing app so startup doesn't
+# create a run_history.db in the working directory.
+import atexit as _atexit
+import shutil as _shutil
+_test_data_dir = tempfile.mkdtemp(prefix="zyra-test-")
+os.environ["ZYRA_DATA_DIR"] = _test_data_dir
+_atexit.register(lambda: _shutil.rmtree(_test_data_dir, ignore_errors=True))
+
 from main import app
+from run_history import init_db
 
 client = TestClient(app, raise_server_exceptions=False)
 
@@ -297,3 +306,151 @@ class TestFeedbackEndpoint:
                 assert saved["timestamp"]  # auto-generated when not provided
             finally:
                 main_mod.FEEDBACK_DIR = original
+
+
+# ── /v1/runs ────────────────────────────────────────────────────────────────
+
+
+def _make_run_payload(run_id="run-test-1", status="succeeded"):
+    """Build a minimal run payload for endpoint tests."""
+    return {
+        "id": run_id,
+        "startedAt": "2026-03-12T10:00:00Z",
+        "completedAt": "2026-03-12T10:01:00Z",
+        "status": status,
+        "durationMs": 60000,
+        "mode": "pipeline",
+        "nodeCount": 1,
+        "summary": None,
+        "graphSnapshot": {"nodes": [{"id": "n1"}], "edges": []},
+        "steps": [
+            {
+                "nodeId": "step-a",
+                "status": status,
+                "jobId": "job-abc",
+                "exitCode": 0,
+                "stdout": "output",
+                "stderr": "",
+                "startedAt": "2026-03-12T10:00:00Z",
+                "completedAt": "2026-03-12T10:01:00Z",
+                "durationMs": 60000,
+                "request": {"stage": "acquire", "command": "http", "args": {"url": "http://example.com"}, "mode": "async"},
+                "events": [],
+                "dryRunArgv": None,
+            }
+        ],
+    }
+
+
+class TestRunHistoryEndpoints:
+    """Tests for create/list/get/delete run history via HTTP endpoints."""
+
+    @pytest.fixture(autouse=True)
+    def _history_db(self, monkeypatch, tmp_path):
+        """Provide a fresh temp DB, closed automatically after the test.
+
+        Closes any startup-created connection before replacing it to
+        avoid leaking the sqlite handle created by TestClient(app).
+        """
+        import main as main_mod
+        old_db = getattr(main_mod, "_history_db", None)
+        if old_db is not None:
+            old_db.close()
+        monkeypatch.setenv("ZYRA_DATA_DIR", str(tmp_path))
+        self._db = init_db()
+        monkeypatch.setattr(main_mod, "_history_db", self._db)
+        yield self._db
+        self._db.close()
+
+    def test_create_run(self):
+        response = client.post("/v1/runs", json=_make_run_payload())
+        assert response.status_code == 200
+        assert response.json()["id"] == "run-test-1"
+
+    def test_list_runs_empty(self):
+        response = client.get("/v1/runs")
+        assert response.status_code == 200
+        data = response.json()
+        assert data["runs"] == []
+        assert data["total"] == 0
+
+    def test_list_runs_returns_saved(self):
+        client.post("/v1/runs", json=_make_run_payload("r1"))
+        client.post("/v1/runs", json=_make_run_payload("r2"))
+        response = client.get("/v1/runs")
+        assert response.status_code == 200
+        data = response.json()
+        assert len(data["runs"]) == 2
+        assert data["total"] == 2
+
+    def test_list_runs_pagination(self):
+        for i in range(5):
+            client.post("/v1/runs", json=_make_run_payload(f"r{i}"))
+        response = client.get("/v1/runs?limit=2&offset=0")
+        assert len(response.json()["runs"]) == 2
+        response2 = client.get("/v1/runs?limit=2&offset=2")
+        assert len(response2.json()["runs"]) == 2
+
+    def test_get_run(self):
+        client.post("/v1/runs", json=_make_run_payload("r1"))
+        response = client.get("/v1/runs/r1")
+        assert response.status_code == 200
+        data = response.json()
+        assert data["id"] == "r1"
+        assert "steps" in data
+
+    def test_get_run_not_found(self):
+        response = client.get("/v1/runs/nonexistent")
+        assert response.status_code == 404
+
+    def test_delete_run(self):
+        client.post("/v1/runs", json=_make_run_payload("r1"))
+        response = client.delete("/v1/runs/r1")
+        assert response.status_code == 204
+        # Verify it's gone
+        response2 = client.get("/v1/runs/r1")
+        assert response2.status_code == 404
+
+    def test_delete_run_not_found(self):
+        response = client.delete("/v1/runs/nonexistent")
+        assert response.status_code == 404
+
+
+# ── /v1/cache/lookup ────────────────────────────────────────────────────────
+
+
+class TestCacheLookupEndpoint:
+    @pytest.fixture(autouse=True)
+    def _history_db(self, monkeypatch, tmp_path):
+        """Provide a fresh temp DB, closed automatically after the test.
+
+        Closes any startup-created connection before replacing it to
+        avoid leaking the sqlite handle created by TestClient(app).
+        """
+        import main as main_mod
+        old_db = getattr(main_mod, "_history_db", None)
+        if old_db is not None:
+            old_db.close()
+        monkeypatch.setenv("ZYRA_DATA_DIR", str(tmp_path))
+        self._db = init_db()
+        monkeypatch.setattr(main_mod, "_history_db", self._db)
+        yield self._db
+        self._db.close()
+
+    def test_cache_miss(self):
+        response = client.get("/v1/cache/lookup?key=nonexistent")
+        assert response.status_code == 200
+        assert response.json()["hit"] is False
+
+    def test_cache_hit_after_run(self):
+        # Save a run so its cache key is populated
+        client.post("/v1/runs", json=_make_run_payload("r1"))
+        # Look up the cache key for step-a's request
+        cur = self._db.execute("SELECT cache_key FROM run_steps WHERE node_id = 'step-a'")
+        row = cur.fetchone()
+        assert row is not None, "run_steps row for step-a should exist"
+        assert row[0], "cache_key should be non-empty"
+        response = client.get(f"/v1/cache/lookup?key={row[0]}")
+        assert response.status_code == 200
+        data = response.json()
+        assert data["hit"] is True
