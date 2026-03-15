@@ -1,0 +1,68 @@
+  <!-- ════════════════════════════════════════════════════
+       SECTION 5: KEY FEATURES
+       ════════════════════════════════════════════════════ -->
+  <div class="section fade-in">
+    <div class="section-tag">
+      <div class="diamond" style="background:var(--seafoam);"></div>
+      <span>Capabilities</span>
+    </div>
+    <h2>Key Features</h2>
+    <p class="section-lead">
+      Everything you need to visually build, configure, execute, and export scientific data pipelines.
+    </p>
+
+    <div class="features-grid">
+
+      <div class="feature-card">
+        <div class="fc-header">
+          <div class="fc-icon fc-icon--drag"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/></svg></div>
+          <strong>Drag-and-Drop Pipeline Building</strong>
+        </div>
+        <p>Browse stages in the Node Palette, drag them onto the canvas, and connect type-safe ports. The <code>@zyra/core</code> library validates compatibility — only matching types can link.</p>
+      </div>
+
+      <div class="feature-card">
+        <div class="fc-header">
+          <div class="fc-icon fc-icon--args"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><rect x="3" y="3" width="18" height="18" rx="2"/><line x1="9" y1="9" x2="15" y2="9"/><line x1="9" y1="13" x2="15" y2="13"/><line x1="9" y1="17" x2="13" y2="17"/></svg></div>
+          <strong>Live Argument Editing</strong>
+        </div>
+        <p>Select any node to configure its CLI arguments via the detail panel. Supports text, numbers, booleans, file paths, dropdowns, and cron expressions.</p>
+      </div>
+
+      <div class="feature-card">
+        <div class="fc-header">
+          <div class="fc-icon fc-icon--exec"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><polygon points="5 3 19 12 5 21 5 3"/></svg></div>
+          <strong>Real-Time Execution &amp; History</strong>
+        </div>
+        <p>Run pipelines with WebSocket log streaming and per-node status indicators. Track past runs with timing visualization and Gantt charts.</p>
+      </div>
+
+      <div class="feature-card">
+        <div class="fc-header">
+          <div class="fc-icon fc-icon--yaml"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><polyline points="4 17 10 11 4 5"/><line x1="12" y1="19" x2="20" y2="19"/></svg></div>
+          <strong>Pipeline YAML Round-Trip</strong>
+        </div>
+        <p>Export your visual graph to <code>pipeline.yaml</code> via topological sort, or import existing YAML back into the editor. Full round-trip between visual design and CLI.</p>
+      </div>
+
+      <div class="feature-card">
+        <div class="fc-header">
+          <div class="fc-icon fc-icon--plan"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 2L2 7l10 5 10-5-10-5z"/><path d="M2 17l10 5 10-5"/><path d="M2 12l10 5 10-5"/></svg></div>
+          <strong>AI-Powered Planning</strong>
+        </div>
+        <p>Describe what you want in natural language — the Planner Panel generates a pipeline plan, translates it to a visual graph, and lets you refine it.</p>
+      </div>
+
+      <div class="feature-card">
+        <div class="fc-header">
+          <div class="fc-icon fc-icon--security"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0110 0v4"/></svg></div>
+          <strong>Security &amp; Resource Management</strong>
+        </div>
+        <p>Secrets are AES-256-GCM encrypted at rest — never written to YAML. Define reusable resources (URLs, paths, credentials) and reference them across nodes.</p>
+      </div>
+
+    </div>
+  </div>
+
+  <div class="section-transition"></div>
+
