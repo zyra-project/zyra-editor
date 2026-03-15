@@ -23,17 +23,19 @@
     var startStopBtn = document.getElementById('timerStartStop');
     var resetBtn = document.getElementById('timerReset');
     var toggleBtn = document.getElementById('timerToggle');
-    if (!timer) return;
+    if (!timer || !display || !startStopBtn || !resetBtn || !toggleBtn) return;
 
     var elapsed = 0;      // seconds
     var interval = null;
     var running = false;
 
     // Create reopen tab
-    var tab = document.createElement('div');
+    var tab = document.createElement('button');
+    tab.type = 'button';
     tab.className = 'pres-timer-tab';
     tab.textContent = '\u23f1 Timer';
     tab.title = 'Show timer';
+    tab.setAttribute('aria-label', 'Show timer');
     document.body.appendChild(tab);
 
     function pad(n) { return n < 10 ? '0' + n : '' + n; }

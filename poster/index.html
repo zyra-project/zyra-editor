@@ -116,8 +116,16 @@ body {
   line-height: 1;
 }
 
-.pres-timer-btn:hover {
+.pres-timer-btn:hover,
+.pres-timer-btn:focus-visible {
   background: rgba(255,255,255,0.25);
+  outline: 2px solid rgba(255,255,255,0.5);
+  outline-offset: 1px;
+}
+
+.pres-timer-tab:focus-visible {
+  outline: 2px solid rgba(255,255,255,0.5);
+  outline-offset: 1px;
 }
 
 .pres-timer-close {
@@ -1950,10 +1958,10 @@ body {
 
 <!-- Presentation timer (sticky top bar) -->
 <div class="pres-timer" id="presTimer">
-  <button class="pres-timer-btn" id="timerStartStop" title="Start / Pause">&#9654;</button>
-  <span class="pres-timer-display" id="timerDisplay">00:00</span>
-  <button class="pres-timer-btn" id="timerReset" title="Reset">&#8634;</button>
-  <button class="pres-timer-btn pres-timer-close" id="timerToggle" title="Hide timer">&times;</button>
+  <button class="pres-timer-btn" id="timerStartStop" title="Start / Pause" aria-label="Start or pause timer">&#9654;</button>
+  <span class="pres-timer-display" id="timerDisplay" aria-live="off" aria-label="Elapsed time">00:00</span>
+  <button class="pres-timer-btn" id="timerReset" title="Reset" aria-label="Reset timer">&#8634;</button>
+  <button class="pres-timer-btn pres-timer-close" id="timerToggle" title="Hide timer" aria-label="Hide timer">&times;</button>
 </div>
 
 <div class="presentation">
@@ -2418,7 +2426,7 @@ body {
   <div class="section-transition"></div>
 
   <!-- ════════════════════════════════════════════════════
-       SECTION 4: KEY FEATURES
+       SECTION 5: KEY FEATURES
        ════════════════════════════════════════════════════ -->
   <div class="section fade-in">
     <div class="section-tag">
@@ -2742,17 +2750,19 @@ body {
     var startStopBtn = document.getElementById('timerStartStop');
     var resetBtn = document.getElementById('timerReset');
     var toggleBtn = document.getElementById('timerToggle');
-    if (!timer) return;
+    if (!timer || !display || !startStopBtn || !resetBtn || !toggleBtn) return;
 
     var elapsed = 0;      // seconds
     var interval = null;
     var running = false;
 
     // Create reopen tab
-    var tab = document.createElement('div');
+    var tab = document.createElement('button');
+    tab.type = 'button';
     tab.className = 'pres-timer-tab';
     tab.textContent = '\u23f1 Timer';
     tab.title = 'Show timer';
+    tab.setAttribute('aria-label', 'Show timer');
     document.body.appendChild(tab);
 
     function pad(n) { return n < 10 ? '0' + n : '' + n; }
