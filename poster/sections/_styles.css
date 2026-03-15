@@ -129,6 +129,8 @@ body {
 
 .hero-logo-right {
   justify-self: end;
+  flex-direction: column;
+  gap: 0;
 }
 
 .hero-center {
@@ -223,6 +225,31 @@ body {
   border-radius: 50%;
   margin-right: 4px;
   vertical-align: middle;
+}
+
+/* QR code in hero (stacked below GSL logo) */
+.hero-qr {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  margin-top: 12px;
+}
+
+.hero-qr-img {
+  width: 64px;
+  height: 64px;
+  border-radius: 4px;
+  background: white;
+  padding: 3px;
+  box-shadow: 0 2px 6px rgba(0,23,45,0.10);
+}
+
+.hero-qr-label {
+  font-size: 10px;
+  font-weight: 600;
+  color: var(--ocean-blue);
+  letter-spacing: 0.3px;
 }
 
 /* ═══════════════════════════════════════════
@@ -519,6 +546,37 @@ body {
   display: flex;
   justify-content: center;
   align-items: center;
+}
+
+.foundation-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 24px;
+}
+
+.foundation-qr {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  flex-shrink: 0;
+}
+
+.foundation-qr-img {
+  width: 64px;
+  height: 64px;
+  border-radius: 4px;
+  background: white;
+  padding: 3px;
+  box-shadow: 0 2px 6px rgba(0,23,45,0.10);
+}
+
+.foundation-qr-label {
+  font-size: 10px;
+  font-weight: 600;
+  color: var(--ocean-blue);
+  letter-spacing: 0.3px;
 }
 
 /* ═══════════════════════════════════════════
@@ -1587,11 +1645,43 @@ body {
   color: rgba(0,23,45,0.6);
 }
 
+.survey-cta-stack {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 14px;
+  flex-shrink: 0;
+}
+
+.survey-qr {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+}
+
+.survey-qr-img {
+  width: 72px;
+  height: 72px;
+  border-radius: 4px;
+  background: white;
+  padding: 3px;
+  box-shadow: 0 2px 8px rgba(0,0,0,0.15);
+}
+
+.survey-qr-label {
+  font-size: 10px;
+  font-weight: 600;
+  color: var(--mist);
+  letter-spacing: 0.3px;
+}
+
 @media (max-width: 900px) {
   .survey-content {
     grid-template-columns: 1fr;
   }
   .survey-banner { padding: 32px 28px; }
+  .survey-cta-stack { width: 100%; }
   .survey-cta { width: 100%; }
 }
 

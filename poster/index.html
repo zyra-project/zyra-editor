@@ -142,6 +142,8 @@ body {
 
 .hero-logo-right {
   justify-self: end;
+  flex-direction: column;
+  gap: 0;
 }
 
 .hero-center {
@@ -236,6 +238,31 @@ body {
   border-radius: 50%;
   margin-right: 4px;
   vertical-align: middle;
+}
+
+/* QR code in hero (stacked below GSL logo) */
+.hero-qr {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  margin-top: 12px;
+}
+
+.hero-qr-img {
+  width: 64px;
+  height: 64px;
+  border-radius: 4px;
+  background: white;
+  padding: 3px;
+  box-shadow: 0 2px 6px rgba(0,23,45,0.10);
+}
+
+.hero-qr-label {
+  font-size: 10px;
+  font-weight: 600;
+  color: var(--ocean-blue);
+  letter-spacing: 0.3px;
 }
 
 /* ═══════════════════════════════════════════
@@ -532,6 +559,37 @@ body {
   display: flex;
   justify-content: center;
   align-items: center;
+}
+
+.foundation-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 24px;
+}
+
+.foundation-qr {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  flex-shrink: 0;
+}
+
+.foundation-qr-img {
+  width: 64px;
+  height: 64px;
+  border-radius: 4px;
+  background: white;
+  padding: 3px;
+  box-shadow: 0 2px 6px rgba(0,23,45,0.10);
+}
+
+.foundation-qr-label {
+  font-size: 10px;
+  font-weight: 600;
+  color: var(--ocean-blue);
+  letter-spacing: 0.3px;
 }
 
 /* ═══════════════════════════════════════════
@@ -1600,11 +1658,43 @@ body {
   color: rgba(0,23,45,0.6);
 }
 
+.survey-cta-stack {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 14px;
+  flex-shrink: 0;
+}
+
+.survey-qr {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+}
+
+.survey-qr-img {
+  width: 72px;
+  height: 72px;
+  border-radius: 4px;
+  background: white;
+  padding: 3px;
+  box-shadow: 0 2px 8px rgba(0,0,0,0.15);
+}
+
+.survey-qr-label {
+  font-size: 10px;
+  font-weight: 600;
+  color: var(--mist);
+  letter-spacing: 0.3px;
+}
+
 @media (max-width: 900px) {
   .survey-content {
     grid-template-columns: 1fr;
   }
   .survey-banner { padding: 32px 28px; }
+  .survey-cta-stack { width: 100%; }
   .survey-cta { width: 100%; }
 }
 
@@ -1837,6 +1927,10 @@ body {
 
       <div class="hero-logo-right">
         <img src="Global%20Systems%20Laboratory%203%20Lines%20Dark%403x.png" alt="NOAA Global Systems Laboratory" class="hero-logo">
+        <div class="hero-qr">
+          <img src="qr-poster.svg" alt="QR code — view this poster online" class="hero-qr-img">
+          <span class="hero-qr-label">View Online</span>
+        </div>
       </div>
     </div>
   </div>
@@ -2012,11 +2106,19 @@ body {
       <div class="diamond"></div>
       <span>Foundation</span>
     </div>
-    <h2>Built on the Zyra Framework</h2>
-    <p class="section-lead">
-      Zyra is a CLI-first Python framework for acquiring, processing, visualizing, and narrating scientific data.
-      The Editor brings that power to a visual interface.
-    </p>
+    <div class="foundation-header">
+      <div>
+        <h2>Built on the Zyra Framework</h2>
+        <p class="section-lead">
+          Zyra is a CLI-first Python framework for acquiring, processing, visualizing, and narrating scientific data.
+          The Editor brings that power to a visual interface.
+        </p>
+      </div>
+      <div class="foundation-qr">
+        <img src="qr-zyra-poster.svg" alt="QR code — view the Zyra framework poster" class="foundation-qr-img">
+        <span class="foundation-qr-label">Zyra Poster</span>
+      </div>
+    </div>
 
     <div class="foundation-recap">
       <div class="foundation-text">
@@ -2132,211 +2234,6 @@ body {
 
   <div class="section-transition"></div>
 
-<!-- ════════════════════════════════════════════════════
-     SECTION 2b: THE 8-STAGE PIPELINE
-     (Content sourced from zyra-project/zyra poster sec-03-pipeline)
-     ════════════════════════════════════════════════════ -->
-<div class="section section--alt fade-in">
-  <div class="section-tag">
-    <div class="diamond" style="background:var(--cable-blue);"></div>
-    <span>Pipeline Architecture</span>
-  </div>
-  <h2>The Pipeline: 8 Composable Stages</h2>
-  <p class="section-lead">
-    Use only what you need. Each stage streams via stdin/stdout for Unix-style chaining.
-    These are the building blocks the editor lets you wire together visually.
-  </p>
-
-  <!-- ── Main pipeline diagram ── -->
-  <div class="pl-diagram">
-
-    <!-- Source icons on the left -->
-    <div class="pl-sources">
-      <div class="pl-source-icon">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="10"/><path d="M2 12h20M12 2a15.3 15.3 0 014 10 15.3 15.3 0 01-4 10 15.3 15.3 0 01-4-10 15.3 15.3 0 014-10z"/></svg>
-        <span>HTTP</span>
-      </div>
-      <div class="pl-source-icon">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M4 22h14a2 2 0 002-2V7.5L14.5 2H6a2 2 0 00-2 2v4"/><polyline points="14 2 14 8 20 8"/><path d="M2 15h6M2 15l2-2M2 15l2 2"/></svg>
-        <span>S3</span>
-      </div>
-      <div class="pl-source-icon">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 2v8l4-4M12 10l-4-4"/><rect x="2" y="14" width="20" height="8" rx="2"/><circle cx="6" cy="18" r="1"/></svg>
-        <span>FTP</span>
-      </div>
-      <div class="pl-source-arrow">
-        <svg viewBox="0 0 32 12" fill="none"><path d="M0 6h28M24 1l6 5-6 5" stroke="var(--neutral-600)" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
-      </div>
-    </div>
-
-    <!-- Phase cards container -->
-    <div class="pl-phases">
-
-      <!-- Phase 1: Data Ingestion & Transformation -->
-      <div class="pl-phase pl-phase--wide">
-        <div class="pl-phase-header pl-phase-header--ingest">Data Ingestion &amp; Transformation</div>
-        <div class="pl-phase-stages">
-          <div class="pl-bubble">
-            <div class="pl-bubble-icon" style="background:linear-gradient(135deg,var(--cable-blue),#003d7a)">
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4M7 10l5 5 5-5M12 15V3"/></svg>
-            </div>
-            <div class="pl-bubble-name">Import</div>
-            <div class="pl-bubble-cli">zyra acquire</div>
-          </div>
-          <div class="pl-stage-arrow">
-            <svg viewBox="0 0 24 12" fill="none"><path d="M0 6h20M16 1l6 5-6 5" stroke="var(--cable-blue)" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" opacity="0.5"/></svg>
-          </div>
-          <div class="pl-bubble">
-            <div class="pl-bubble-icon" style="background:linear-gradient(135deg,var(--leaf-green),#1a4a08)">
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></svg>
-            </div>
-            <div class="pl-bubble-name">Process</div>
-            <div class="pl-bubble-cli">zyra process</div>
-            <!-- Format pills -->
-            <div class="pl-format-pills">
-              <span class="pl-pill">GRIB2</span>
-              <span class="pl-pill">NetCDF</span>
-              <span class="pl-pill">GeoTIFF</span>
-            </div>
-          </div>
-        </div>
-        <!-- Planned stages — compact row -->
-        <div class="pl-planned-row">
-          <span class="pl-planned-label">Planned:</span>
-          <span class="pl-planned-item">Simulate</span>
-          <span class="pl-planned-item">Decide</span>
-        </div>
-      </div>
-
-      <!-- Phase 2: Visualization & AI Narration -->
-      <div class="pl-phase">
-        <div class="pl-phase-header pl-phase-header--viz">Visualization &amp; AI Narration</div>
-        <div class="pl-phase-stages">
-          <div class="pl-bubble">
-            <div class="pl-bubble-icon" style="background:linear-gradient(135deg,var(--olive),#3a4510)">
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 15l4-4 4 4 4-6 5 6"/></svg>
-            </div>
-            <div class="pl-bubble-name">Visualize</div>
-            <div class="pl-bubble-cli">zyra render</div>
-          </div>
-          <div class="pl-stage-arrow">
-            <svg viewBox="0 0 24 12" fill="none"><path d="M0 6h20M16 1l6 5-6 5" stroke="var(--ocean-blue)" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" opacity="0.5"/></svg>
-          </div>
-          <div class="pl-bubble">
-            <div class="pl-bubble-icon" style="background:linear-gradient(135deg,var(--ocean-blue),#0e3a44)">
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 2a3 3 0 00-3 3v7a3 3 0 006 0V5a3 3 0 00-3-3z"/><path d="M19 10v2a7 7 0 01-14 0v-2M12 19v3M8 22h8"/></svg>
-            </div>
-            <div class="pl-bubble-name">Narrate</div>
-            <div class="pl-bubble-cli">AI-driven</div>
-          </div>
-        </div>
-      </div>
-
-      <!-- Phase 3: Verification & Export -->
-      <div class="pl-phase">
-        <div class="pl-phase-header pl-phase-header--export">Verification &amp; Export</div>
-        <div class="pl-phase-stages">
-          <div class="pl-bubble">
-            <div class="pl-bubble-icon" style="background:linear-gradient(135deg,var(--seafoam),#3d7585)">
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M9 12l2 2 4-4M20.618 5.984A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z"/></svg>
-            </div>
-            <div class="pl-bubble-name">Verify</div>
-            <div class="pl-bubble-cli">zyra verify</div>
-          </div>
-          <div class="pl-stage-arrow">
-            <svg viewBox="0 0 24 12" fill="none"><path d="M0 6h20M16 1l6 5-6 5" stroke="var(--leaf-green)" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" opacity="0.5"/></svg>
-          </div>
-          <div class="pl-bubble">
-            <div class="pl-bubble-icon" style="background:linear-gradient(135deg,var(--cable-blue),#003d7a)">
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4M17 8l-5-5-5 5M12 3v12"/></svg>
-            </div>
-            <div class="pl-bubble-name">Export</div>
-            <div class="pl-bubble-cli">disseminate</div>
-          </div>
-        </div>
-      </div>
-
-    </div><!-- .pl-phases -->
-
-    <!-- Output icons on the right -->
-    <div class="pl-outputs">
-      <div class="pl-output-arrow">
-        <svg viewBox="0 0 32 12" fill="none"><path d="M0 6h28M24 1l6 5-6 5" stroke="var(--neutral-600)" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
-      </div>
-      <div class="pl-source-icon">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M18 10h-1.26A8 8 0 109 20h9a5 5 0 000-10z"/></svg>
-        <span>Cloud</span>
-      </div>
-      <div class="pl-source-icon">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M4 22h14a2 2 0 002-2V7.5L14.5 2H6a2 2 0 00-2 2v4"/><polyline points="14 2 14 8 20 8"/><path d="M2 15h6M2 15l2-2M2 15l2 2"/></svg>
-        <span>S3</span>
-      </div>
-      <div class="pl-source-icon">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M22 19a2 2 0 01-2 2H4a2 2 0 01-2-2V5a2 2 0 012-2h5l2 3h9a2 2 0 012 2z"/></svg>
-        <span>Local</span>
-      </div>
-    </div>
-
-  </div><!-- .pl-diagram -->
-
-  <!-- ── Description cards ── -->
-  <div class="pl-desc-grid">
-    <div class="pl-desc-card">
-      <div class="pl-desc-header">
-        <span class="pl-desc-pill" style="background:var(--cable-blue)">Import</span>
-        <code>zyra acquire</code>
-      </div>
-      <p>Search and fetch datasets from HTTP/S, S3, FTP, and REST APIs with parallel downloads and resume support.</p>
-    </div>
-    <div class="pl-desc-card">
-      <div class="pl-desc-header">
-        <span class="pl-desc-pill" style="background:var(--leaf-green)">Process</span>
-        <code>zyra process</code>
-      </div>
-      <p>Decode, subset, reproject, and convert between GRIB2, NetCDF, and GeoTIFF formats via streaming transforms.</p>
-    </div>
-    <div class="pl-desc-card">
-      <div class="pl-desc-header">
-        <span class="pl-desc-pill" style="background:var(--olive)">Visualize</span>
-        <code>zyra render</code>
-      </div>
-      <p>Produce static maps, animated sequences, and interactive plots from processed data.</p>
-    </div>
-    <div class="pl-desc-card">
-      <div class="pl-desc-header">
-        <span class="pl-desc-pill" style="background:var(--ocean-blue)">Narrate</span>
-        <code>AI-driven</code>
-      </div>
-      <p>AI-generated captions, spoken narration, and summary reports for visualizations.</p>
-    </div>
-    <div class="pl-desc-card">
-      <div class="pl-desc-header">
-        <span class="pl-desc-pill" style="background:var(--seafoam)">Verify</span>
-        <code>zyra verify</code>
-      </div>
-      <p>Run quality checks, metadata validation, and compliance tests before dissemination.</p>
-    </div>
-    <div class="pl-desc-card">
-      <div class="pl-desc-header">
-        <span class="pl-desc-pill" style="background:var(--cable-blue)">Export</span>
-        <code>disseminate</code>
-      </div>
-      <p>Push final products to S3, FTP, Vimeo, local filesystem, or HTTP POST endpoints.</p>
-    </div>
-  </div>
-
-  <!-- Streaming example -->
-  <div class="pipeline-stream"><span class="sc-cmd">zyra acquire</span> http $URL <span class="sc-flag">-o -</span> <span class="sc-pipe">|</span> \
-<span class="sc-cmd">zyra process</span> convert-format - netcdf <span class="sc-flag">--stdout</span> <span class="sc-pipe">|</span>
-<span class="sc-cmd">zyra visualize</span> heatmap <span class="sc-flag">--input -</span> <span class="sc-flag">--var</span> TMP <span class="sc-flag">-o</span> plot.png</div>
-
-  <p class="pipeline-note">
-    Stages are composable &mdash; pipe any stage's output directly into the next.
-    The editor turns these CLI stages into visual nodes you can drag, connect, and configure.
-  </p>
-</div>
-
-<div class="section-transition"></div>
   <!-- ════════════════════════════════════════════════════
        SECTION 3: INTRODUCING THE EDITOR
        ════════════════════════════════════════════════════ -->
@@ -2703,11 +2600,17 @@ body {
         </ul>
         <p class="survey-privacy"><em>Your insights directly guide how we design and prioritize future tools built to amplify human creativity, efficiency, and discovery. Responses are used anonymously for research and system improvement; do not include sensitive or confidential data.</em></p>
       </div>
-      <a href="https://survey.zyra-project.org/" class="survey-cta">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M9 11l3 3L22 4"/><path d="M21 12v7a2 2 0 01-2 2H5a2 2 0 01-2-2V5a2 2 0 012-2h11"/></svg>
-        <span class="survey-cta-label">Take the Survey</span>
-        <span class="survey-cta-url">survey.zyra-project.org</span>
-      </a>
+      <div class="survey-cta-stack">
+        <a href="https://survey.zyra-project.org/" class="survey-cta">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M9 11l3 3L22 4"/><path d="M21 12v7a2 2 0 01-2 2H5a2 2 0 01-2-2V5a2 2 0 012-2h11"/></svg>
+          <span class="survey-cta-label">Take the Survey</span>
+          <span class="survey-cta-url">survey.zyra-project.org</span>
+        </a>
+        <div class="survey-qr">
+          <img src="qr-survey.svg" alt="QR code — take the survey" class="survey-qr-img">
+          <span class="survey-qr-label">Scan to respond</span>
+        </div>
+      </div>
     </div>
   </div>
 
