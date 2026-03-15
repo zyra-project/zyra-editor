@@ -4,3 +4,5 @@ _work/
 server/.venv/
 server/__pycache__/
 **/dist/
+.claude/
+.playwright-mcp/

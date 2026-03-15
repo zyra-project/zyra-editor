@@ -1,0 +1,161 @@
+  <!-- ════════════════════════════════════════════════════
+       SECTION 2: MOTIVATION — WHY VISUAL WORKFLOWS?
+       ════════════════════════════════════════════════════ -->
+  <div class="section section--alt fade-in">
+    <div class="section-tag">
+      <div class="diamond"></div>
+      <span>Motivation</span>
+    </div>
+    <h2>Scientific Data Workflows</h2>
+    <p class="section-lead">
+      Turning raw observations into actionable products requires a chain of
+      acquisition, processing, visualization, and dissemination steps — often
+      spanning dozens of tools, formats, and protocols.
+    </p>
+
+    <!-- ── Horizontal workflow flow graphic ── -->
+    <div class="workflow-flow">
+      <div class="workflow-step">
+        <div class="workflow-circle" style="background: var(--cable-blue);">
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none"
+               stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+            <polyline points="7 10 12 15 17 10"/>
+            <line x1="12" y1="15" x2="12" y2="3"/>
+          </svg>
+        </div>
+        <span class="workflow-label">Raw Data</span>
+        <span class="workflow-sub">Satellite, Radar, Models</span>
+      </div>
+
+      <div class="workflow-arrow">
+        <svg viewBox="0 0 40 12" fill="none" xmlns="http://www.w3.org/2000/svg">
+          <line x1="0" y1="6" x2="34" y2="6" stroke="var(--neutral-400)" stroke-width="2"/>
+          <polygon points="34,2 40,6 34,10" fill="var(--neutral-400)"/>
+        </svg>
+      </div>
+
+      <div class="workflow-step">
+        <div class="workflow-circle" style="background: var(--ocean-blue);">
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none"
+               stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <polyline points="16 18 22 12 16 6"/>
+            <polyline points="8 6 2 12 8 18"/>
+          </svg>
+        </div>
+        <span class="workflow-label">Process</span>
+        <span class="workflow-sub">Transform, Regrid, QC</span>
+      </div>
+
+      <div class="workflow-arrow">
+        <svg viewBox="0 0 40 12" fill="none" xmlns="http://www.w3.org/2000/svg">
+          <line x1="0" y1="6" x2="34" y2="6" stroke="var(--neutral-400)" stroke-width="2"/>
+          <polygon points="34,2 40,6 34,10" fill="var(--neutral-400)"/>
+        </svg>
+      </div>
+
+      <div class="workflow-step">
+        <div class="workflow-circle" style="background: var(--leaf-green);">
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none"
+               stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <line x1="18" y1="20" x2="18" y2="10"/>
+            <line x1="12" y1="20" x2="12" y2="4"/>
+            <line x1="6" y1="20" x2="6" y2="14"/>
+            <line x1="2" y1="20" x2="22" y2="20"/>
+          </svg>
+        </div>
+        <span class="workflow-label">Visualize</span>
+        <span class="workflow-sub">Maps, Charts, Animations</span>
+      </div>
+
+      <div class="workflow-arrow">
+        <svg viewBox="0 0 40 12" fill="none" xmlns="http://www.w3.org/2000/svg">
+          <line x1="0" y1="6" x2="34" y2="6" stroke="var(--neutral-400)" stroke-width="2"/>
+          <polygon points="34,2 40,6 34,10" fill="var(--neutral-400)"/>
+        </svg>
+      </div>
+
+      <div class="workflow-step">
+        <div class="workflow-circle" style="background: var(--seafoam);">
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none"
+               stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M22 2L11 13"/>
+            <polygon points="22 2 15 22 11 13 2 9 22 2"/>
+          </svg>
+        </div>
+        <span class="workflow-label">Disseminate</span>
+        <span class="workflow-sub">Web, FTP, Cloud</span>
+      </div>
+    </div>
+
+    <!-- ── GSL context ── -->
+    <h3>Workflows at NOAA's Global Systems Laboratory</h3>
+    <p class="section-lead">
+      GSL produces operational weather products, experimental forecasts, and
+      research datasets. These workflows run daily — often involving dozens of
+      steps across heterogeneous tools, formats
+      (<span class="tok">GRIB2</span> <span class="tok">NetCDF</span>), and
+      protocols (<span class="tok">S3</span> <span class="tok">FTP</span>
+      <span class="tok">HTTP</span>).
+    </p>
+
+    <!-- ── Challenge cards (3-column) ── -->
+    <div class="challenge-grid">
+      <div class="challenge-card">
+        <div class="challenge-icon" style="background: var(--cable-blue);">
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none"
+               stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <rect x="2" y="3" width="20" height="14" rx="2" ry="2"/>
+            <line x1="8" y1="21" x2="16" y2="21"/>
+            <line x1="12" y1="17" x2="12" y2="21"/>
+          </svg>
+        </div>
+        <strong>Manual Orchestration</strong>
+        <p>
+          Scientists spend time writing shell scripts, cron jobs, and glue code
+          instead of doing science.
+        </p>
+      </div>
+
+      <div class="challenge-card">
+        <div class="challenge-icon" style="background: var(--ocean-blue);">
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none"
+               stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M16 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/>
+            <circle cx="8.5" cy="7" r="4"/>
+            <polyline points="17 11 19 13 23 9"/>
+          </svg>
+        </div>
+        <strong>Reproducibility</strong>
+        <p>
+          Ad-hoc scripts are hard to version, share, and reproduce across
+          teams and environments.
+        </p>
+      </div>
+
+      <div class="challenge-card">
+        <div class="challenge-icon" style="background: var(--leaf-green);">
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none"
+               stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <circle cx="12" cy="12" r="10"/>
+            <path d="M2 12h20"/>
+            <path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/>
+          </svg>
+        </div>
+        <strong>Complexity</strong>
+        <p>
+          Pipelines span multiple tools, formats, and protocols with no
+          unified view of the entire workflow.
+        </p>
+      </div>
+    </div>
+
+    <!-- ── Transition callout ── -->
+    <div class="foundation-transition">
+      The <strong>Zyra Editor</strong> provides a visual, manifest-driven
+      approach to building these workflows — making pipelines accessible,
+      reproducible, and shareable across teams.
+    </div>
+  </div>
+
+  <div class="section-transition"></div>

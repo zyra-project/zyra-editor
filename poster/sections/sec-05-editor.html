@@ -1,0 +1,80 @@
+  <!-- ════════════════════════════════════════════════════
+       SECTION 3: INTRODUCING THE EDITOR
+       ════════════════════════════════════════════════════ -->
+  <div class="section section--alt fade-in">
+    <div class="section-tag">
+      <div class="diamond" style="background:var(--cable-blue);"></div>
+      <span>Architecture</span>
+    </div>
+    <h2>How the Editor Works</h2>
+    <p class="section-lead">
+      The editor reads a manifest from the Zyra CLI, presents stages as draggable nodes, and exports your visual graph back to executable pipeline YAML.
+    </p>
+
+    <!-- Architecture flow — horizontal -->
+    <div class="arch-flow arch-flow--horizontal">
+      <div class="arch-box arch-box--manifest">
+        <svg style="width:16px;height:16px;vertical-align:middle;margin-right:4px;" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2" stroke-linecap="round"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
+        Manifest
+      </div>
+      <div class="arch-arrow">&rarr;</div>
+      <div class="arch-box arch-box--palette">
+        <svg style="width:16px;height:16px;vertical-align:middle;margin-right:4px;" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2" stroke-linecap="round"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/></svg>
+        Palette
+      </div>
+      <div class="arch-arrow">&rarr;</div>
+      <div class="arch-box arch-box--canvas">
+        <svg style="width:16px;height:16px;vertical-align:middle;margin-right:4px;" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2" stroke-linecap="round"><circle cx="6" cy="6" r="3"/><circle cx="18" cy="18" r="3"/><path d="M8.59 13.51l6.83 6.83"/><circle cx="18" cy="6" r="3"/></svg>
+        Canvas
+      </div>
+      <div class="arch-arrow">&rarr;</div>
+      <div class="arch-box arch-box--yaml">
+        <svg style="width:16px;height:16px;vertical-align:middle;margin-right:4px;" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2" stroke-linecap="round"><polyline points="4 17 10 11 4 5"/><line x1="12" y1="19" x2="20" y2="19"/></svg>
+        YAML
+      </div>
+    </div>
+
+    <div class="intro-grid">
+      <div class="intro-text">
+        <p>
+          The Zyra CLI exposes a <strong>manifest</strong> — a JSON document describing every available stage, its arguments, input/output ports, and type constraints. The editor loads this manifest and transforms it into an interactive canvas.
+        </p>
+        <p>
+          Users browse stages in the <strong>Node Palette</strong> (grouped by category), drag them onto the canvas, and connect ports to form a directed acyclic graph. The editor enforces <strong>type-safe connections</strong> — only compatible port types can link.
+        </p>
+        <p>
+          When you're ready, the graph is topologically sorted and serialized to <strong>pipeline YAML</strong> — the same format the Zyra CLI consumes. You can also import existing YAML files back into the visual editor.
+        </p>
+      </div>
+
+      <!-- Monorepo structure -->
+      <div class="monorepo-card">
+        <h4>Monorepo Structure</h4>
+        <table class="mono-table">
+          <thead>
+            <tr><th>Package</th><th>Path</th><th>Role</th></tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><code>@zyra/core</code></td>
+              <td><code>packages/core/</code></td>
+              <td>Zero-dependency TypeScript library — graph types, port validation, pipeline serialization</td>
+            </tr>
+            <tr>
+              <td><code>@zyra/editor</code></td>
+              <td><code>packages/editor/</code></td>
+              <td>React 18 + Vite visual editor UI using XYFlow (React Flow)</td>
+            </tr>
+            <tr>
+              <td>Server</td>
+              <td><code>server/</code></td>
+              <td>FastAPI backend — proxies the Zyra CLI, runs async jobs, streams logs via WebSocket</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+
+  <div class="section-transition"></div>
+

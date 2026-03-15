@@ -13,3 +13,4 @@ coverage/
 .pytest_cache/
 .claude/settings.local.json
 run_history.db
+.playwright-mcp/

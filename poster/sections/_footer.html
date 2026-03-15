@@ -16,26 +16,81 @@
     observer.observe(el);
   });
 
+  // ── Demo URL resolution ──
+  // window.__DEMO_URL__ is injected at build time via --demo-url / DEMO_URL env var.
+  // If empty, auto-detect from current page origin (works when editor is co-hosted).
+  // Falls back to localhost:5173 for local development.
+  var demoUrl = (window.__DEMO_URL__ || '').trim();
+  if (!demoUrl) {
+    // If served via file:// or localhost, default to localhost:5173
+    // Otherwise assume the editor might be co-hosted at the same origin
+    if (location.protocol === 'file:' || location.hostname === 'localhost' || location.hostname === '127.0.0.1') {
+      demoUrl = 'http://localhost:5173';
+    } else {
+      demoUrl = location.origin;
+    }
+  }
+
   // ── Editor iframe fallback ──
   var iframe = document.getElementById('editorFrame');
   var fallback = document.getElementById('demoFallback');
+  var fallbackText = document.getElementById('demoFallbackText');
+  var screenshot = document.getElementById('demoScreenshot');
+  var urlDisplay = document.getElementById('demoUrlDisplay');
   var loaded = false;
 
+  // Set the iframe src and title bar URL display
+  if (iframe) {
+    iframe.src = demoUrl;
+  }
+  if (urlDisplay) {
+    try {
+      var urlObj = new URL(demoUrl);
+      urlDisplay.textContent = urlObj.host + ' \u2014 Zyra Editor';
+    } catch(e) {
+      urlDisplay.textContent = demoUrl + ' \u2014 Zyra Editor';
+    }
+  }
+
+  // Pre-check if the screenshot image exists
+  var screenshotAvailable = false;
+  if (screenshot) {
+    var testImg = new Image();
+    testImg.onload = function() { screenshotAvailable = true; };
+    testImg.src = screenshot.src;
+  }
+
+  function showFallback() {
+    if (loaded) return;
+    iframe.style.display = 'none';
+    fallback.classList.add('active');
+    // Show screenshot if available, otherwise show text instructions
+    if (screenshotAvailable && screenshot) {
+      screenshot.style.display = 'block';
+      if (fallbackText) fallbackText.style.display = 'none';
+    } else {
+      if (screenshot) screenshot.style.display = 'none';
+      if (fallbackText) fallbackText.style.display = '';
+    }
+  }
+
+  function showEditor() {
+    if (loaded) return;
+    loaded = true;
+    iframe.style.display = 'block';
+    fallback.classList.remove('active');
+  }
+
   function checkEditor() {
-    fetch('http://localhost:5173/health', { mode: 'no-cors' })
+    // Use the health endpoint relative to the demo URL
+    var healthUrl = demoUrl.replace(/\/+$/, '') + '/health';
+    fetch(healthUrl, { mode: 'no-cors' })
       .then(function() {
         // no-cors means we can't read the response, but if it doesn't throw, the server is up
-        if (!loaded) {
-          loaded = true;
-          iframe.style.display = 'block';
-          fallback.classList.remove('active');
-        }
+        showEditor();
       })
       .catch(function() {
-        if (!loaded) {
-          iframe.style.display = 'none';
-          fallback.classList.add('active');
-        }
+        showFallback();
       });
   }
 
@@ -45,8 +100,7 @@
   });
 
   iframe.addEventListener('error', function() {
-    iframe.style.display = 'none';
-    fallback.classList.add('active');
+    showFallback();
   });
 
   // Initial check after a short delay

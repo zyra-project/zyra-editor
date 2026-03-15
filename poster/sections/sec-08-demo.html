@@ -1,34 +1,45 @@
-  <!-- ════════════════════════════════════════════════════
-       SECTION 7: LIVE DEMO
-       ════════════════════════════════════════════════════ -->
-  <div class="demo-section fade-in">
-    <div class="section-tag">
-      <div class="diamond"></div>
-      <span>Interactive Demo</span>
-    </div>
-    <h2>Try It Live</h2>
-    <p class="demo-instructions">
-      The editor is embedded below. If it's not loading, start the containers with
-      <code>docker compose up --build</code> and reload this page.
-      The editor runs at <code>localhost:5173</code>.
-    </p>
+<!-- ════════════════════════════════════════════════════
+     SECTION 7: LIVE DEMO
+     ════════════════════════════════════════════════════ -->
+<div class="demo-section fade-in">
+  <div class="section-tag">
+    <div class="diamond"></div>
+    <span>Interactive Demo</span>
+  </div>
+  <h2>Try It Live</h2>
+  <p class="demo-instructions">
+    The editor is embedded below. If it's not loading, start the containers with
+    <code>docker compose up --build</code> and reload this page.
+    The editor runs at <code>localhost:5173</code>.
+  </p>
 
-    <div class="demo-frame-wrap">
-      <div class="demo-frame-titlebar">
-        <div class="demo-frame-dot demo-frame-dot--red"></div>
-        <div class="demo-frame-dot demo-frame-dot--yellow"></div>
-        <div class="demo-frame-dot demo-frame-dot--green"></div>
-        <div class="demo-frame-url">localhost:5173 &mdash; Zyra Editor</div>
-      </div>
-      <iframe
-        id="editorFrame"
-        class="demo-iframe"
-        src="http://localhost:5173"
-        loading="lazy"
-        title="Zyra Editor — Live Demo"
-        sandbox="allow-scripts allow-same-origin allow-forms allow-popups"
-      ></iframe>
-      <div class="demo-fallback" id="demoFallback">
+  <div class="demo-frame-wrap">
+    <div class="demo-frame-titlebar">
+      <div class="demo-frame-dot demo-frame-dot--red"></div>
+      <div class="demo-frame-dot demo-frame-dot--yellow"></div>
+      <div class="demo-frame-dot demo-frame-dot--green"></div>
+      <div class="demo-frame-url" id="demoUrlDisplay">localhost:5173 &mdash; Zyra Editor</div>
+      <button class="demo-fullscreen-btn" onclick="toggleDemoFullscreen()" title="Toggle fullscreen">
+        <svg class="demo-fs-expand" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><polyline points="15 3 21 3 21 9"/><polyline points="9 21 3 21 3 15"/><line x1="21" y1="3" x2="14" y2="10"/><line x1="3" y1="21" x2="10" y2="14"/></svg>
+        <svg class="demo-fs-shrink" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><polyline points="4 14 10 14 10 20"/><polyline points="20 10 14 10 14 4"/><line x1="14" y1="10" x2="21" y2="3"/><line x1="3" y1="21" x2="10" y2="14"/></svg>
+      </button>
+    </div>
+    <iframe
+      id="editorFrame"
+      class="demo-iframe"
+      loading="lazy"
+      title="Zyra Editor — Live Demo"
+      sandbox="allow-scripts allow-same-origin allow-forms allow-popups"
+    ></iframe>
+    <div class="demo-fallback" id="demoFallback">
+      <img
+        id="demoScreenshot"
+        class="demo-screenshot"
+        src="demo-screenshot.png"
+        alt="Zyra Editor — screenshot of the visual pipeline builder interface"
+        style="display:none; width:100%; border-radius:0 0 8px 8px;"
+      />
+      <div id="demoFallbackText" class="demo-fallback-text">
         <p style="font-size:18px;color:var(--mist);margin-bottom:16px;">The editor is not running.</p>
         <p style="color:var(--neutral-600);margin-bottom:20px;">Start the development server to see the live demo:</p>
         <code>docker compose up --build</code>
@@ -36,4 +47,50 @@
       </div>
     </div>
   </div>
+</div>
+
+<script>
+(function() {
+  var placeholder = null;
+
+  function enterFullscreen(wrap) {
+    // Insert a placeholder so we know where to put it back
+    placeholder = document.createComment('demo-fullscreen-placeholder');
+    wrap.parentNode.insertBefore(placeholder, wrap);
+    // Move to body to escape any transform containing block
+    document.body.appendChild(wrap);
+    wrap.classList.add('demo-fullscreen');
+    document.body.style.overflow = 'hidden';
+  }
+
+  function exitFullscreen(wrap) {
+    wrap.classList.remove('demo-fullscreen');
+    document.body.style.overflow = '';
+    // Move back to original position
+    if (placeholder && placeholder.parentNode) {
+      placeholder.parentNode.insertBefore(wrap, placeholder);
+      placeholder.parentNode.removeChild(placeholder);
+      placeholder = null;
+    }
+  }
+
+  window.toggleDemoFullscreen = function() {
+    var wrap = document.querySelector('.demo-frame-wrap');
+    if (wrap.classList.contains('demo-fullscreen')) {
+      exitFullscreen(wrap);
+    } else {
+      enterFullscreen(wrap);
+    }
+  };
+
+  document.addEventListener('keydown', function(e) {
+    if (e.key === 'Escape') {
+      var wrap = document.querySelector('.demo-frame-wrap');
+      if (wrap && wrap.classList.contains('demo-fullscreen')) {
+        exitFullscreen(wrap);
+      }
+    }
+  });
+})();
+</script>
 

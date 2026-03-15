@@ -24,6 +24,7 @@ Output works with file:// protocol — no server required.
 from __future__ import annotations
 
 import argparse
+import os
 import sys
 import urllib.request
 import urllib.error
@@ -35,14 +36,13 @@ OUTPUT = REPO_ROOT / "poster" / "index.html"
 
 # GitHub raw content base for the upstream zyra poster sections
 UPSTREAM_RAW_BASE = (
-    "https://raw.githubusercontent.com/zyra-project/zyra"
-    "/mirror/main/poster/sections"
+    "https://raw.githubusercontent.com/NOAA-GSL/zyra"
+    "/main/poster/sections"
 )
 
 # Map local section stem -> upstream section filename.
 # Add entries here to pull more sections from the upstream poster.
 UPSTREAM_SECTIONS: dict[str, str] = {
-    "sec-03-pipeline": "sec-03-pipeline.html",
 }
 
 # Upstream styles URL (fetched once, scoped per upstream section)
@@ -106,7 +106,17 @@ def _wrap_upstream_section(
     )
 
 
-def build(*, local_only: bool = False) -> None:
+def _demo_url_script(demo_url: str) -> str:
+    """Return a <script> block that sets the demo URL for runtime use."""
+    # Empty string means "auto-detect from current origin at runtime"
+    return (
+        '<script>\n'
+        f'  window.__DEMO_URL__ = "{demo_url}";\n'
+        '</script>\n'
+    )
+
+
+def build(*, local_only: bool = False, demo_url: str = "") -> None:
     # ── Discover section files ──
     section_files = sorted(SECTIONS_DIR.glob("sec-*.html"))
     if not section_files:
@@ -126,7 +136,7 @@ def build(*, local_only: bool = False) -> None:
         upstream_css = _fetch(UPSTREAM_STYLES_URL)
 
     # ── Assemble sections ──
-    parts: list[str] = [head, styles, body_open]
+    parts: list[str] = [head, styles, body_open, _demo_url_script(demo_url)]
 
     for sf in section_files:
         stem = sf.stem
@@ -174,8 +184,17 @@ def main() -> None:
         action="store_true",
         help="Skip fetching upstream sections; use only local files.",
     )
+    parser.add_argument(
+        "--demo-url",
+        default=os.environ.get("DEMO_URL", ""),
+        help=(
+            "URL for the live demo iframe. Defaults to DEMO_URL env var. "
+            "If empty, the poster auto-detects from the current page origin "
+            "at runtime and falls back to a static screenshot if unavailable."
+        ),
+    )
     args = parser.parse_args()
-    build(local_only=args.local)
+    build(local_only=args.local, demo_url=args.demo_url)
 
 
 if __name__ == "__main__":
