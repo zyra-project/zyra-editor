@@ -2861,15 +2861,12 @@ body {
       });
   }
 
-  iframe.addEventListener('load', function() {
-    loaded = true;
-  });
-
   iframe.addEventListener('error', function() {
     showFallback();
   });
 
-  // Initial check after a short delay
+  // Only the /health check gates the loaded flag (via showEditor).
+  // The iframe load event is not used because it fires for error pages too.
   setTimeout(checkEditor, 1500);
   // Retry periodically in case the server starts later
   var retryCount = 0;
