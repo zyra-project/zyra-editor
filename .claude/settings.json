@@ -1,0 +1,40 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(pnpm --filter @zyra/core exec vitest run src/__tests__/lineage.test.ts)",
+      "Bash(pnpm --filter @zyra/core exec vitest run)",
+      "Bash(pnpm --filter @zyra/core exec vitest run src/__tests__/resources.test.ts)",
+      "Bash(pnpm --filter @zyra/core test)",
+      "Bash(git -C /c/zyra-editor status)",
+      "Bash(git -C /c/zyra-editor diff --stat)",
+      "Bash(git -C /c/zyra-editor log --oneline -5)",
+      "Bash(git -C /c/zyra-editor add packages/core/src/resources.ts packages/core/src/__tests__/resources.test.ts packages/core/src/__tests__/serializer.test.ts packages/core/src/index.ts packages/core/src/serializer.ts packages/editor/src/ResourcePanel.tsx packages/editor/src/App.tsx packages/editor/src/Toolbar.tsx packages/editor/src/YamlPanel.tsx packages/editor/src/useExecution.ts)",
+      "Bash(git -C /c/zyra-editor add packages/editor/src/useExecution.ts packages/editor/src/ResourcePanel.tsx server/main.py)",
+      "Bash(git -C:*)",
+      "Bash(python -m pytest tests/test_endpoints.py -v)",
+      "Bash(find c:zyra-editor -name *manifest* -o -name *api*)",
+      "Bash(python -m pytest tests/test_endpoints.py -q)",
+      "Bash(find /c/zyra-editor/server/tests -type f -name *.py)",
+      "Bash(echo \"exit: $?\")",
+      "Bash(python poster/scripts/build_poster.py --local)",
+      "WebFetch(domain:noaa-gsl.github.io)",
+      "mcp__playwright__browser_navigate",
+      "mcp__playwright__browser_install",
+      "Bash(python -m http.server 8899)",
+      "Bash(curl -s -o /dev/null -w \"%{http_code}\" http://localhost:8899/index.html)",
+      "mcp__playwright__browser_take_screenshot",
+      "Bash(python poster/scripts/build_poster.py)",
+      "Bash(curl -s \"https://raw.githubusercontent.com/NOAA-GSL/zyra/main/poster/sections/sec-03-pipeline.html\" -o c:/zyra-editor/poster/sections/sec-03-pipeline.html)",
+      "mcp__playwright__browser_resize",
+      "mcp__playwright__browser_evaluate",
+      "Bash(rm -f pipeline-section.png pipeline-viewport.png pipeline-viewport2.png pipeline-viewport3.png pipeline-viewport4.png pipeline-restored.png)",
+      "Bash(rm -rf .playwright-mcp)",
+      "Bash(ls c:/zyra-editor/poster/sections/sec-*.html)",
+      "Bash(ls sec-*.html)",
+      "Bash(python poster/scripts/build_poster.py --local --demo-url \"https://zyra-demo.example.com\")"
+    ],
+    "additionalDirectories": [
+      "c:\\zyra-editor\\$LOCALAPPDATA\\ms-playwright"
+    ]
+  }
+}

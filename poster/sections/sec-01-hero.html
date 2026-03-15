@@ -1,0 +1,75 @@
+  <!-- ════════════════════════════════════════════════════
+       SECTION 1: HERO
+       ════════════════════════════════════════════════════ -->
+  <div class="hero">
+
+    <!-- Data-viz texture background -->
+    <div class="hero-texture">
+      <svg xmlns="http://www.w3.org/2000/svg" preserveAspectRatio="none">
+        <defs>
+          <pattern id="dotgrid" x="0" y="0" width="28" height="28" patternUnits="userSpaceOnUse">
+            <circle cx="14" cy="14" r="1" fill="#1A5A69" opacity="0.07"/>
+          </pattern>
+          <pattern id="contour" x="0" y="0" width="360" height="360" patternUnits="userSpaceOnUse">
+            <ellipse cx="180" cy="180" rx="160" ry="105" fill="none" stroke="#1A5A69" stroke-width="0.6" opacity="0.06"/>
+            <ellipse cx="180" cy="180" rx="120" ry="78" fill="none" stroke="#1A5A69" stroke-width="0.5" opacity="0.05"/>
+            <ellipse cx="180" cy="180" rx="80" ry="50" fill="none" stroke="#1A5A69" stroke-width="0.45" opacity="0.045"/>
+          </pattern>
+        </defs>
+        <rect width="100%" height="100%" fill="url(#contour)"/>
+        <rect width="100%" height="100%" fill="url(#dotgrid)"/>
+        <path d="M20,60 Q140,30 280,55 Q420,85 540,50 Q680,15 820,45" fill="none" stroke="#5F9DAE" stroke-width="0.7" opacity="0.045"/>
+        <path d="M10,100 Q150,70 300,95 Q440,125 560,90 Q700,55 840,80" fill="none" stroke="#5F9DAE" stroke-width="0.6" opacity="0.04"/>
+      </svg>
+    </div>
+
+    <!-- 3-column layout: logo | content | logo -->
+    <div class="hero-layout">
+      <div class="hero-logo-left">
+        <img src="noaa-logo.svg" alt="NOAA — National Oceanic and Atmospheric Administration" class="hero-logo">
+      </div>
+
+      <div class="hero-center">
+        <div class="hero-project-name">Zyra <span>Editor</span></div>
+        <h1 class="hero-title">A Visual Node Editor for Scientific Data&nbsp;Pipelines</h1>
+        <p class="hero-subtitle">
+          Drag, connect, and run data processing workflows — powered by the Zyra framework.
+          A manifest-driven visual interface for orchestrating CLI pipelines in the browser.
+        </p>
+
+        <div class="author-block">
+          <span class="author-name">Eric Hackathorn</span>
+          <span class="author-org">NOAA Global Systems Laboratory</span>
+          <span class="author-orcid">
+            <span class="orcid-dot">iD</span>
+            0000-0002-9693-2093
+          </span>
+        </div>
+
+        <div class="badges">
+          <a href="https://github.com/zyra-project/zyra-editor" class="badge">
+            <span class="badge-pip pip-gh">GH</span>
+            <span class="badge-label">GitHub</span>
+            <span class="badge-value">zyra-project/zyra-editor</span>
+          </a>
+          <span class="badge">
+            <span class="badge-pip pip-lic">Lic</span>
+            <span class="badge-label">License</span>
+            <span class="badge-value">Apache-2.0</span>
+          </span>
+          <span class="badge">
+            <span class="badge-pip" style="background:var(--ocean-blue);">TS</span>
+            <span class="badge-label">Lang</span>
+            <span class="badge-value">TypeScript + React</span>
+          </span>
+        </div>
+      </div>
+
+      <div class="hero-logo-right">
+        <img src="Global%20Systems%20Laboratory%203%20Lines%20Dark%403x.png" alt="NOAA Global Systems Laboratory" class="hero-logo">
+      </div>
+    </div>
+  </div>
+
+  <div class="section-transition"></div>
+

@@ -1,0 +1,124 @@
+
+</div><!-- /.presentation -->
+
+<script>
+(function() {
+  // ── Scroll-triggered fade-in ──
+  var observer = new IntersectionObserver(function(entries) {
+    entries.forEach(function(entry) {
+      if (entry.isIntersecting) {
+        entry.target.classList.add('visible');
+      }
+    });
+  }, { threshold: 0.1, rootMargin: '0px 0px -40px 0px' });
+
+  document.querySelectorAll('.fade-in').forEach(function(el) {
+    observer.observe(el);
+  });
+
+  // ── Demo URL resolution ──
+  // window.__DEMO_URL__ is injected at build time via --demo-url / DEMO_URL env var.
+  // If empty, auto-detect: localhost/file:// → localhost:5173, otherwise skip probing
+  // and show the screenshot fallback immediately.
+  var explicitUrl = (window.__DEMO_URL__ || '').trim();
+  var isLocal = location.protocol === 'file:'
+    || location.hostname === 'localhost'
+    || location.hostname === '127.0.0.1';
+  var demoUrl = explicitUrl
+    || (isLocal ? 'http://localhost:5173' : '');
+
+  // ── Editor iframe fallback ──
+  var iframe = document.getElementById('editorFrame');
+  var fallback = document.getElementById('demoFallback');
+  var fallbackText = document.getElementById('demoFallbackText');
+  var screenshot = document.getElementById('demoScreenshot');
+  var urlDisplay = document.getElementById('demoUrlDisplay');
+
+  if (!iframe || !fallback) return; // demo section not present
+
+  var loaded = false;
+
+  // Pre-check if the screenshot image exists
+  var screenshotAvailable = false;
+  if (screenshot) {
+    var testImg = new Image();
+    testImg.onload = function() { screenshotAvailable = true; };
+    testImg.src = screenshot.src;
+  }
+
+  function showFallback() {
+    if (loaded) return;
+    iframe.style.display = 'none';
+    fallback.classList.add('active');
+    // Show screenshot if available, otherwise show text instructions
+    if (screenshotAvailable && screenshot) {
+      screenshot.style.display = 'block';
+      if (fallbackText) fallbackText.style.display = 'none';
+    } else {
+      if (screenshot) screenshot.style.display = 'none';
+      if (fallbackText) fallbackText.style.display = '';
+    }
+  }
+
+  function showEditor() {
+    if (loaded) return;
+    loaded = true;
+    iframe.style.display = 'block';
+    fallback.classList.remove('active');
+  }
+
+  // If no demo URL resolved (non-local, no explicit DEMO_URL), skip probing
+  // and go straight to the screenshot/text fallback.
+  if (!demoUrl) {
+    showFallback();
+    return;
+  }
+
+  // Set the iframe src and title bar URL display
+  iframe.src = demoUrl;
+  if (urlDisplay) {
+    try {
+      var urlObj = new URL(demoUrl);
+      urlDisplay.textContent = urlObj.host + ' \u2014 Zyra Editor';
+    } catch(e) {
+      urlDisplay.textContent = demoUrl + ' \u2014 Zyra Editor';
+    }
+  }
+
+  function checkEditor() {
+    var healthUrl = demoUrl.replace(/\/+$/, '') + '/health';
+    fetch(healthUrl)
+      .then(function(response) {
+        if (response.ok) {
+          showEditor();
+        } else {
+          showFallback();
+        }
+      })
+      .catch(function() {
+        showFallback();
+      });
+  }
+
+  iframe.addEventListener('error', function() {
+    showFallback();
+  });
+
+  // Only the /health check gates the loaded flag (via showEditor).
+  // The iframe load event is not used because it fires for error pages too.
+  setTimeout(checkEditor, 1500);
+  // Retry periodically in case the server starts later
+  var retryCount = 0;
+  var retryInterval = setInterval(function() {
+    if (loaded || retryCount > 10) {
+      clearInterval(retryInterval);
+      return;
+    }
+    retryCount++;
+    checkEditor();
+  }, 3000);
+})();
+</script>
+
+</body>
+</html>
