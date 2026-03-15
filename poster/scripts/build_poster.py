@@ -6,9 +6,9 @@ Produces:
   poster/index.html — assembled from poster/sections/ fragments
 
 Sections whose names appear in UPSTREAM_SECTIONS are fetched from the
-zyra-project/zyra repository (mirror/main branch) at build time, so
-content stays in sync with the upstream poster.  Use --local to skip
-fetching and use only local section files.
+NOAA-GSL/zyra repository (main branch) at build time, so content stays
+in sync with the upstream poster.  Use --local to skip fetching and use
+only local section files.
 
 When fetching upstream sections, the build script also pulls the
 upstream _styles.css and scopes it inside a wrapper div using CSS
@@ -96,7 +96,7 @@ def _wrap_upstream_section(
     return (
         f"  <!-- ════════════════════════════════════════════════════\n"
         f"       UPSTREAM: {stem}\n"
-        f"       (Auto-fetched from zyra-project/zyra poster)\n"
+        f"       (Auto-fetched from NOAA-GSL/zyra poster)\n"
         f"       ════════════════════════════════════════════════════ -->\n"
         f"  <div class=\"{scope_class}\">\n"
         f"    <style>\n{scoped_css}    </style>\n"
@@ -108,10 +108,12 @@ def _wrap_upstream_section(
 
 def _demo_url_script(demo_url: str) -> str:
     """Return a <script> block that sets the demo URL for runtime use."""
+    import json
     # Empty string means "auto-detect from current origin at runtime"
+    safe_value = json.dumps(demo_url)
     return (
         '<script>\n'
-        f'  window.__DEMO_URL__ = "{demo_url}";\n'
+        f'  window.__DEMO_URL__ = {safe_value};\n'
         '</script>\n'
     )
 

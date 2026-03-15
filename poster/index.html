@@ -1727,6 +1727,18 @@ body {
 }
 
 /* ═══════════════════════════════════════════
+   REDUCED MOTION
+   ═══════════════════════════════════════════ */
+@media (prefers-reduced-motion: reduce) {
+  html { scroll-behavior: auto; }
+  .fade-in {
+    opacity: 1;
+    transform: none;
+    transition: none;
+  }
+}
+
+/* ═══════════════════════════════════════════
    RESPONSIVE
    ═══════════════════════════════════════════ */
 @media (max-width: 900px) {
@@ -2767,18 +2779,14 @@ body {
 
   // ── Demo URL resolution ──
   // window.__DEMO_URL__ is injected at build time via --demo-url / DEMO_URL env var.
-  // If empty, auto-detect from current page origin (works when editor is co-hosted).
-  // Falls back to localhost:5173 for local development.
-  var demoUrl = (window.__DEMO_URL__ || '').trim();
-  if (!demoUrl) {
-    // If served via file:// or localhost, default to localhost:5173
-    // Otherwise assume the editor might be co-hosted at the same origin
-    if (location.protocol === 'file:' || location.hostname === 'localhost' || location.hostname === '127.0.0.1') {
-      demoUrl = 'http://localhost:5173';
-    } else {
-      demoUrl = location.origin;
-    }
-  }
+  // If empty, auto-detect: localhost/file:// → localhost:5173, otherwise skip probing
+  // and show the screenshot fallback immediately.
+  var explicitUrl = (window.__DEMO_URL__ || '').trim();
+  var isLocal = location.protocol === 'file:'
+    || location.hostname === 'localhost'
+    || location.hostname === '127.0.0.1';
+  var demoUrl = explicitUrl
+    || (isLocal ? 'http://localhost:5173' : '');
 
   // ── Editor iframe fallback ──
   var iframe = document.getElementById('editorFrame');
@@ -2786,20 +2794,10 @@ body {
   var fallbackText = document.getElementById('demoFallbackText');
   var screenshot = document.getElementById('demoScreenshot');
   var urlDisplay = document.getElementById('demoUrlDisplay');
-  var loaded = false;
 
-  // Set the iframe src and title bar URL display
-  if (iframe) {
-    iframe.src = demoUrl;
-  }
-  if (urlDisplay) {
-    try {
-      var urlObj = new URL(demoUrl);
-      urlDisplay.textContent = urlObj.host + ' \u2014 Zyra Editor';
-    } catch(e) {
-      urlDisplay.textContent = demoUrl + ' \u2014 Zyra Editor';
-    }
-  }
+  if (!iframe || !fallback) return; // demo section not present
+
+  var loaded = false;
 
   // Pre-check if the screenshot image exists
   var screenshotAvailable = false;
@@ -2830,20 +2828,39 @@ body {
     fallback.classList.remove('active');
   }
 
+  // If no demo URL resolved (non-local, no explicit DEMO_URL), skip probing
+  // and go straight to the screenshot/text fallback.
+  if (!demoUrl) {
+    showFallback();
+    return;
+  }
+
+  // Set the iframe src and title bar URL display
+  iframe.src = demoUrl;
+  if (urlDisplay) {
+    try {
+      var urlObj = new URL(demoUrl);
+      urlDisplay.textContent = urlObj.host + ' \u2014 Zyra Editor';
+    } catch(e) {
+      urlDisplay.textContent = demoUrl + ' \u2014 Zyra Editor';
+    }
+  }
+
   function checkEditor() {
-    // Use the health endpoint relative to the demo URL
     var healthUrl = demoUrl.replace(/\/+$/, '') + '/health';
-    fetch(healthUrl, { mode: 'no-cors' })
-      .then(function() {
-        // no-cors means we can't read the response, but if it doesn't throw, the server is up
-        showEditor();
+    fetch(healthUrl)
+      .then(function(response) {
+        if (response.ok) {
+          showEditor();
+        } else {
+          showFallback();
+        }
       })
       .catch(function() {
         showFallback();
       });
   }
 
-  // Check on load and retry a few times
   iframe.addEventListener('load', function() {
     loaded = true;
   });
