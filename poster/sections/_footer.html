@@ -16,6 +16,75 @@
     observer.observe(el);
   });
 
+  // ── Presentation Timer ──
+  (function() {
+    var timer = document.getElementById('presTimer');
+    var display = document.getElementById('timerDisplay');
+    var startStopBtn = document.getElementById('timerStartStop');
+    var resetBtn = document.getElementById('timerReset');
+    var toggleBtn = document.getElementById('timerToggle');
+    if (!timer) return;
+
+    var elapsed = 0;      // seconds
+    var interval = null;
+    var running = false;
+
+    // Create reopen tab
+    var tab = document.createElement('div');
+    tab.className = 'pres-timer-tab';
+    tab.textContent = '\u23f1 Timer';
+    tab.title = 'Show timer';
+    document.body.appendChild(tab);
+
+    function pad(n) { return n < 10 ? '0' + n : '' + n; }
+
+    function render() {
+      var m = Math.floor(elapsed / 60);
+      var s = elapsed % 60;
+      display.textContent = pad(m) + ':' + pad(s);
+      // Warning at 4 min, overtime at 5 min
+      display.classList.toggle('warning', elapsed >= 240 && elapsed < 300);
+      display.classList.toggle('overtime', elapsed >= 300);
+    }
+
+    function start() {
+      if (running) return;
+      running = true;
+      startStopBtn.innerHTML = '\u275A\u275A'; // pause icon
+      startStopBtn.title = 'Pause';
+      interval = setInterval(function() { elapsed++; render(); }, 1000);
+    }
+
+    function pause() {
+      running = false;
+      startStopBtn.innerHTML = '\u25B6'; // play icon
+      startStopBtn.title = 'Start';
+      clearInterval(interval);
+    }
+
+    startStopBtn.addEventListener('click', function() {
+      running ? pause() : start();
+    });
+
+    resetBtn.addEventListener('click', function() {
+      pause();
+      elapsed = 0;
+      render();
+    });
+
+    toggleBtn.addEventListener('click', function() {
+      timer.classList.add('hidden');
+      tab.classList.add('visible');
+    });
+
+    tab.addEventListener('click', function() {
+      timer.classList.remove('hidden');
+      tab.classList.remove('visible');
+    });
+
+    render();
+  })();
+
   // ── Demo URL resolution ──
   // window.__DEMO_URL__ is injected at build time via --demo-url / DEMO_URL env var.
   // If empty, auto-detect: localhost/file:// → localhost:5173, otherwise skip probing

@@ -57,6 +57,102 @@ body {
 }
 
 /* ═══════════════════════════════════════════
+   PRESENTATION TIMER (sticky top bar)
+   ═══════════════════════════════════════════ */
+.pres-timer {
+  position: fixed;
+  top: 0;
+  right: 12px;
+  z-index: 10000;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 10px;
+  background: rgba(0,23,45,0.85);
+  backdrop-filter: blur(6px);
+  border-radius: 0 0 8px 8px;
+  box-shadow: 0 2px 10px rgba(0,0,0,0.25);
+  font-family: var(--font-mono);
+  user-select: none;
+  transition: opacity 0.3s, transform 0.3s;
+}
+
+.pres-timer.hidden {
+  transform: translateY(-100%);
+  opacity: 0;
+  pointer-events: none;
+}
+
+.pres-timer-display {
+  font-size: 16px;
+  font-weight: 600;
+  color: #fff;
+  min-width: 52px;
+  text-align: center;
+  letter-spacing: 1px;
+}
+
+.pres-timer-display.warning {
+  color: var(--amber);
+}
+
+.pres-timer-display.overtime {
+  color: var(--red);
+}
+
+.pres-timer-btn {
+  background: rgba(255,255,255,0.12);
+  border: none;
+  border-radius: 4px;
+  color: #fff;
+  font-size: 13px;
+  width: 26px;
+  height: 26px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: background 0.15s;
+  line-height: 1;
+}
+
+.pres-timer-btn:hover {
+  background: rgba(255,255,255,0.25);
+}
+
+.pres-timer-close {
+  font-size: 16px;
+  margin-left: 2px;
+}
+
+/* Tab to reopen timer when hidden */
+.pres-timer-tab {
+  position: fixed;
+  top: 0;
+  right: 12px;
+  z-index: 10000;
+  padding: 2px 12px;
+  background: rgba(0,23,45,0.7);
+  color: #fff;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  border-radius: 0 0 6px 6px;
+  cursor: pointer;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.3s;
+}
+
+.pres-timer-tab.visible {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+.pres-timer-tab:hover {
+  background: rgba(0,23,45,0.9);
+}
+
+/* ═══════════════════════════════════════════
    PRESENTATION CONTAINER
    ═══════════════════════════════════════════ */
 .presentation {
@@ -495,7 +591,6 @@ body {
   font-size: 17px;
   color: var(--neutral-700);
   line-height: 1.6;
-  max-width: 800px;
   margin-bottom: 32px;
 }
 
@@ -1183,7 +1278,7 @@ body {
    ═══════════════════════════════════════════ */
 .features-grid {
   display: grid;
-  grid-template-columns: 1fr 1fr;
+  grid-template-columns: repeat(3, 1fr);
   gap: 20px;
 }
 
@@ -1853,6 +1948,14 @@ body {
 </head>
 <body>
 
+<!-- Presentation timer (sticky top bar) -->
+<div class="pres-timer" id="presTimer">
+  <button class="pres-timer-btn" id="timerStartStop" title="Start / Pause">&#9654;</button>
+  <span class="pres-timer-display" id="timerDisplay">00:00</span>
+  <button class="pres-timer-btn" id="timerReset" title="Reset">&#8634;</button>
+  <button class="pres-timer-btn pres-timer-close" id="timerToggle" title="Hide timer">&times;</button>
+</div>
+
 <div class="presentation">
 
 <script>
@@ -2334,15 +2437,7 @@ body {
           <div class="fc-icon fc-icon--drag"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/></svg></div>
           <strong>Drag-and-Drop Pipeline Building</strong>
         </div>
-        <p>Browse stages in the Node Palette — grouped by category — and drag them onto the canvas. Connect input and output ports to wire your pipeline.</p>
-      </div>
-
-      <div class="feature-card">
-        <div class="fc-header">
-          <div class="fc-icon fc-icon--ports"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/><path d="M9 12l2 2 4-4"/></svg></div>
-          <strong>Type-Safe Port Connections</strong>
-        </div>
-        <p>Ports carry type information (file, url, json, etc.). The <code>@zyra/core</code> library validates compatibility — only matching types can connect.</p>
+        <p>Browse stages in the Node Palette, drag them onto the canvas, and connect type-safe ports. The <code>@zyra/core</code> library validates compatibility — only matching types can link.</p>
       </div>
 
       <div class="feature-card">
@@ -2356,25 +2451,17 @@ body {
       <div class="feature-card">
         <div class="fc-header">
           <div class="fc-icon fc-icon--exec"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><polygon points="5 3 19 12 5 21 5 3"/></svg></div>
-          <strong>Real-Time Execution</strong>
+          <strong>Real-Time Execution &amp; History</strong>
         </div>
-        <p>Run pipelines against the Zyra backend with WebSocket log streaming. Watch per-node status indicators update live as stages execute.</p>
+        <p>Run pipelines with WebSocket log streaming and per-node status indicators. Track past runs with timing visualization and Gantt charts.</p>
       </div>
 
       <div class="feature-card">
         <div class="fc-header">
           <div class="fc-icon fc-icon--yaml"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><polyline points="4 17 10 11 4 5"/><line x1="12" y1="19" x2="20" y2="19"/></svg></div>
-          <strong>Pipeline YAML Export</strong>
+          <strong>Pipeline YAML Round-Trip</strong>
         </div>
-        <p>Topological sort converts your visual graph to structured <code>pipeline.yaml</code> via <code>graphToPipeline()</code> — ready for the Zyra CLI.</p>
-      </div>
-
-      <div class="feature-card">
-        <div class="fc-header">
-          <div class="fc-icon fc-icon--import"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg></div>
-          <strong>YAML Import</strong>
-        </div>
-        <p>Load existing <code>pipeline.yaml</code> files back into the visual editor. Round-trip between visual design and CLI execution.</p>
+        <p>Export your visual graph to <code>pipeline.yaml</code> via topological sort, or import existing YAML back into the editor. Full round-trip between visual design and CLI.</p>
       </div>
 
       <div class="feature-card">
@@ -2387,42 +2474,10 @@ body {
 
       <div class="feature-card">
         <div class="fc-header">
-          <div class="fc-icon fc-icon--history"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg></div>
-          <strong>Run History &amp; Gantt Charts</strong>
-        </div>
-        <p>Track execution history with timing visualization. See which stages ran, how long they took, and whether they succeeded or failed.</p>
-      </div>
-
-      <div class="feature-card">
-        <div class="fc-header">
-          <div class="fc-icon fc-icon--resource"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M2 3h6a4 4 0 014 4v14a3 3 0 00-3-3H2z"/><path d="M22 3h-6a4 4 0 00-4 4v14a3 3 0 013-3h7z"/></svg></div>
-          <strong>Resource Management</strong>
-        </div>
-        <p>Define reusable pipeline resources — URLs, file paths, credentials — and reference them across nodes for cleaner, DRY pipeline definitions.</p>
-      </div>
-
-      <div class="feature-card">
-        <div class="fc-header">
-          <div class="fc-icon fc-icon--control"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg></div>
-          <strong>Control Flow Nodes</strong>
-        </div>
-        <p>Delay, cron, conditional, and loop nodes for orchestration logic — build complex scheduling and branching directly in the visual graph.</p>
-      </div>
-
-      <div class="feature-card">
-        <div class="fc-header">
           <div class="fc-icon fc-icon--security"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0110 0v4"/></svg></div>
-          <strong>Encrypted Secrets</strong>
+          <strong>Security &amp; Resource Management</strong>
         </div>
-        <p>Secret node values are AES-256-GCM encrypted at rest via Web Crypto API. Never written to pipeline YAML — only env var names are persisted.</p>
-      </div>
-
-      <div class="feature-card">
-        <div class="fc-header">
-          <div class="fc-icon fc-icon--theme"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="5"/><line x1="12" y1="1" x2="12" y2="3"/><line x1="12" y1="21" x2="12" y2="23"/><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"/><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"/><line x1="1" y1="12" x2="3" y2="12"/><line x1="21" y1="12" x2="23" y2="12"/></svg></div>
-          <strong>Light &amp; Dark Theme</strong>
-        </div>
-        <p>Toggle between light and dark themes. The editor adapts all node colors, panels, and the canvas background to your preference.</p>
+        <p>Secrets are AES-256-GCM encrypted at rest — never written to YAML. Define reusable resources (URLs, paths, credentials) and reference them across nodes.</p>
       </div>
 
     </div>
@@ -2679,6 +2734,75 @@ body {
   document.querySelectorAll('.fade-in').forEach(function(el) {
     observer.observe(el);
   });
+
+  // ── Presentation Timer ──
+  (function() {
+    var timer = document.getElementById('presTimer');
+    var display = document.getElementById('timerDisplay');
+    var startStopBtn = document.getElementById('timerStartStop');
+    var resetBtn = document.getElementById('timerReset');
+    var toggleBtn = document.getElementById('timerToggle');
+    if (!timer) return;
+
+    var elapsed = 0;      // seconds
+    var interval = null;
+    var running = false;
+
+    // Create reopen tab
+    var tab = document.createElement('div');
+    tab.className = 'pres-timer-tab';
+    tab.textContent = '\u23f1 Timer';
+    tab.title = 'Show timer';
+    document.body.appendChild(tab);
+
+    function pad(n) { return n < 10 ? '0' + n : '' + n; }
+
+    function render() {
+      var m = Math.floor(elapsed / 60);
+      var s = elapsed % 60;
+      display.textContent = pad(m) + ':' + pad(s);
+      // Warning at 4 min, overtime at 5 min
+      display.classList.toggle('warning', elapsed >= 240 && elapsed < 300);
+      display.classList.toggle('overtime', elapsed >= 300);
+    }
+
+    function start() {
+      if (running) return;
+      running = true;
+      startStopBtn.innerHTML = '\u275A\u275A'; // pause icon
+      startStopBtn.title = 'Pause';
+      interval = setInterval(function() { elapsed++; render(); }, 1000);
+    }
+
+    function pause() {
+      running = false;
+      startStopBtn.innerHTML = '\u25B6'; // play icon
+      startStopBtn.title = 'Start';
+      clearInterval(interval);
+    }
+
+    startStopBtn.addEventListener('click', function() {
+      running ? pause() : start();
+    });
+
+    resetBtn.addEventListener('click', function() {
+      pause();
+      elapsed = 0;
+      render();
+    });
+
+    toggleBtn.addEventListener('click', function() {
+      timer.classList.add('hidden');
+      tab.classList.add('visible');
+    });
+
+    tab.addEventListener('click', function() {
+      timer.classList.remove('hidden');
+      tab.classList.remove('visible');
+    });
+
+    render();
+  })();
 
   // ── Demo URL resolution ──
   // window.__DEMO_URL__ is injected at build time via --demo-url / DEMO_URL env var.
