@@ -15,6 +15,7 @@ RUN pnpm install --shamefully-hoist
 # Copy source
 COPY packages/core/ packages/core/
 COPY packages/editor/ packages/editor/
+COPY poster/ poster/
 
 # Build @zyra/core (workspace dependency)
 RUN ./node_modules/.bin/tsc -p packages/core

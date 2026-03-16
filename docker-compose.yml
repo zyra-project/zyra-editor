@@ -27,5 +27,6 @@ services:
       - ./packages/editor/src:/app/packages/editor/src
       - ./packages/editor/index.html:/app/packages/editor/index.html
       - ./packages/editor/vite.config.ts:/app/packages/editor/vite.config.ts
+      - ./poster:/app/poster
     depends_on:
       - zyra-server
