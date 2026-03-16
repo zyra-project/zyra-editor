@@ -111,14 +111,28 @@
 
   // Pre-check if the screenshot image exists
   var screenshotAvailable = false;
+  var screenshotProbed = false;
+  var pendingFallback = false;
   if (screenshot) {
     var testImg = new Image();
-    testImg.onload = function() { screenshotAvailable = true; };
+    testImg.onload = function() {
+      screenshotAvailable = true;
+      screenshotProbed = true;
+      if (pendingFallback) showFallback();
+    };
+    testImg.onerror = function() {
+      screenshotProbed = true;
+      if (pendingFallback) showFallback();
+    };
     testImg.src = screenshot.src;
+  } else {
+    screenshotProbed = true;
   }
 
   function showFallback() {
     if (loaded) return;
+    // If the screenshot probe hasn't finished, defer until it does
+    if (!screenshotProbed) { pendingFallback = true; return; }
     iframe.style.display = 'none';
     fallback.classList.add('active');
     // Show screenshot if available, otherwise show text instructions
